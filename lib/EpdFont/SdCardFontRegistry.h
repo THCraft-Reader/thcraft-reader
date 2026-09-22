@@ -4,22 +4,31 @@
 #include <string>
 #include <vector>
 
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+#include <NativeTextTypes.h>
+#endif
+
 struct SdCardFontFileInfo {
-  std::string path;   // v4 on-disk naming: "/<root>/<Family>/<Family>_<size>.cpfont"
-                      // where <root> is "/.fonts" (preferred, hidden) or "/fonts" (visible).
-                      // e.g. "/.fonts/NotoSansCJK/NotoSansCJK_14.cpfont"
-  uint8_t pointSize;  // parsed from filename: 14
-  uint8_t style;      // always 0 in v4 (all 4 styles bundled in one file);
-                      // kept for potential future formats
+  std::string path;   // Actual on-card path; native styles are point-size independent.
+  uint8_t pointSize;  // Native: 0 (not a synthetic file for each supported point size).
+  uint8_t style;      // Native: regular/bold/italic/bold-italic = 0/1/2/3; cpfont bundles all styles.
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  NativeVariation axes[8]{};
+  uint8_t axisCount = 0;
+#endif
 };
 
 struct SdCardFontFamilyInfo {
   std::string name;  // directory name, e.g. "NotoSansCJK"
   std::vector<SdCardFontFileInfo> files;
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  // Invalid metadata remains visible to management, but is never selectable/registered.
+  TextStatus nativeStatus = TextStatus::Ok;
+#endif
 
   const SdCardFontFileInfo* findFile(uint8_t size, uint8_t style = 0) const;
-  // Installed file closest to `pointSize` (ties → smaller). nullptr when the
-  // family ships nothing in `style`.
+  // Legacy: installed file nearest `pointSize` (ties → smaller). Native: the
+  // point-independent style source. nullptr if the family/style is unavailable.
   const SdCardFontFileInfo* findNearestSize(uint8_t pointSize, uint8_t style = 0) const;
   bool hasSize(uint8_t size) const;
   std::vector<uint8_t> availableSizes() const;
@@ -54,7 +63,9 @@ class SdCardFontRegistry {
  private:
   std::vector<SdCardFontFamilyInfo> families_;  // sorted alphabetically
 
+#if !defined(CROSSPOINT_NATIVE_TEXT) || !CROSSPOINT_NATIVE_TEXT
   static bool parseFilename(const char* filename, uint8_t& size, uint8_t& style);
+#endif
   static void scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family);
   // Scan one root (e.g. "/.fonts"), append families to `out`, dedup by name.
   static void scanRoot(const char* rootPath, std::vector<SdCardFontFamilyInfo>& out);

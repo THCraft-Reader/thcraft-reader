@@ -1,6 +1,10 @@
 #include "EpubReaderChapterSelectionActivity.h"
 
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <NativeTextEngine.h>
+#else
 #include <FontCacheManager.h>
+#endif
 #include <GfxRenderer.h>
 #include <I18n.h>
 
@@ -23,6 +27,9 @@ EpubReaderChapterSelectionActivity::EpubReaderChapterSelectionActivity(GfxRender
 void EpubReaderChapterSelectionActivity::onEnter() {
   UiListActivity::onEnter();
 
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#else
   // The reader underneath pins its page-render glyph arenas while this
   // overlay is up. clearCache() is heap-adaptive: below the retention floor
   // it frees them (the next page render's PrewarmScope rebuilds them at
@@ -32,6 +39,7 @@ void EpubReaderChapterSelectionActivity::onEnter() {
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->clearCache();
   }
+#endif
 
   if (!epub) {
     return;

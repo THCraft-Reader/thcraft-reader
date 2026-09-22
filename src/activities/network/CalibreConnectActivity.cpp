@@ -1,7 +1,11 @@
 #include "CalibreConnectActivity.h"
 
 #include <ESPmDNS.h>
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <NativeTextEngine.h>
+#else
 #include <FontCacheManager.h>
+#endif
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <WiFi.h>
@@ -19,6 +23,9 @@ constexpr const char* HOSTNAME = "crosspoint";
 
 void CalibreConnectActivity::onEnter() {
   Activity::onEnter();
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#endif
 
   requestUpdate();
   state = CalibreConnectState::WIFI_SELECTION;
@@ -85,11 +92,15 @@ void CalibreConnectActivity::startWebServer() {
   // are rebuildable — release them (again: the WiFi selection screen may have
   // repopulated them rendering a CJK SSID) so the server object doesn't abort
   // on OOM. See CrossPointWebServerActivity::startWebServer().
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#else
   if (auto* fcm = renderer.getFontCacheManager()) {
     LOG_DBG("CAL", "Free heap before SD font cache release: %d bytes", ESP.getFreeHeap());
     fcm->releaseSdFontCaches();
     LOG_DBG("CAL", "Free heap before server alloc: %d bytes", ESP.getFreeHeap());
   }
+#endif
 
   webServer.reset(new CrossPointWebServer());
   webServer->begin();

@@ -1,7 +1,10 @@
 #include "ActivityManager.h"
 
 #include <BoardConfig.h>
-#include <FontCacheManager.h>
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <I18n.h>
+#include <NativeTextEngine.h>
+#endif
 #include <FsHelpers.h>
 #include <HalDisplay.h>
 #include <HalPowerManager.h>
@@ -11,6 +14,10 @@
 
 #include "CrossPointSettings.h"
 #include "OpdsServerStore.h"
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include "SdCardFontSystem.h"
+#include "components/UITheme.h"
+#endif
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -61,7 +68,24 @@ void ActivityManager::renderTaskLoop() {
       // Night mode is a global output polarity applied to every activity.
       // The sleep screen forces normal polarity itself (SleepActivity).
       display.setInverted(SETTINGS.screenInverted != 0);
+#if defined(CROSSPOINT_NATIVE_TEXT)
+      renderer.clearTextStatus();
+#endif
       currentActivity->render(std::move(lock));
+#if defined(CROSSPOINT_NATIVE_TEXT)
+      // Measurement can fail while a reader loans its framebuffer for layout.
+      // Report only here, after the visible render has returned that loan.
+      if (renderer.hasFrameBuffer() && renderer.lastTextStatus() != TextStatus::Ok) {
+        const auto status = renderer.lastTextStatus();
+        if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+        renderer.waitRefreshComplete();
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.clearScreen();
+        GUI.drawPopup(renderer, status == TextStatus::OutOfMemory ? tr(STR_MEMORY_ERROR) : tr(STR_TEXT_RENDER_ERROR));
+      } else if (renderer.hasFrameBuffer()) {
+        if (const char* notice = sdFontSystem.takeNotice()) GUI.drawPopup(renderer, notice);
+      }
+#endif
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;

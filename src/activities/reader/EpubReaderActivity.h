@@ -48,6 +48,9 @@ class EpubReaderActivity final : public ReaderActivity {
   int idlePrewarmSpine = -1;
   int idlePrewarmPage = -1;
   unsigned long lastRenderCompleteMs = 0;
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  bool nativePageRenderFailed = true;
+#endif
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
   bool recentsEntryRemoved = false;
@@ -129,6 +132,8 @@ class EpubReaderActivity final : public ReaderActivity {
   bool applyDeferredReposition();
   void clearDeferredReposition();
   void rememberCurrentContentOffset();
+  // Caller holds RenderLock. Preserve source position before discarding stale geometry.
+  bool resetStaleTextLayout();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);

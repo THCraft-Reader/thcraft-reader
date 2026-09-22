@@ -1,15 +1,24 @@
 #pragma once
+#include <BoundedFileReader.h>
 #include <EpdFontFamily.h>
 #include <HalStorage.h>
+#ifdef CROSSPOINT_NATIVE_TEXT
+#include <NativeTextTypes.h>
+
+#include <new>
+#endif
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "Block.h"
 #include "BlockStyle.h"
 #include "Epub/FootnoteEntry.h"
+
+struct NativeLineData;
 
 // Represents a line of text on a page.
 //
@@ -45,14 +54,26 @@ class TextBlock final : public Block {
     int16_t x;
     int16_t width;
     int16_t topLift;
+#ifdef CROSSPOINT_NATIVE_TEXT
+    int16_t top = 0;
+    int16_t height = 0;
+#endif
   };
 
  private:
   BlockStyle blockStyle;
   uint16_t numWords = 0;
   uint16_t textBytes = 0;  // total size of the text region, including NULs
+  // getRubyTexts() presents either backing store without copying annotations.
   bool focusPresent = false;
   bool isValid = true;
+#ifdef CROSSPOINT_NATIVE_TEXT
+  NativeLineData nativeData;
+  bool nativePresent = false;
+  // Layout-only source range; page source LUTs and links persist their own positions.
+  uint32_t nativeSourceStart = 0;
+  uint32_t nativeSourceEnd = 0;
+#endif
   // The ONLY allocation: makeUniqueNoThrow, so OOM yields an invalid block
   // instead of abort() (bare new is not nothrow with -fno-exceptions).
   std::unique_ptr<uint8_t[]> arena;
@@ -67,7 +88,11 @@ class TextBlock final : public Block {
   std::vector<std::string> rubyTexts;
   // Layout-only metadata. ChapterHtmlSlimParser moves it into Page::links
   // immediately; cached TextBlocks therefore keep the same compact format.
+#ifdef CROSSPOINT_NATIVE_TEXT
+  NativeBuffer<LinkSpan> linkSpans;
+#else
   std::vector<LinkSpan> linkSpans;
+#endif
 
   TextBlock() = default;  // deserialize() fills the fields directly
   static size_t arenaSize(uint16_t wordCount, bool hasFocus, uint16_t textBytes);
@@ -81,32 +106,64 @@ class TextBlock final : public Block {
                      const std::vector<EpdFontFamily::Style>& wordStyles, const std::vector<uint8_t>& focusBoundary,
                      const std::vector<uint16_t>& focusSuffixX, const BlockStyle& blockStyle = BlockStyle(),
                      std::vector<std::string> rubyTexts = {}, std::vector<LinkSpan> linkSpans = {});
+#ifdef CROSSPOINT_NATIVE_TEXT
+  static void* operator new(size_t bytes, const std::nothrow_t&) noexcept;
+  static void operator delete(void* pointer) noexcept;
+  static void operator delete(void* pointer, const std::nothrow_t&) noexcept;
+  explicit TextBlock(NativeLineData&& line, const BlockStyle& blockStyle, NativeBuffer<LinkSpan> linkSpans = {});
+  std::span<const NativeRuby> getNativeRuby() const;
+  std::string_view nativeRubyText(size_t index) const;
+  void setSourceRange(uint32_t start, uint32_t end) {
+    nativeSourceStart = start;
+    nativeSourceEnd = end;
+  }
+  uint32_t sourceStartOffset() const { return nativeSourceStart; }
+  uint32_t sourceEndOffset() const { return nativeSourceEnd; }
+#endif
+  const NativeLineData* nativeLine() const;
+  bool warmNativeText(const GfxRenderer& renderer, int fontId) const;
+  int layoutHeight(const GfxRenderer& renderer, int fontId, float compression) const;
   ~TextBlock() override = default;
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
 
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   const BlockStyle& getBlockStyle() const { return blockStyle; }
-  bool isEmpty() override { return numWords == 0; }
+  bool isEmpty() override;
+  class RubyTextView {
+    const TextBlock* block;
+
+   public:
+    explicit RubyTextView(const TextBlock* block) : block(block) {}
+    size_t size() const;
+    bool empty() const { return size() == 0; }
+    std::string_view operator[](size_t index) const;
+    std::string_view back() const { return (*this)[size() - 1]; }
+  };
   bool valid() const { return isValid; }
-  uint16_t wordCount() const { return numWords; }
-  // NUL-terminated by construction; safe to pass to C APIs directly.
-  const char* wordText(const uint16_t i) const { return textArr + textOffArr[i]; }
-  uint16_t wordTextLen(const uint16_t i) const {
-    const uint16_t end = (i + 1 < numWords) ? textOffArr[i + 1] : textBytes;
-    return end - textOffArr[i] - 1;  // exclude the NUL
-  }
-  int16_t wordXpos(const uint16_t i) const { return xposArr[i]; }
-  EpdFontFamily::Style wordStyle(const uint16_t i) const { return static_cast<EpdFontFamily::Style>(stylesArr[i]); }
-  uint8_t focusBoundary(const uint16_t i) const { return focusPresent ? focusBoundaryArr[i] : 0; }
-  uint16_t focusSuffixX(const uint16_t i) const { return focusPresent ? focusSuffixXArr[i] : 0; }
+  uint16_t wordCount() const;
+  // Selection strings are NUL-terminated in either representation.
+  const char* wordText(uint16_t i) const;
+  uint16_t wordTextLen(uint16_t i) const;
+  int16_t wordXpos(uint16_t i) const;
+  EpdFontFamily::Style wordStyle(uint16_t i) const;
+  // Native focus is already represented by cluster-safe style spans.
+  uint8_t focusBoundary(uint16_t i) const;
+  uint16_t focusSuffixX(uint16_t i) const;
+  int wordWidth(uint16_t i) const;
+  int wordTop(uint16_t i) const;
+  int wordHeight(uint16_t i) const;
   bool hasRuby() const;
-  int getRubyShift(int ascender) const { return hasRuby() ? (ascender / 2) : 0; }
-  const std::vector<std::string>& getRubyTexts() const { return rubyTexts; }
+  int getRubyShift(int ascender) const;
+  RubyTextView getRubyTexts() const { return RubyTextView(this); }
+#ifdef CROSSPOINT_NATIVE_TEXT
+  NativeBuffer<LinkSpan> takeLinkSpans() { return std::move(linkSpans); }
+#else
   std::vector<LinkSpan> takeLinkSpans() { return std::move(linkSpans); }
+#endif
 
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;
   BlockType getType() override { return TEXT_BLOCK; }
   bool serialize(HalFile& file) const;
-  static std::unique_ptr<TextBlock> deserialize(HalFile& file);
+  static std::unique_ptr<TextBlock> deserialize(serialization::BoundedFileReader& file);
 };

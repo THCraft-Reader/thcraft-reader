@@ -65,11 +65,16 @@ struct WifiPowerSaveGuard {
 
 #if defined(FREEINK_NET_WOLFSSL)
 HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std::string& username,
-                                         const std::string& password, Sink& sink, bool downgradeRedirectsToHttp) {
+                                         const std::string& password, Sink& sink, bool downgradeRedirectsToHttp,
+                                         bool requireHttps) {
   WifiPowerSaveGuard psGuard;
   std::string url = startUrl;
 
   for (int hop = 0; hop <= MAX_REDIRECTS; ++hop) {
+    if (requireHttps && url.rfind("https://", 0) != 0) {
+      LOG_ERR("HTTP", "Refusing non-HTTPS font source");
+      return HttpDownloader::HTTP_ERROR;
+    }
     freeink::SecureHttpClient http;
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.setInsecure();
@@ -89,12 +94,12 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
 
     LOG_DBG("HTTP", "wolfSSL GET: %s", url.c_str());
     const int status = http.GET(
-        [&http, &sink](const uint8_t* data, size_t len) {
+        [&http, &sink, requireHttps](const uint8_t* data, size_t len) {
           if (http.getStatus() != 200) return true;
           if (sink.total == 0 && http.hasContentLength()) sink.total = http.getContentLength();
           if (!sink.write(data, len)) return false;
           sink.downloaded += len;
-          if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
+          if (sink.progress && (sink.total > 0 || requireHttps)) sink.progress(sink.downloaded, sink.total);
           return true;
         },
         [&sink]() { return sink.cancelFlag && *sink.cancelFlag; });
@@ -108,6 +113,10 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
       const std::string location = http.getHeader("location");
       if (location.empty() || !freeink::SecureHttpClient::resolveUrl(url, location, url)) {
         LOG_ERR("HTTP", "wolfSSL bad redirect: %d", status);
+        return HttpDownloader::HTTP_ERROR;
+      }
+      if (requireHttps && url.rfind("https://", 0) != 0) {
+        LOG_ERR("HTTP", "Refusing non-HTTPS font redirect");
         return HttpDownloader::HTTP_ERROR;
       }
       if (downgradeRedirectsToHttp && url.rfind("https://", 0) == 0) {
@@ -142,7 +151,7 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
 // that ends early as ESP_ERR_HTTP_INCOMPLETE_DATA, whereas the read loop streams
 // large/slow files and surfaces a short read directly.
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
-                                     Sink& sink) {
+                                     Sink& sink, bool requireHttps) {
   WifiPowerSaveGuard psGuard;
   esp_http_client_config_t config = {};
   config.url = url.c_str();
@@ -185,6 +194,13 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   int status = esp_http_client_get_status_code(client);
   for (int hop = 0; isRedirect(status) && hop < MAX_REDIRECTS; ++hop) {
     if (esp_http_client_set_redirection(client) != ESP_OK) break;
+    // set_redirection resolves relative and scheme-relative Location values.
+    // Check the selected transport before opening the redirected connection.
+    if (requireHttps && esp_http_client_get_transport_type(client) != HTTP_TRANSPORT_OVER_SSL) {
+      LOG_ERR("HTTP", "Refusing non-HTTPS font redirect");
+      esp_http_client_cleanup(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
     esp_http_client_close(client);
     err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -230,7 +246,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       return HttpDownloader::FILE_ERROR;
     }
     sink.downloaded += read;
-    if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
+    if (sink.progress && (sink.total > 0 || requireHttps)) sink.progress(sink.downloaded, sink.total);
   }
 
   const bool complete = esp_http_client_is_complete_data_received(client);
@@ -249,14 +265,18 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 // WiFiClient inside runGetWolf, so this is safe for non-TLS targets too.
 HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::string& username,
                                            const std::string& password, Sink& sink,
-                                           bool downgradeRedirectsToHttp = false) {
+                                           bool downgradeRedirectsToHttp = false, bool requireHttps = false) {
+  if (requireHttps && (downgradeRedirectsToHttp || url.rfind("https://", 0) != 0)) {
+    LOG_ERR("HTTP", "Refusing non-HTTPS font request");
+    return HttpDownloader::HTTP_ERROR;
+  }
 #if defined(FREEINK_NET_WOLFSSL)
-  return runGetWolf(url, username, password, sink, downgradeRedirectsToHttp);
+  return runGetWolf(url, username, password, sink, downgradeRedirectsToHttp, requireHttps);
 #else
   // esp_http_client follows redirects internally; the downgrade only exists on
   // the wolfSSL path, where the manual hop loop exposes the Location URL.
   (void)downgradeRedirectsToHttp;
-  return runGet(url, username, password, sink);
+  return runGet(url, username, password, sink, requireHttps);
 #endif
 }
 }  // namespace
@@ -292,8 +312,9 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
-                                                             bool downgradeRedirectsToHttp) {
+                                                             bool downgradeRedirectsToHttp, bool requireHttps) {
   LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
+  if (requireHttps && (downgradeRedirectsToHttp || url.rfind("https://", 0) != 0)) return HTTP_ERROR;
 
   if (Storage.exists(destPath.c_str())) {
     Storage.remove(destPath.c_str());
@@ -309,7 +330,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   sink.cancelFlag = cancelFlag;
   sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
 
-  const DownloadError result = runGetSecure(url, username, password, sink, downgradeRedirectsToHttp);
+  const DownloadError result = runGetSecure(url, username, password, sink, downgradeRedirectsToHttp, requireHttps);
   // Close before any remove() on the same path; DESTRUCTOR_CLOSES_FILE would
   // otherwise close only after the remove.
   file.close();

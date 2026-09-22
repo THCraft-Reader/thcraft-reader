@@ -15,4 +15,8 @@ class HalMemory {
   static HeapStats getDefaultHeap();
   static HeapStats getInternalHeap();
   static HeapStats getPsramHeap();
+
+  static void* allocateExternal(size_t bytes);
+  static void* reallocateExternal(void* pointer, size_t bytes);
+  static void freeExternal(void* pointer);
 };

@@ -1,27 +1,38 @@
 #include "TxtReaderActivity.h"
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 #include <BidiUtils.h>
 #include <FontCacheManager.h>
+#include <Serialization.h>
+#include <Utf8.h>
+
+#include "ProgressFile.h"
+#endif
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Memory.h>
-#include <Serialization.h>
-#include <Utf8.h>
+
+#include <algorithm>
+
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <NativeTextTypes.h>
+#endif
 
 #include "CrossPointSettings.h"
-#include "ProgressFile.h"
 #include "ReaderActivity.h"
 #include "ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
 // Cache file magic and version
 constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
 constexpr uint8_t CACHE_VERSION = 3;          // Increment when cache format changes
 }  // namespace
+#endif
 
 bool TxtReaderActivity::loadBook() {
   txt = makeUniqueNoThrow<Txt>(bookPath, "/.crosspoint");
@@ -37,6 +48,174 @@ bool TxtReaderActivity::loadBook() {
   return true;
 }
 
+void TxtReaderActivity::onExit() {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  // ActivityManager already owns RenderLock while calling onExit.
+  currentNativePage.reset();
+  nativeCache.close();
+  initialized = false;
+  loadedNativePage = UINT32_MAX;
+  hasDisplayedSource = false;
+#endif
+  ReaderActivity::onExit();
+}
+
+#if defined(CROSSPOINT_NATIVE_TEXT)
+bool TxtReaderActivity::failNativeReader(TextStatus status) {
+  nativeRenderFailed = true;
+  currentNativePage.reset();
+  loadedNativePage = UINT32_MAX;
+  renderer.recordTextFailure(status == TextStatus::Ok ? TextStatus::InvalidText : status);
+  return false;
+}
+
+bool TxtReaderActivity::initializeNativeReader(GfxRenderer& renderer) {
+  if (!renderer.usesNativeText()) return failNativeReader(TextStatus::InvalidFont);
+
+  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+  int top, right, bottom, left;
+  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+  const int statusBarHeight = UITheme::getStatusBarHeight();
+  top += SETTINGS.screenMargin;
+  right += SETTINGS.screenMargin;
+  left += SETTINGS.screenMargin;
+  bottom += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarHeight);
+  const int width = renderer.getScreenWidth() - left - right;
+  const int height = renderer.getScreenHeight() - top - bottom;
+  if (width <= 0 || height <= 0 || width > INT16_MAX || height > INT16_MAX) {
+    return failNativeReader(TextStatus::CapacityExceeded);
+  }
+  if (initialized && cachedOrientation == SETTINGS.orientation && cachedStatusBarHeight == statusBarHeight &&
+      cachedOrientedMarginTop == top && cachedOrientedMarginRight == right && cachedOrientedMarginBottom == bottom &&
+      cachedOrientedMarginLeft == left && nativeCache.matches(renderer, width, height, SETTINGS.paragraphAlignment)) {
+    return true;
+  }
+
+  initialized = false;
+  currentNativePage.reset();
+  loadedNativePage = UINT32_MAX;
+  nativeCache.close();
+  cachedFontId = SETTINGS.getReaderFontId();
+  cachedScreenMargin = SETTINGS.screenMargin;
+  cachedParagraphAlignment = SETTINGS.paragraphAlignment;
+  cachedOrientation = SETTINGS.orientation;
+  cachedStatusBarHeight = statusBarHeight;
+  cachedOrientedMarginTop = top;
+  cachedOrientedMarginRight = right;
+  cachedOrientedMarginBottom = bottom;
+  cachedOrientedMarginLeft = left;
+  viewportWidth = width;
+  viewportHeight = height;
+
+  const auto result = nativeCache.open(*txt, renderer, width, height, cachedParagraphAlignment);
+  if (result == NativeTxtCache::Result::Error) return failNativeReader(nativeCache.lastStatus());
+  if (result == NativeTxtCache::Result::Rebuild && !buildNativePageCache(renderer)) return false;
+  if (nativeCache.pageCount() > INT32_MAX) return failNativeReader(TextStatus::CapacityExceeded);
+  totalPages = static_cast<int>(nativeCache.pageCount());
+
+  uint32_t restoredPage = 0;
+  if (hasDisplayedSource) {
+    if (displayedSourceSize != nativeCache.sourceSize() || displayedSourceHash != nativeCache.sourceHash()) {
+      LOG_INF("TRS", "TXT source changed; restoring the displayed byte position best-effort");
+    }
+    if (!nativeCache.pageForSource(displayedSourceStart, restoredPage)) {
+      return failNativeReader(nativeCache.lastStatus());
+    }
+  } else if (!nativeCache.restorePage(restoredPage)) {
+    return failNativeReader(nativeCache.lastStatus());
+  }
+  currentPage = static_cast<int>(restoredPage);
+  initialized = true;
+  return true;
+}
+
+bool TxtReaderActivity::buildNativePageCache(GfxRenderer& renderer) {
+  currentNativePage.reset();
+  loadedNativePage = UINT32_MAX;
+  GUI.drawPopup(renderer, tr(STR_INDEXING));
+  if (renderer.lastTextStatus() != TextStatus::Ok) return failNativeReader(renderer.lastTextStatus());
+  if (!nativeCache.build(renderer)) return failNativeReader(nativeCache.lastStatus());
+  if (nativeCache.pageCount() > INT32_MAX) return failNativeReader(TextStatus::CapacityExceeded);
+  totalPages = static_cast<int>(nativeCache.pageCount());
+  return true;
+}
+
+bool TxtReaderActivity::loadNativePage(uint32_t pageIndex) {
+  if (currentNativePage && loadedNativePage == pageIndex) return true;
+  currentNativePage.reset();
+  loadedNativePage = UINT32_MAX;
+  nativeSourceStart = nativeSourceEnd = 0;
+  auto result = nativeCache.loadPage(pageIndex, currentNativePage, nativeSourceStart, nativeSourceEnd);
+  if (result == NativeTxtCache::Result::Rebuild) {
+    // A valid LUT may still locate a corrupt page body. Prefer that requested
+    // position; otherwise retain the last page actually displayed.
+    const bool hasRequestedSource = nativeSourceEnd > nativeSourceStart;
+    const uint32_t sourceByte = hasRequestedSource ? nativeSourceStart : displayedSourceStart;
+    if (!buildNativePageCache(renderer)) return false;
+    if (hasRequestedSource || hasDisplayedSource) {
+      if (!nativeCache.pageForSource(sourceByte, pageIndex)) return failNativeReader(nativeCache.lastStatus());
+    } else if (!nativeCache.restorePage(pageIndex)) {
+      return failNativeReader(nativeCache.lastStatus());
+    }
+    currentPage = static_cast<int>(pageIndex);
+    if (totalPages == 0) return true;
+    result = nativeCache.loadPage(pageIndex, currentNativePage, nativeSourceStart, nativeSourceEnd);
+  }
+  if (result != NativeTxtCache::Result::Ready || !currentNativePage) {
+    return failNativeReader(nativeCache.lastStatus());
+  }
+  loadedNativePage = pageIndex;
+  return true;
+}
+
+bool TxtReaderActivity::renderNativePage(GfxRenderer& renderer) {
+  if (!currentNativePage) return failNativeReader(TextStatus::InvalidText);
+  if (!currentNativePage->warmNativeText(renderer, cachedFontId) || renderer.lastTextStatus() != TextStatus::Ok) {
+    return failNativeReader(renderer.lastTextStatus());
+  }
+
+  const auto renderContent = [&]() {
+    if (renderer.lastTextStatus() != TextStatus::Ok) return;
+    int clipX, clipY, clipWidth, clipHeight;
+    renderer.getClipRect(clipX, clipY, clipWidth, clipHeight);
+    const int left = std::max(clipX, cachedOrientedMarginLeft);
+    const int top = std::max(clipY, cachedOrientedMarginTop);
+    const int right = std::min(clipX + clipWidth, cachedOrientedMarginLeft + viewportWidth);
+    const int bottom = std::min(clipY + clipHeight, cachedOrientedMarginTop + viewportHeight);
+    renderer.setClipRect(left, top, std::max(0, right - left), std::max(0, bottom - top));
+    currentNativePage->render(renderer, cachedFontId, cachedOrientedMarginLeft, cachedOrientedMarginTop);
+    renderer.setClipRect(clipX, clipY, clipWidth, clipHeight);
+  };
+
+  renderer.setRenderMode(GfxRenderer::BW);
+  renderer.clearScreen();
+  renderContent();
+  if (renderer.lastTextStatus() != TextStatus::Ok) return failNativeReader(renderer.lastTextStatus());
+  renderStatusBar();
+  if (renderer.lastTextStatus() != TextStatus::Ok) return failNativeReader(renderer.lastTextStatus());
+
+  if (SETTINGS.textAntiAliasing) {
+    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    unsigned grayPasses = 0;
+    ReaderUtils::renderAntiAliased(renderer, [&]() {
+      ++grayPasses;
+      renderContent();
+    });
+    if (renderer.lastTextStatus() != TextStatus::Ok) return failNativeReader(renderer.lastTextStatus());
+    // The helper returns without invoking the callback when its BW snapshot
+    // allocation fails. A partial AA display must not advance saved progress.
+    if (grayPasses != 2) return failNativeReader(TextStatus::OutOfMemory);
+  } else {
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  }
+  if (!nativeCache.matches(renderer, viewportWidth, viewportHeight, cachedParagraphAlignment)) {
+    initialized = false;
+    return failNativeReader(TextStatus::InvalidFont);
+  }
+  forcedRefreshPending = false;
+  return true;
+}
+#else
 void TxtReaderActivity::initializeReader(GfxRenderer& renderer) {
   if (initialized) {
     return;
@@ -236,12 +415,41 @@ bool TxtReaderActivity::loadPageAtOffset(const GfxRenderer& renderer, size_t off
   free(buffer);
   return !outLines.empty();
 }
+#endif
 
 void TxtReaderActivity::renderBook() {
   if (!txt) {
     return;
   }
 
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (!initializeNativeReader(renderer)) return;
+  if (totalPages > 0) {
+    currentPage = std::max(0, std::min(currentPage, totalPages - 1));
+    if (!loadNativePage(static_cast<uint32_t>(currentPage))) return;
+  }
+  if (totalPages == 0) {
+    renderer.clearScreen();
+    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_FILE), true, EpdFontFamily::BOLD);
+    if (renderer.lastTextStatus() != TextStatus::Ok) {
+      failNativeReader(renderer.lastTextStatus());
+      return;
+    }
+    renderer.displayBuffer();
+    nativeRenderFailed = false;
+    return;
+  }
+  if (!renderNativePage(renderer)) return;
+  nativeRenderFailed = false;
+  displayedSourceStart = nativeSourceStart;
+  displayedSourceSize = nativeCache.sourceSize();
+  displayedSourceHash = nativeCache.sourceHash();
+  hasDisplayedSource = true;
+  if (!nativeCache.saveProgress(displayedSourceStart)) {
+    LOG_ERR("TRS", "Failed to save native TXT source position: %lu", static_cast<unsigned long>(displayedSourceStart));
+    failNativeReader(nativeCache.lastStatus());
+  }
+#else
   if (!initialized) {
     initializeReader(renderer);
   }
@@ -268,8 +476,10 @@ void TxtReaderActivity::renderBook() {
 
   // Save progress
   saveProgress();
+#endif
 }
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 void TxtReaderActivity::renderPage(GfxRenderer& renderer) {
   const int lineHeight = renderer.getLineHeight(cachedFontId);
   const int contentWidth = viewportWidth;
@@ -329,6 +539,7 @@ void TxtReaderActivity::renderPage(GfxRenderer& renderer) {
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
 }
+#endif
 
 void TxtReaderActivity::renderStatusBar() const {
   const float progress = totalPages > 0 ? (currentPage + 1) * 100.0f / totalPages : 0;
@@ -340,6 +551,9 @@ void TxtReaderActivity::renderStatusBar() const {
 }
 
 bool TxtReaderActivity::pageTurn(bool isForward) {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (totalPages == 0 || nativeRenderFailed) return false;
+#endif
   // Ignore paging until initializeReader has established the page index
   if (!initialized) {
     return false;
@@ -359,11 +573,19 @@ bool TxtReaderActivity::pageTurn(bool isForward) {
 }
 
 bool TxtReaderActivity::skipPages(int amount) {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (totalPages == 0 || nativeRenderFailed) return false;
+#endif
   if (!initialized) {
     return false;
   }
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  int newPage =
+      static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(static_cast<int64_t>(currentPage) + amount, totalPages)));
+#else
   int newPage = currentPage + amount;
   if (newPage < 0) newPage = 0;
+#endif
   // Clamp to totalPages, not totalPages - 1: pageTurn() lets currentPage reach
   // totalPages and isAtEndOfBook() treats that as the end-of-book sentinel, so
   // a forward skip must be able to reach it too.
@@ -375,10 +597,16 @@ bool TxtReaderActivity::skipPages(int amount) {
   return false;
 }
 
-bool TxtReaderActivity::isAtEndOfBook() const { return initialized && currentPage >= totalPages; }
+bool TxtReaderActivity::isAtEndOfBook() const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (totalPages == 0 || nativeRenderFailed) return false;
+#endif
+  return initialized && currentPage >= totalPages;
+}
 
 void TxtReaderActivity::onReturnFromEndOfBook() { currentPage = totalPages > 0 ? totalPages - 1 : 0; }
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 void TxtReaderActivity::saveProgress() const {
   uint8_t data[4];
   data[0] = currentPage & 0xFF;
@@ -512,6 +740,7 @@ void TxtReaderActivity::savePageIndexCache() const {
 
   LOG_DBG("TRS", "Saved page index cache: %d pages", totalPages);
 }
+#endif
 
 ScreenshotInfo TxtReaderActivity::getScreenshotInfo() const {
   ScreenshotInfo info;
@@ -520,9 +749,17 @@ ScreenshotInfo TxtReaderActivity::getScreenshotInfo() const {
     const std::string t = txt->getTitle();
     snprintf(info.title, sizeof(info.title), "%s", t.c_str());
   }
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  info.currentPage = totalPages > 0 ? std::min(currentPage, totalPages - 1) + 1 : 0;
+#else
   info.currentPage = currentPage + 1;
+#endif
   info.totalPages = totalPages;
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  info.progressPercent = totalPages > 0 ? static_cast<int>(info.currentPage * 100.0f / totalPages + 0.5f) : 0;
+#else
   info.progressPercent = totalPages > 0 ? static_cast<int>((currentPage + 1) * 100.0f / totalPages + 0.5f) : 0;
+#endif
   if (info.progressPercent > 100) info.progressPercent = 100;
   return info;
 }

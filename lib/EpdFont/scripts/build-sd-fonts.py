@@ -3,7 +3,9 @@
 
 Reads sd-fonts.yaml, downloads any missing source fonts, runs
 fontconvert_sdcard.py in parallel for each family, and optionally
-generates the fonts.json manifest.
+generates the legacy fonts.json manifest. Original source resolution is shared
+with build-native-font-catalogue.py; that Pro-only companion consumes the same
+YAML without rasterization or variable-font instancing.
 
 Usage:
     # Generate fonts (output in ./output/)
@@ -23,6 +25,9 @@ Usage:
 
     # Override the per-family timeout (default: 600s)
     python3 build-sd-fonts.py --timeout 1200
+
+    # Explicitly refresh the native Pro catalogue; ordinary native builds omit --refresh
+    python3 build-native-font-catalogue.py --refresh --output ../../../build/native-catalogue
 """
 
 import argparse
@@ -33,64 +38,21 @@ import sys
 import tempfile
 import threading
 import time
-import socket
-import urllib.request
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import yaml
 
+from font_sources import EPDFONTS_DIR, resolve_font_source
+
 SCRIPT_DIR = Path(__file__).parent
 FONTCONVERT = SCRIPT_DIR / "fontconvert_sdcard.py"
-EPDFONTS_DIR = SCRIPT_DIR.parent  # lib/EpdFont
 DEFAULT_CONFIG = SCRIPT_DIR / "sd-fonts.yaml"
 DEFAULT_OUTPUT = SCRIPT_DIR / "output"
-DOWNLOAD_DIR = SCRIPT_DIR / "downloaded_fonts"
 INSTANCE_DIR = SCRIPT_DIR / "instanced_fonts"
 DEFAULT_FALLBACK_FONT = EPDFONTS_DIR / "builtinFonts/source/NotoSans/NotoSans-Regular.ttf"
 
 
-_orig_getaddrinfo = socket.getaddrinfo
-
-
-def _ipv4_only_getaddrinfo(*args, **kwargs):
-    """getaddrinfo variant that drops AAAA records (IPv4 only)."""
-    return [ai for ai in _orig_getaddrinfo(*args, **kwargs) if ai[0] == socket.AF_INET]
-
-
-def download_font(url: str, dest: Path, retries: int = 3) -> Path:
-    """Download a font file if not already cached. Returns the local path.
-
-    Some sources (e.g. mirrors.ctan.org) are round-robin redirectors that land
-    on a different mirror each request; a mirror may advertise an IPv6 address a
-    host without an IPv6 route cannot reach ([Errno 101] Network is unreachable).
-    Retry on failure, forcing IPv4 resolution after the first attempt.
-    """
-    if dest.exists():
-        return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    print(f"  Downloading {dest.name}...")
-    last_err = None
-    for attempt in range(1, retries + 1):
-        force_ipv4 = attempt > 1
-        if force_ipv4:
-            socket.getaddrinfo = _ipv4_only_getaddrinfo
-        try:
-            urllib.request.urlretrieve(url, dest)
-            break
-        except Exception as e:  # noqa: BLE001 - reported via RuntimeError below
-            last_err = e
-            dest.unlink(missing_ok=True)
-            if attempt < retries:
-                print(f"  Attempt {attempt} failed ({e}); retrying (IPv4-only)...")
-        finally:
-            if force_ipv4:
-                socket.getaddrinfo = _orig_getaddrinfo
-    else:
-        raise RuntimeError(f"Failed to download {url}: {last_err}") from last_err
-    size_kb = dest.stat().st_size / 1024
-    print(f"  Downloaded {dest.name} ({size_kb:.0f} KB)")
-    return dest
 
 
 def extract_static_instance(source_path: Path, axes: dict, family_name: str, style_name: str) -> Path:
@@ -156,18 +118,7 @@ def resolve_font_path(style_spec: dict, family_name: str, style_name: str) -> Pa
     If 'variable' key is present, extracts a static instance via fonttools
     instancer after resolving the source file.
     """
-    if "path" in style_spec:
-        resolved = EPDFONTS_DIR / style_spec["path"]
-        if not resolved.exists():
-            raise FileNotFoundError(f"{family_name}/{style_name}: {resolved} not found")
-    elif "url" in style_spec:
-        url = style_spec["url"]
-        # Derive a stable filename from the URL
-        filename = url.rsplit("/", 1)[-1]
-        dest = DOWNLOAD_DIR / family_name / filename
-        resolved = download_font(url, dest)
-    else:
-        raise ValueError(f"{family_name}/{style_name}: must have 'path' or 'url'")
+    resolved, _ = resolve_font_source(style_spec, family_name, style_name)
 
     # If variable font axes are specified, extract a static instance
     if "variable" in style_spec:

@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "fonttools_version": "4.65.0",
+  "unicode_data_version": "15.0.0",
+  "source_root": "../builtinFonts/source",
+  "licenses": {
+    "NotoSans": {
+      "path": "NotoSans/OFL.txt",
+      "sha256_lf": "e51d69f5e43cacd83ab6e5f3f1a47005380ae08b6d108d444be49e786d127458"
+    },
+    "NotoSerif": {
+      "path": "NotoSerif/OFL.txt",
+      "sha256_lf": "e51d69f5e43cacd83ab6e5f3f1a47005380ae08b6d108d444be49e786d127458"
+    },
+    "Ubuntu": {
+      "path": "Ubuntu/UFL.txt",
+      "sha256_lf": "2f0015108d68627bd788d313f529c21ff4da2c2c42a5e1f3883acc83480f9002"
+    },
+    "NotoSansHebrew": {
+      "path": "NotoSansHebrew/OFL.txt",
+      "sha256_lf": "e08036dbb38d9e7a033a721e0ca60befde2ed9d1a8075922dbd3429093dd793b"
+    },
+    "NotoSansArabic": {
+      "path": "NotoSansArabic/OFL.txt",
+      "sha256_lf": "a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af"
+    },
+    "NotoSansThai": {
+      "path": "NotoSansThai/OFL.txt",
+      "sha256_lf": "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0"
+    },
+    "NotoSerifThai": {
+      "path": "NotoSerifThai/OFL.txt",
+      "sha256_lf": "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0"
+    }
+  },
+  "archives": [
+    {
+      "url": "https://github.com/notofonts/thai/releases/download/NotoSansThai-v2.002/NotoSansThai-v2.002.zip",
+      "sha256": "af889cc673fc714060ce5e4e088fbad32aa4c0571a19958efeaff128a22da485",
+      "members": [
+        {
+          "member": "NotoSansThai/hinted/ttf/NotoSansThai-Regular.ttf",
+          "path": "NotoSansThai/NotoSansThai-Regular.ttf",
+          "sha256": "61cf814eec46b294d6ea4401ac295d0cecd5207bd2331dcc5a15e7301d30ee44",
+          "size": 37780
+        },
+        {
+          "member": "NotoSansThai/hinted/ttf/NotoSansThai-Bold.ttf",
+          "path": "NotoSansThai/NotoSansThai-Bold.ttf",
+          "sha256": "2ac6c6e8a478e23b15f76e4894af1fa2210f8f350e4e6e54aad530bec03efbfb",
+          "size": 37824
+        },
+        {
+          "member": "OFL.txt",
+          "path": "NotoSansThai/OFL.txt",
+          "sha256": "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0",
+          "size": 4380
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/notofonts/thai/releases/download/NotoSerifThai-v2.002/NotoSerifThai-v2.002.zip",
+      "sha256": "89e3c04bfc54d9a5dd0aec660bf974ad46df38385df7d9397c083482d515049a",
+      "members": [
+        {
+          "member": "NotoSerifThai/hinted/ttf/NotoSerifThai-Regular.ttf",
+          "path": "NotoSerifThai/NotoSerifThai-Regular.ttf",
+          "sha256": "747b5bb1fdd329850ddd3218d872a3d2a96ab0dd544f51e5300c6d1b12071b62",
+          "size": 45424
+        },
+        {
+          "member": "NotoSerifThai/hinted/ttf/NotoSerifThai-Bold.ttf",
+          "path": "NotoSerifThai/NotoSerifThai-Bold.ttf",
+          "sha256": "af3f64944248fe0dd9a37c0d2e8eed69930623d962eb5b2130fa81bb9e879dd1",
+          "size": 46544
+        },
+        {
+          "member": "OFL.txt",
+          "path": "NotoSerifThai/OFL.txt",
+          "sha256": "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0",
+          "size": 4380
+        }
+      ]
+    }
+  ],
+  "fonts": [
+    {
+      "name": "NotoSans-Regular",
+      "path": "NotoSans/NotoSans-Regular.ttf",
+      "sha256": "fe8c022f48d8dd29f17b744d16f9346f4357e16f7d4f7be58b000ae7c291b614",
+      "size": 629024,
+      "license": "NotoSans",
+      "subset_family": "THCraft Sans",
+      "style": "Regular",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSans-Bold",
+      "path": "NotoSans/NotoSans-Bold.ttf",
+      "sha256": "13a813c49624ae3ba3c5c6e72c5ebffc4b9e1e6ea32f421c04069b037c6ad431",
+      "size": 630968,
+      "license": "NotoSans",
+      "subset_family": "THCraft Sans",
+      "style": "Bold",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSans-Italic",
+      "path": "NotoSans/NotoSans-Italic.ttf",
+      "sha256": "feb3e57888ce3acb604f270c278cfb304c674306518771619ddbdefca42a066b",
+      "size": 642344,
+      "license": "NotoSans",
+      "subset_family": "THCraft Sans",
+      "style": "Italic",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSans-BoldItalic",
+      "path": "NotoSans/NotoSans-BoldItalic.ttf",
+      "sha256": "7e34616e092593c340449baf9a259075a054c6419511ccf21ff0d83a1c9dd0d0",
+      "size": 644344,
+      "license": "NotoSans",
+      "subset_family": "THCraft Sans",
+      "style": "BoldItalic",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSerif-Regular",
+      "path": "NotoSerif/NotoSerif-Regular.ttf",
+      "sha256": "a7e8ea1ab7e7d368b001c892d6148325fffc849a46e030e55e1bdc597bbe939d",
+      "size": 504932,
+      "license": "NotoSerif",
+      "subset_family": "THCraft Serif",
+      "style": "Regular",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSerif-Bold",
+      "path": "NotoSerif/NotoSerif-Bold.ttf",
+      "sha256": "1b941681106aae26ead3a24c6f15b51f994b1b26adce8742a37ce96648f0fe0a",
+      "size": 506864,
+      "license": "NotoSerif",
+      "subset_family": "THCraft Serif",
+      "style": "Bold",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSerif-Italic",
+      "path": "NotoSerif/NotoSerif-Italic.ttf",
+      "sha256": "15d5f8050fc1f142545e7a26a50bd07a0434eca535d4d98aad9d5e8f03741e43",
+      "size": 534156,
+      "license": "NotoSerif",
+      "subset_family": "THCraft Serif",
+      "style": "Italic",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSerif-BoldItalic",
+      "path": "NotoSerif/NotoSerif-BoldItalic.ttf",
+      "sha256": "2400339667ad2701320aa671e337d1632731e56b397564afe14e981124b899c6",
+      "size": 534540,
+      "license": "NotoSerif",
+      "subset_family": "THCraft Serif",
+      "style": "BoldItalic",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "Ubuntu-Regular",
+      "path": "Ubuntu/Ubuntu-Regular.ttf",
+      "sha256": "540f19be11a368130641d00ec1c354b535c0803560f598d7d062486c9278387a",
+      "size": 299684,
+      "license": "Ubuntu",
+      "subset_family": "Ubuntu derivative THCraft UI",
+      "style": "Regular",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "Ubuntu-Bold",
+      "path": "Ubuntu/Ubuntu-Bold.ttf",
+      "sha256": "6dbcce3fdd846f3aebc7e1890b5ccca234806cbd84763785f7ced043a99e8268",
+      "size": 270164,
+      "license": "Ubuntu",
+      "subset_family": "Ubuntu derivative THCraft UI",
+      "style": "Bold",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "Ubuntu-Vietnamese-Regular",
+      "path": "Ubuntu/Ubuntu-Vietnamese-Regular.ttf",
+      "sha256": "0221c61dfb34344b7be2dfc602d66ff773d1aed90ff3bca3e3e859aff4fbab33",
+      "size": 7888,
+      "license": "Ubuntu",
+      "subset_family": "Ubuntu derivative THCraft UI Vietnamese",
+      "style": "Regular",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "Ubuntu-Vietnamese-Bold",
+      "path": "Ubuntu/Ubuntu-Vietnamese-Bold.ttf",
+      "sha256": "08dd08c571264cb89402a07ee6d7beeb85cd10ea6572c12e50a2234433d9390b",
+      "size": 7960,
+      "license": "Ubuntu",
+      "subset_family": "Ubuntu derivative THCraft UI Vietnamese",
+      "style": "Bold",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSansHebrew-Regular",
+      "path": "NotoSansHebrew/NotoSansHebrew-Regular.ttf",
+      "sha256": "671951828bd5c95db818e5bb12dcea2d0c0dda00311888522be061ee6835125e",
+      "size": 66156,
+      "license": "NotoSansHebrew",
+      "subset_family": "THCraft Hebrew",
+      "style": "Regular",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSansHebrew-Bold",
+      "path": "NotoSansHebrew/NotoSansHebrew-Bold.ttf",
+      "sha256": "96f88305d31a8432f0fe6648c853cb9ef77db8e52ada8948ed0c577037d45423",
+      "size": 66608,
+      "license": "NotoSansHebrew",
+      "subset_family": "THCraft Hebrew",
+      "style": "Bold",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSansArabic-Regular",
+      "path": "NotoSansArabic/NotoSansArabic-Regular.ttf",
+      "sha256": "252629ca0e87b6233851249b8cbf7b43445211a8caf199f1b306a19202251508",
+      "size": 194176,
+      "license": "NotoSansArabic",
+      "subset_family": "THCraft Arabic",
+      "style": "Regular",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSansArabic-Bold",
+      "path": "NotoSansArabic/NotoSansArabic-Bold.ttf",
+      "sha256": "a86a704ff8b315082f4859b04c2f8f746f4cefb14553ef10505f143e0d4829d3",
+      "size": 194380,
+      "license": "NotoSansArabic",
+      "subset_family": "THCraft Arabic",
+      "style": "Bold",
+      "keep_full_cmap": false
+    },
+    {
+      "name": "NotoSansThai-Regular",
+      "path": "NotoSansThai/NotoSansThai-Regular.ttf",
+      "sha256": "61cf814eec46b294d6ea4401ac295d0cecd5207bd2331dcc5a15e7301d30ee44",
+      "size": 37780,
+      "license": "NotoSansThai",
+      "subset_family": "THCraft Sans Thai",
+      "style": "Regular",
+      "keep_full_cmap": true
+    },
+    {
+      "name": "NotoSansThai-Bold",
+      "path": "NotoSansThai/NotoSansThai-Bold.ttf",
+      "sha256": "2ac6c6e8a478e23b15f76e4894af1fa2210f8f350e4e6e54aad530bec03efbfb",
+      "size": 37824,
+      "license": "NotoSansThai",
+      "subset_family": "THCraft Sans Thai",
+      "style": "Bold",
+      "keep_full_cmap": true
+    },
+    {
+      "name": "NotoSerifThai-Regular",
+      "path": "NotoSerifThai/NotoSerifThai-Regular.ttf",
+      "sha256": "747b5bb1fdd329850ddd3218d872a3d2a96ab0dd544f51e5300c6d1b12071b62",
+      "size": 45424,
+      "license": "NotoSerifThai",
+      "subset_family": "THCraft Serif Thai",
+      "style": "Regular",
+      "keep_full_cmap": true
+    },
+    {
+      "name": "NotoSerifThai-Bold",
+      "path": "NotoSerifThai/NotoSerifThai-Bold.ttf",
+      "sha256": "af3f64944248fe0dd9a37c0d2e8eed69930623d962eb5b2130fa81bb9e879dd1",
+      "size": 46544,
+      "license": "NotoSerifThai",
+      "subset_family": "THCraft Serif Thai",
+      "style": "Bold",
+      "keep_full_cmap": true
+    }
+  ],
+  "stacks": {
+    "reader_sans": {
+      "primary": "NotoSans",
+      "thai": "NotoSansThai"
+    },
+    "reader_serif": {
+      "primary": "NotoSerif",
+      "thai": "NotoSerifThai"
+    },
+    "ui": {
+      "primary": "Ubuntu",
+      "fallbacks": [
+        "NotoSansThai",
+        "NotoSansHebrew",
+        "NotoSansArabic",
+        "Ubuntu-Vietnamese"
+      ]
+    },
+    "small": {
+      "primary": "NotoSans",
+      "fallbacks": [
+        "NotoSansThai",
+        "NotoSansHebrew",
+        "NotoSansArabic",
+        "Ubuntu-Vietnamese"
+      ]
+    }
+  },
+  "render_policy": {
+    "dpi": 150,
+    "thai_italic": "synthetic-oblique",
+    "oblique_degrees": 12
+  }
+}

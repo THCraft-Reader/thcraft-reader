@@ -140,14 +140,36 @@
     <div class="card">
       <h2>Upload Font</h2>
       <form class="upload-form" id="uploadForm">
-        <input type="file" id="fontFiles" webkitdirectory directory multiple required />
-        <button type="submit" class="btn btn-primary">Upload</button>
+        <input type="file" id="fontFiles" multiple required disabled aria-label="Font files" aria-describedby="uploadHelp pickedInfo" />
+        <button type="submit" id="uploadButton" class="btn btn-primary" disabled>Upload</button>
+        <button type="button" id="cancelUpload" class="btn btn-danger" hidden>Cancel</button>
       </form>
+      <p id="uploadHelp" class="family-meta">Loading the supported font format...</p>
       <p id="pickedInfo" class="family-meta" style="margin: 8px 0 0;"></p>
-      <div id="status"></div>
+      <div id="status" role="status" aria-live="polite"></div>
     </div>
 
   <script>
+    let fontConfig = null;
+    let uploadController = null;
+
+    function configurePicker(data) {
+      if (!['opentype', 'cpfont'].includes(data.format) || !Array.isArray(data.extensions) ||
+          !data.extensions.length || data.extensions.some(ext => !/^[a-z0-9]+$/.test(ext))) {
+        throw new Error('Unsupported font configuration');
+      }
+      fontConfig = data;
+      const native = data.format === 'opentype';
+      const picker = document.getElementById('fontFiles');
+      picker.accept = data.extensions.map(ext => '.' + ext).join(',');
+      picker.toggleAttribute('webkitdirectory', !native);
+      picker.toggleAttribute('directory', !native);
+      picker.disabled = !!uploadController;
+      document.getElementById('uploadButton').disabled = !!uploadController;
+      document.getElementById('uploadHelp').textContent = native
+        ? 'Select TTF/OTF files from one family: Family-Regular.ttf, with optional Family-Bold, Family-Italic and Family-BoldItalic styles. A new family needs Regular. Uploading styles replaces only those styles.'
+        : 'Select a folder containing one family of .cpfont files, named Family_12.cpfont, Family_14.cpfont, and so on. Other files in the folder are ignored.';
+    }
     function formatSize(bytes) {
       if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
       if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
@@ -159,6 +181,8 @@
       try {
         const res = await fetch('/api/fonts');
         const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Unable to load fonts');
+        configurePicker(data);
         // Build rows with DOM APIs and textContent so on-device family names
         // (which can contain arbitrary characters) cannot break markup or
         // execute script via innerHTML / inline onclick interpolation.
@@ -183,7 +207,7 @@
           meta.className = 'family-meta';
           const sizes = (f.sizes || []).join(', ');
           const filesSizes = (f.files || []).map(fi => formatSize(fi.size)).join(' + ');
-          meta.textContent = sizes + 'pt · ' + filesSizes;
+          meta.textContent = (data.format === 'opentype' ? 'TTF/OTF · ' : sizes + 'pt · ') + filesSizes;
           info.appendChild(meta);
 
           const btn = document.createElement('button');
@@ -192,7 +216,7 @@
           // Capture name in the closure rather than interpolating into onclick.
           const familyName = f.name;
           btn.addEventListener('click', () => deleteFamily(familyName));
-
+          btn.disabled = !!uploadController;
           row.appendChild(info);
           row.appendChild(btn);
           el.appendChild(row);
@@ -201,7 +225,7 @@
         el.replaceChildren();
         const p = document.createElement('p');
         p.className = 'empty';
-        p.textContent = 'Failed to load font list';
+        p.textContent = 'Failed to load font list: ' + e.message + '. Reload this page to retry.';
         el.appendChild(p);
       }
     }
@@ -222,8 +246,9 @@
           status.className = 'status-ok';
           status.textContent = 'Deleted "' + name + '".';
         } else {
+          const data = await res.json();
           status.className = 'status-err';
-          status.textContent = 'Failed to delete "' + name + '".';
+          status.textContent = data.error || 'Failed to delete "' + name + '".';
         }
       } catch (err) {
         status.className = 'status-err';
@@ -232,89 +257,102 @@
       await loadFonts();
     }
 
-    // Derive family name from a .cpfont filename: take everything before the
-    // last '-' or '_' (that separator precedes the size suffix, e.g. Bookerly_12.cpfont).
-    function familyFromFilename(name) {
-      const stem = name.replace(/\.cpfont$/i, '');
-      const cut = Math.max(stem.lastIndexOf('-'), stem.lastIndexOf('_'));
-      return cut > 0 ? stem.slice(0, cut) : stem;
+    function fileIdentity(name) {
+      if (!fontConfig || /[\/\\]/.test(name) || name.includes('..')) {
+        throw new Error('Invalid font filename: ' + name);
+      }
+      const native = fontConfig.format === 'opentype';
+      const match = native
+        ? /^([A-Za-z0-9_-]+)-(Regular|Bold|Italic|BoldItalic)\.([A-Za-z]+)$/.exec(name)
+        : /^([A-Za-z0-9_-]+)[_-]([0-9]{1,3})\.([A-Za-z]+)$/.exec(name);
+      if (!match || !fontConfig.extensions.includes(match[3].toLowerCase())) {
+        throw new Error(native
+          ? 'Use Family-Regular.ttf/.otf, with optional Bold, Italic and BoldItalic styles.'
+          : 'Use Family_12.cpfont filenames with a point-size suffix.');
+      }
+      if (match[1].length > fontConfig.maxFamilyLength) {
+        throw new Error('Family names must be at most ' + fontConfig.maxFamilyLength + ' characters.');
+      }
+      const key = native ? match[2] : Number(match[2]);
+      if (!native && (key < 1 || key > 255)) throw new Error('Invalid font point size.');
+      return {family: match[1], key};
     }
 
-    // Sanitize to match firmware's [A-Za-z0-9_-]+ pattern.
-    function sanitizeFamily(raw) {
-      return raw.replace(/[^A-Za-z0-9_-]/g, '_');
-    }
-
-    function cpfontFilesOnly(fileList) {
-      return Array.from(fileList).filter(f => /\.cpfont$/i.test(f.name));
+    function selectedFonts() {
+      if (!fontConfig) throw new Error('Wait for the font list to load.');
+      const selected = Array.from(document.getElementById('fontFiles').files);
+      const files = fontConfig.format === 'cpfont'
+        ? selected.filter(file => fontConfig.extensions.includes(file.name.split('.').pop().toLowerCase()))
+        : selected;
+      if (!files.length) throw new Error('No supported font files selected.');
+      if (files.length > fontConfig.maxFiles) throw new Error('Select at most ' + fontConfig.maxFiles + ' font files.');
+      const identities = files.map(file => {
+        if (file.size < 8 || file.size > 0xffffffff) throw new Error('Invalid file size: ' + file.name);
+        return fileIdentity(file.name);
+      });
+      const family = identities[0].family;
+      if (identities.some(id => id.family !== family)) throw new Error('Please select files from a single font family.');
+      if (new Set(identities.map(id => id.key)).size !== files.length) {
+        throw new Error('Select each font style or size only once.');
+      }
+      if (fontConfig.format === 'opentype' && !identities.some(id => id.key === 'Regular') &&
+          !fontConfig.families.some(f => f.name === family && f.files.some(file => file.style === 0))) {
+        throw new Error('Include Family-Regular.ttf or Family-Regular.otf when installing a new family.');
+      }
+      return {family, files};
     }
 
     document.getElementById('fontFiles').addEventListener('change', function() {
+      const status = document.getElementById('status');
+      status.textContent = '';
+      status.style.display = 'none';
       const info = document.getElementById('pickedInfo');
-      const files = cpfontFilesOnly(this.files);
-      if (files.length === 0) {
-        info.textContent = 'No .cpfont files found in the selected folder.';
-        return;
+      try {
+        const {family, files} = selectedFonts();
+        info.textContent = files.length + ' file' + (files.length === 1 ? '' : 's') + ' → family "' + family + '"';
+      } catch (error) {
+        info.textContent = error.message;
       }
-      const family = sanitizeFamily(familyFromFilename(files[0].name));
-      info.textContent = files.length + ' file' + (files.length === 1 ? '' : 's') +
-        ' → family "' + family + '"';
+    });
+
+    document.getElementById('cancelUpload').addEventListener('click', () => {
+      if (uploadController) uploadController.abort();
     });
 
     document.getElementById('uploadForm').addEventListener('submit', async function(e) {
       e.preventDefault();
+      if (uploadController) return;
       const status = document.getElementById('status');
-      const files = cpfontFilesOnly(document.getElementById('fontFiles').files);
-      if (files.length === 0) {
-        status.className = 'status-err';
-        status.style.display = 'block';
-        status.textContent = 'No .cpfont files selected.';
-        return;
-      }
-
-      // A directory picker may include files from multiple family subfolders.
-      // Reject that up front — otherwise files[0]'s family is silently reused
-      // for every upload, corrupting the install layout.
-      const families = [...new Set(files.map(f => sanitizeFamily(familyFromFilename(f.name))))];
-      if (families.length !== 1) {
-        status.className = 'status-err';
-        status.style.display = 'block';
-        status.textContent = 'Please select files from a single font family.';
-        return;
-      }
-      const family = families[0];
-
       status.className = '';
       status.style.display = 'block';
-
-      let uploaded = 0;
-      for (const file of files) {
-        status.textContent = 'Uploading ' + (uploaded + 1) + '/' + files.length + ': ' + file.name;
-        const formData = new FormData();
-        formData.append('family', family);
-        formData.append('file', file, file.name);
-        try {
-          const res = await fetch('/api/fonts/upload', { method: 'POST', body: formData });
-          const data = await res.json();
-          if (!data.ok) {
-            status.className = 'status-err';
-            status.textContent = 'Failed on ' + file.name + ': ' + (data.error || 'unknown error');
-            await loadFonts();
-            return;
-          }
-        } catch (err) {
-          status.className = 'status-err';
-          status.textContent = 'Upload error on ' + file.name + ': ' + err.message;
-          await loadFonts();
-          return;
-        }
-        uploaded++;
+      try {
+        const {family, files} = selectedFonts();
+        uploadController = new AbortController();
+        document.getElementById('fontFiles').disabled = true;
+        document.getElementById('uploadButton').disabled = true;
+        document.querySelectorAll('#families button').forEach(button => button.disabled = true);
+        document.getElementById('cancelUpload').hidden = false;
+        status.textContent = 'Uploading ' + files.length + ' file' + (files.length === 1 ? '' : 's') + ' to "' + family + '"...';
+        const manifest = {family, files: files.map(file => ({name: file.name, size: file.size}))};
+        const body = new FormData();
+        files.forEach(file => body.append('file', file, file.name));
+        const res = await fetch('/api/fonts/upload?manifest=' + encodeURIComponent(JSON.stringify(manifest)), {
+          method: 'POST', body, signal: uploadController.signal
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'The font selection could not be installed.');
+        status.className = 'status-ok';
+        status.textContent = 'Uploaded ' + files.length + ' file' + (files.length === 1 ? '' : 's') + ' to family "' + family + '".';
+        document.getElementById('fontFiles').value = '';
+        document.getElementById('pickedInfo').textContent = '';
+      } catch (error) {
+        status.className = 'status-err';
+        status.textContent = error.name === 'AbortError' ? 'Upload cancelled. Checking installed fonts...' : error.message;
+      } finally {
+        uploadController = null;
+        document.getElementById('cancelUpload').hidden = true;
+        await loadFonts();
       }
-
-      status.className = 'status-ok';
-      status.textContent = 'Uploaded ' + uploaded + ' file' + (uploaded === 1 ? '' : 's') +
-        ' to family "' + family + '".';
-      await loadFonts();
     });
 
     loadFonts();

@@ -470,18 +470,65 @@ int do_shape(bidi_char* line, bidi_char* to, int count) {
  * (replaces GCC nested functions — ESP32C3 has no executable stack)
  * ═══════════════════════════════════════════════════════════════════════ */
 
+#define BRACKET_STACK 63
+
 typedef struct {
-  uchar emb[BIDI_MAX_LINE + 1];
-  uchar ovr[BIDI_MAX_LINE + 1];
-  bool isol[BIDI_MAX_LINE + 1];
+  ucschar opener;
+  int pos;
+} BracketEntry;
+
+typedef struct {
+  uchar* emb;
+  uchar* ovr;
+  uchar* isol;
+  int capacity;
   int top;
 } DirStatusStack;
+
+typedef struct {
+  BracketEntry* openers;
+  uchar* types;
+  uchar* skip;
+  DirStatusStack dss;
+} BidiWorkspace;
+
+/* offsetof supplies the C99-compatible alignment requirement. */
+typedef struct {
+  char pad;
+  BracketEntry entry;
+} BracketAlignment;
+
+#define BIDI_ALIGNMENT offsetof(BracketAlignment, entry)
+#define BIDI_WORK_BYTES(count) (sizeof(BracketEntry) * BRACKET_STACK + 5 * (count) + 3)
+
+size_t bidi_scratch_size(size_t count) {
+  if (!count || count > BIDI_MAX_NATIVE_LINE) return 0;
+  /* The count limit bounds every multiplication and includes alignment slack. */
+  return BIDI_WORK_BYTES(count) + BIDI_ALIGNMENT - 1;
+}
+
+static BidiWorkspace bidi_workspace(void* alignedScratch, int count) {
+  BidiWorkspace work;
+  work.openers = (BracketEntry*)alignedScratch;
+  work.types = (uchar*)(work.openers + BRACKET_STACK);
+  work.skip = work.types + count;
+  work.dss.emb = work.skip + count;
+  work.dss.ovr = work.dss.emb + count + 1;
+  work.dss.isol = work.dss.ovr + count + 1;
+  work.dss.capacity = count + 1;
+  work.dss.top = -1;
+  return work;
+}
+
+static bool buffers_overlap(uintptr_t a, size_t aBytes, uintptr_t b, size_t bBytes) {
+  return a < b + bBytes && b < a + aBytes;
+}
 
 static inline void dss_init(DirStatusStack* s) { s->top = -1; }
 static inline int dss_count(const DirStatusStack* s) { return s->top + 1; }
 
 static inline void dss_push(DirStatusStack* s, uchar emb, uchar ovr, bool isol) {
-  if (s->top < BIDI_MAX_LINE) {
+  if (s->top + 1 < s->capacity) {
     ++s->top;
     s->emb[s->top] = emb;
     s->ovr[s->top] = ovr;
@@ -504,20 +551,16 @@ static inline void dss_pop(DirStatusStack* s, uchar* emb, uchar* ovr, bool* isol
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * do_bidi()  — The main UAX#9 algorithm
+ * resolve_levels_core() — Logical paragraph resolution through I1/I2
  * ═══════════════════════════════════════════════════════════════════════ */
 
-int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
-  if (count > BIDI_MAX_LINE) count = BIDI_MAX_LINE;
-
+static int resolve_levels_core(bool autodir, int paragraphLevel, const bidi_char* line, int count, uchar* levels,
+                               BidiWorkspace* work) {
   uchar currentEmbedding, currentOverride;
   bool currentIsolate;
   int i, j;
-
-  /* Fixed-size working arrays — no VLAs, no heap */
-  uchar types[BIDI_MAX_LINE];
-  uchar levels[BIDI_MAX_LINE];
-  bool skip[BIDI_MAX_LINE];
+  uchar* types = work->types;
+  uchar* skip = work->skip;
 
   /* ── P2/P3: detect paragraph level ── */
   int isolateLevel = 0, resLevel = -1;
@@ -551,8 +594,15 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
   } else
     resLevel = paragraphLevel;
 
-  /* Fast path: pure LTR line with LTR paragraph — nothing to reorder */
-  if (!hasRTL && !paragraphLevel) return 0;
+  /* Initialize output even when there is nothing to reorder. */
+  if (!hasRTL && !paragraphLevel) {
+    for (i = 0; i < count; i++) {
+      levels[i] = 0;
+      types[i] = bidi_class(line[i].wc);
+      skip[i] = false;
+    }
+    return 0;
+  }
 
   /* ── X1–X8: compute embedding levels ── */
   currentEmbedding = (uchar)paragraphLevel;
@@ -560,9 +610,9 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
   currentIsolate = false;
   isolateLevel = 0;
 
-  DirStatusStack dss;
-  dss_init(&dss);
-  dss_push(&dss, currentEmbedding, currentOverride, currentIsolate);
+  DirStatusStack* dss = &work->dss;
+  dss_init(dss);
+  dss_push(dss, currentEmbedding, currentOverride, currentIsolate);
 
   for (i = 0; i < count; i++) {
     uchar tempType = bidi_class(line[i].wc);
@@ -593,38 +643,38 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
       when RLE : currentEmbedding = leastGreaterOdd(currentEmbedding);
       currentOverride = ON;
       currentIsolate = false;
-      dss_push(&dss, currentEmbedding, currentOverride, currentIsolate);
+      dss_push(dss, currentEmbedding, currentOverride, currentIsolate);
       when LRE : currentEmbedding = leastGreaterEven(currentEmbedding);
       currentOverride = ON;
       currentIsolate = false;
-      dss_push(&dss, currentEmbedding, currentOverride, currentIsolate);
+      dss_push(dss, currentEmbedding, currentOverride, currentIsolate);
       when RLO : currentEmbedding = leastGreaterOdd(currentEmbedding);
       currentOverride = R;
       currentIsolate = false;
-      dss_push(&dss, currentEmbedding, currentOverride, currentIsolate);
+      dss_push(dss, currentEmbedding, currentOverride, currentIsolate);
       when LRO : currentEmbedding = leastGreaterEven(currentEmbedding);
       currentOverride = L;
       currentIsolate = false;
-      dss_push(&dss, currentEmbedding, currentOverride, currentIsolate);
+      dss_push(dss, currentEmbedding, currentOverride, currentIsolate);
       when RLI : if (currentOverride != ON) tempType = currentOverride;
       currentEmbedding = leastGreaterOdd(currentEmbedding);
       isolateLevel++;
       currentOverride = ON;
       currentIsolate = true;
-      dss_push(&dss, currentEmbedding, currentOverride, currentIsolate);
+      dss_push(dss, currentEmbedding, currentOverride, currentIsolate);
       when LRI : if (currentOverride != ON) tempType = currentOverride;
       currentEmbedding = leastGreaterEven(currentEmbedding);
       isolateLevel++;
       currentOverride = ON;
       currentIsolate = true;
-      dss_push(&dss, currentEmbedding, currentOverride, currentIsolate);
-      when PDF : if (!currentIsolate && dss_count(&dss) >= 2)
-                     dss_pop(&dss, &currentEmbedding, &currentOverride, &currentIsolate);
+      dss_push(dss, currentEmbedding, currentOverride, currentIsolate);
+      when PDF : if (!currentIsolate && dss_count(dss) >= 2)
+                     dss_pop(dss, &currentEmbedding, &currentOverride, &currentIsolate);
       levels[i] = currentEmbedding;
       when PDI : if (isolateLevel > 0) {
-        while (!currentIsolate && dss_count(&dss) > 0)
-          dss_pop(&dss, &currentEmbedding, &currentOverride, &currentIsolate);
-        dss_pop(&dss, &currentEmbedding, &currentOverride, &currentIsolate);
+        while (!currentIsolate && dss_count(dss) > 0)
+          dss_pop(dss, &currentEmbedding, &currentOverride, &currentIsolate);
+        dss_pop(dss, &currentEmbedding, &currentOverride, &currentIsolate);
         isolateLevel--;
       }
       if (currentOverride != ON) tempType = currentOverride;
@@ -739,11 +789,7 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
   {
     uchar e = (paragraphLevel & 1) ? R : L;
     uchar o = (e == L) ? R : L;
-#define BRACKET_STACK 63
-    struct {
-      ucschar opener;
-      int pos;
-    } openers[BRACKET_STACK];
+    BracketEntry* openers = work->openers;
     int opener_top = 0;
 
     for (i = 0; i < count; i++) {
@@ -814,7 +860,6 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
           if (is_NI(types[m])) types[m] = dir;
       }
     }
-#undef BRACKET_STACK
   }
 
   /* ── N1: NI between same-direction strongs → that direction ── */
@@ -864,6 +909,43 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
       if (types[i] == L || types[i] == EN || types[i] == AN) levels[i] += 1;
     }
   }
+  return paragraphLevel;
+}
+
+int resolve_bidi_levels(bool autodir, int paragraphLevel, const bidi_char* line, int count, uchar* levels,
+                        void* scratch, size_t scratchBytes) {
+  if (count < 0 || count > BIDI_MAX_NATIVE_LINE || paragraphLevel < 0 || paragraphLevel > 1) return -1;
+  if (!count) return paragraphLevel;
+  const size_t required = bidi_scratch_size((size_t)count);
+  if (!line || !levels || !scratch || scratchBytes < required) return -1;
+  const uintptr_t input = (uintptr_t)line, output = (uintptr_t)levels, storage = (uintptr_t)scratch;
+  const size_t inputBytes = (size_t)count * sizeof(*line);
+  if (input > UINTPTR_MAX - inputBytes || output > UINTPTR_MAX - (size_t)count || storage > UINTPTR_MAX - scratchBytes)
+    return -1;
+  if (buffers_overlap(input, inputBytes, output, (size_t)count) ||
+      buffers_overlap(input, inputBytes, storage, scratchBytes) ||
+      buffers_overlap(output, (size_t)count, storage, scratchBytes))
+    return -1;
+  const size_t padding = (BIDI_ALIGNMENT - storage % BIDI_ALIGNMENT) % BIDI_ALIGNMENT;
+  BidiWorkspace work = bidi_workspace((uchar*)scratch + padding, count);
+  return resolve_levels_core(autodir, paragraphLevel, line, count, levels, &work);
+}
+
+int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
+  if (count > BIDI_MAX_LINE) count = BIDI_MAX_LINE;
+  if (!line || count <= 0) return paragraphLevel;
+
+  /* Same bounded legacy arrays, now shared with the workspace-driven core. */
+  union {
+    BracketEntry alignment;
+    uchar bytes[BIDI_WORK_BYTES(BIDI_MAX_LINE)];
+  } scratch;
+  uchar levels[BIDI_MAX_LINE];
+  BidiWorkspace work = bidi_workspace(scratch.bytes, count);
+  paragraphLevel = resolve_levels_core(autodir, paragraphLevel, line, count, levels, &work);
+  uchar* types = work.types;
+  uchar* skip = work.skip;
+  int i, j;
 
   /* ── L1: reset trailing/segment whitespace to paragraph level ── */
   for (i = count - 1; i >= 0; i--) {

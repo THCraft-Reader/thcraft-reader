@@ -1,0 +1,6 @@
+vendor/libthai-0.1.30/src/thbrk/thbrk.c
+vendor/libthai-0.1.30/src/thbrk/brk-ctype.c
+vendor/libthai-0.1.30/src/thbrk/brk-common.c
+vendor/libthai-0.1.30/src/thbrk/brk-maximal.c
+vendor/libthai-0.1.30/src/thctype/thctype.c
+vendor/libthai-0.1.30/src/thwchar/thwchar.c

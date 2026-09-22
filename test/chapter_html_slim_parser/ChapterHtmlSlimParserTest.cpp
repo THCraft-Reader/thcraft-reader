@@ -2,7 +2,10 @@
 #include <GfxRenderer.h>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
@@ -40,7 +43,21 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                nullptr,
                                &cssParser};
 
-  void SetUp() override { parser.currentTextBlock = std::make_unique<ParsedText>(false); }
+  void SetUp() override {
+    filepath = (std::filesystem::temp_directory_path() /
+                ("crosspoint-parser-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+                 ".xhtml"))
+                   .string();
+    HalFile file;
+    ASSERT_TRUE(file.open(filepath.c_str(), "wb"));
+    static constexpr char xml[] = "<html><body></body></html>";
+    ASSERT_EQ(file.write(xml, sizeof(xml) - 1), sizeof(xml) - 1);
+    parser.currentTextBlock = std::make_unique<ParsedText>(false);
+  }
+  void TearDown() override {
+    parser.abortParse();
+    std::filesystem::remove(filepath);
+  }
 };
 
 TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
@@ -50,24 +67,66 @@ TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
   text.addWord("c", EpdFontFamily::REGULAR);
   text.setRubyForWordAt(2, "c");
   size_t lines = 0;
-  text.layoutAndExtractLines(
+  ASSERT_TRUE(text.layoutAndExtractLines(
       renderer, 0, 20,
       [&](std::unique_ptr<TextBlock> line, auto) {
         ++lines;
         EXPECT_TRUE(line->getRubyTexts().empty());
       },
-      false);
+      false));
   EXPECT_EQ(lines, 1u);
   const size_t retainedWords = text.size();
   ASSERT_GT(retainedWords, 0u);
   ASSERT_LT(retainedWords, 3u);
-  text.layoutAndExtractLines(renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, auto) {
+  ASSERT_TRUE(text.layoutAndExtractLines(renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, auto) {
     ++lines;
     ASSERT_EQ(line->getRubyTexts().size(), retainedWords);
     EXPECT_EQ(line->getRubyTexts().back(), "c");
     for (size_t i = 0; i + 1 < retainedWords; ++i) EXPECT_TRUE(line->getRubyTexts()[i].empty());
-  });
+  }));
   EXPECT_EQ(lines, 2u);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, EmptyLayoutSucceedsWithoutEmittingLines) {
+  ParsedText text(false);
+  EXPECT_TRUE(
+      text.layoutAndExtractLines(renderer, 0, 200, [](auto, auto) { ADD_FAILURE() << "Empty input emitted a line"; }));
+}
+
+TEST_F(ChapterHtmlSlimParserTest, LayoutReportsRejectedTextBlockWithoutEmittingIt) {
+  ParsedText text(false);
+  // The line's text plus its NUL exceeds TextBlock's uint16_t arena limit.
+  text.addWord(std::string(UINT16_MAX, 'a'), EpdFontFamily::REGULAR);
+  EXPECT_FALSE(text.layoutAndExtractLines(renderer, 0, UINT16_MAX,
+                                          [](auto, auto) { ADD_FAILURE() << "A rejected line was emitted"; }));
+}
+
+TEST_F(ChapterHtmlSlimParserTest, LayoutFailureOverridesHtmlEndAndStopsPagePublication) {
+  parser.viewportWidth = UINT16_MAX;
+  parser.currentTextBlock->addWord(std::string(UINT16_MAX, 'a'), EpdFontFamily::REGULAR);
+  size_t publishedPages = 0;
+  parser.completePageFn = [&](auto, auto, auto, auto) { ++publishedPages; };
+  parser.makePages();
+  parser.htmlEnded_ = true;
+
+  EXPECT_EQ(parser.parseStep(), ChapterHtmlSlimParser::ParseStatus::Error);
+  ChapterHtmlSlimParser::startElement(&parser, "hr", nullptr);
+  ChapterHtmlSlimParser::characterData(&parser, "later ", 6);
+  ChapterHtmlSlimParser::endElement(&parser, "p");
+  EXPECT_FALSE(parser.finishParse());
+  EXPECT_EQ(publishedPages, 0u);
+  EXPECT_EQ(parser.currentPage, nullptr);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, FinalLayoutFailureDoesNotPublishTrailingPage) {
+  parser.viewportWidth = UINT16_MAX;
+  parser.currentTextBlock->addWord(std::string(UINT16_MAX, 'a'), EpdFontFamily::REGULAR);
+  size_t publishedPages = 0;
+  parser.completePageFn = [&](auto, auto, auto, auto) { ++publishedPages; };
+
+  EXPECT_FALSE(parser.finishParse());
+  EXPECT_EQ(publishedPages, 0u);
+  EXPECT_EQ(parser.currentPage, nullptr);
 }
 
 TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
@@ -114,12 +173,12 @@ TEST_F(ChapterHtmlSlimParserTest, PageImageDeserializeRejectsMissingImageBlock) 
   const auto path = std::filesystem::temp_directory_path() / "crosspoint-missing-image-cache.bin";
   {
     HalFile output;
-    ASSERT_TRUE(output.open(path.c_str(), "wb"));
+    ASSERT_TRUE(output.open(path.string().c_str(), "wb"));
     const int16_t coordinates[] = {0, 0};
     output.write(coordinates, sizeof(coordinates));
   }
   HalFile input;
-  ASSERT_TRUE(input.open(path.c_str(), "rb"));
+  ASSERT_TRUE(input.open(path.string().c_str(), "rb"));
   EXPECT_EQ(PageImage::deserialize(input), nullptr);
 }
 
@@ -154,7 +213,7 @@ INSTANTIATE_TEST_SUITE_P(CssVerticalAlign, ChapterHtmlSlimParserTest,
 TEST_F(ChapterHtmlSlimParserTest, ParagraphWithHiddenAttributeShouldBeSkipped) {
   const XML_Char* attributes[] = {"hidden", "hidden", nullptr};
 
-  parser.beginParse();
+  ASSERT_TRUE(parser.beginParse());
   ChapterHtmlSlimParser::startElement(&parser, "p", attributes);
   ChapterHtmlSlimParser::characterData(&parser, "[HIDDEN]", 8);
 
@@ -164,7 +223,7 @@ TEST_F(ChapterHtmlSlimParserTest, ParagraphWithHiddenAttributeShouldBeSkipped) {
 TEST_F(ChapterHtmlSlimParserTest, HeaderWithHiddenAttributeShouldBeSkipped) {
   const XML_Char* attributes[] = {"hidden", "hidden", nullptr};
 
-  parser.beginParse();
+  ASSERT_TRUE(parser.beginParse());
   ChapterHtmlSlimParser::startElement(&parser, "h1", attributes);
   ChapterHtmlSlimParser::characterData(&parser, "[HIDDEN]", 8);
 
@@ -174,7 +233,7 @@ TEST_F(ChapterHtmlSlimParserTest, HeaderWithHiddenAttributeShouldBeSkipped) {
 TEST_F(ChapterHtmlSlimParserTest, SpanWithHiddenAttributeShouldBeSkipped) {
   const XML_Char* attributes[] = {"hidden", "hidden", nullptr};
 
-  parser.beginParse();
+  ASSERT_TRUE(parser.beginParse());
   ChapterHtmlSlimParser::startElement(&parser, "p", nullptr);
   ChapterHtmlSlimParser::characterData(&parser, "Before ", 7);
   ChapterHtmlSlimParser::startElement(&parser, "span", attributes);
@@ -182,15 +241,19 @@ TEST_F(ChapterHtmlSlimParserTest, SpanWithHiddenAttributeShouldBeSkipped) {
   ChapterHtmlSlimParser::endElement(&parser, "span");
   ChapterHtmlSlimParser::characterData(&parser, " After ", 7);
 
-  ASSERT_EQ(parser.currentTextBlock->size(), 2);
-  ASSERT_EQ(parser.currentTextBlock->words[0], "Before");
-  ASSERT_EQ(parser.currentTextBlock->words[1], "After");
+  std::vector<std::string> visible;
+  visible.reserve(2);
+  ASSERT_TRUE(
+      parser.currentTextBlock->layoutAndExtractLines(renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, uint32_t) {
+        for (uint16_t i = 0; i < line->wordCount(); ++i) visible.emplace_back(line->wordText(i));
+      }));
+  EXPECT_EQ(visible, (std::vector<std::string>{"Before", "After"}));
 }
 
 TEST_F(ChapterHtmlSlimParserTest, DivWithHiddenAttributeContentShouldBeSkipped) {
   const XML_Char* attributes[] = {"hidden", "hidden", nullptr};
 
-  parser.beginParse();
+  ASSERT_TRUE(parser.beginParse());
   ChapterHtmlSlimParser::startElement(&parser, "div", attributes);
   ChapterHtmlSlimParser::startElement(&parser, "p", nullptr);
   ChapterHtmlSlimParser::characterData(&parser, "[HIDDEN]", 8);

@@ -1,0 +1,599 @@
+--- a/libdatrie-0.2.14/datrie/alpha-map-private.h
++++ b/libdatrie-0.2.14/datrie/alpha-map-private.h
+@@ -29,6 +29,9 @@
+ 
+ #include <stdio.h>
+ #include "alpha-map.h"
++#include "memory-reader.h"
++
++AlphaMap *  alpha_map_read_memory (TrieMemoryReader *r, unsigned *max_symbol);
+ 
+ AlphaMap *  alpha_map_fread_bin (FILE *file);
+ 
+--- a/libdatrie-0.2.14/datrie/alpha-map.c
++++ b/libdatrie-0.2.14/datrie/alpha-map.c
+@@ -249,7 +249,8 @@
+ 
+         if (!file_read_int32 (file, &b) || !file_read_int32 (file, &e))
+             goto exit_map_created;
+-        alpha_map_add_range_only (alpha_map, b, e);
++        if (alpha_map_add_range_only (alpha_map, b, e) != 0)
++            goto exit_map_created;
+     }
+ 
+     /* work area */
+@@ -262,6 +263,54 @@
+     alpha_map_free (alpha_map);
+ exit_file_read:
+     fseek (file, save_pos, SEEK_SET);
++    return NULL;
++}
++
++/* NativeText port: preflight ranges before allocating the dense work area. */
++AlphaMap *
++alpha_map_read_memory (TrieMemoryReader *r, unsigned *max_symbol)
++{
++    TrieMemoryReader scan = *r;
++    uint32_t sig, count, i, begin, end, first = 0, previous = 0;
++    unsigned symbols = 0;
++    AlphaMap *map;
++
++    if (!trie_memory_u32 (&scan, &sig) || sig != ALPHAMAP_SIGNATURE ||
++        !trie_memory_u32 (&scan, &count) || count > TRIE_CHAR_MAX ||
++        count > (scan.size - scan.pos) / 8)
++        return NULL;
++    for (i = 0; i < count; ++i) {
++        if (!trie_memory_u32 (&scan, &begin) ||
++            !trie_memory_u32 (&scan, &end) || begin == 0 ||
++            end < begin || end >= INT32_MAX ||
++            (i && begin <= previous) ||
++            end - begin >= TRIE_CHAR_MAX - symbols)
++            return NULL;
++        if (!i)
++            first = begin;
++        symbols += end - begin + 1;
++        previous = end;
++    }
++    if (count && ((size_t)(previous - first + 1) >
++                  SIZE_MAX / sizeof (TrieIndex)))
++        return NULL;
++
++    map = alpha_map_new ();
++    if (!map)
++        return NULL;
++    r->pos += 8;
++    for (i = 0; i < count; ++i) {
++        trie_memory_u32 (r, &begin);
++        trie_memory_u32 (r, &end);
++        if (alpha_map_add_range_only (map, begin, end) != 0)
++            goto fail;
++    }
++    if (alpha_map_recalc_work_area (map) != 0)
++        goto fail;
++    *max_symbol = symbols;
++    return map;
++fail:
++    alpha_map_free (map);
+     return NULL;
+ }
+ 
+--- a/libdatrie-0.2.14/datrie/darray.c
++++ b/libdatrie-0.2.14/datrie/darray.c
+@@ -67,7 +67,7 @@
+                                         TrieIndex       base,
+                                         const Symbols  *symbols);
+ 
+-static void         da_relocate_base   (DArray         *d,
++static Bool         da_relocate_base   (DArray         *d,
+                                         TrieIndex       s,
+                                         TrieIndex       new_base);
+ 
+@@ -262,6 +262,124 @@
+     return NULL;
+ }
+ 
++/* NativeText port. Validate all cells, including unreachable/free cells, so
++ * malformed parent chains cannot trap iteration or index outside the pool.
++ */
++DArray *
++da_read_memory (TrieMemoryReader *r, unsigned max_symbol)
++{
++    uint32_t sig, count;
++    TrieIndex i, free_count = 0, linked = 0, p;
++    unsigned char *colors = NULL;
++    DArray *d;
++    if (!trie_memory_u32 (r, &sig) || sig != DA_SIGNATURE ||
++        !trie_memory_u32 (r, &count) || count < DA_POOL_BEGIN ||
++        count > INT32_MAX - TRIE_CHAR_MAX ||
++        count > SIZE_MAX / sizeof (DACell) ||
++        count - 1 > (r->size - r->pos) / 8)
++        return NULL;
++    d = (DArray *) malloc (sizeof (DArray));
++    if (!d)
++        return NULL;
++    d->num_cells = (TrieIndex)count;
++    d->cells = (DACell *) malloc ((size_t)count * sizeof (DACell));
++    if (!d->cells) {
++        free (d);
++        return NULL;
++    }
++    d->cells[0].base = (TrieIndex)DA_SIGNATURE;
++    d->cells[0].check = d->num_cells;
++    for (i = 1; i < d->num_cells; ++i) {
++        trie_memory_i32 (r, &d->cells[i].base);
++        trie_memory_i32 (r, &d->cells[i].check);
++    }
++    if (d->cells[2].check != 0 || d->cells[2].base < DA_POOL_BEGIN ||
++        d->cells[2].base > INT32_MAX - TRIE_CHAR_MAX)
++        goto fail;
++    for (i = 1; i < d->num_cells; ++i) {
++        TrieIndex base = d->cells[i].base, check = d->cells[i].check;
++        if (i == 2)
++            continue;
++        if (check < 0) {
++            if (check == INT32_MIN || base >= 0 || base == INT32_MIN ||
++                -check >= d->num_cells || -base >= d->num_cells ||
++                -check == 2 || -base == 2)
++                goto fail;
++            ++free_count;
++        } else {
++            TrieIndex parent_base;
++            if (i == 1 || check < 2 || check >= d->num_cells ||
++                check == i || base == 0 || base == INT32_MIN ||
++                (base > 0 && (base < DA_POOL_BEGIN ||
++                             base > INT32_MAX - TRIE_CHAR_MAX)))
++                goto fail;
++            parent_base = d->cells[check].base;
++            if (parent_base < DA_POOL_BEGIN || parent_base > i ||
++                (unsigned)(i - parent_base) > max_symbol ||
++                (i == parent_base && base >= 0))
++                goto fail;
++        }
++    }
++    /* Free cells form one ordered circular list through cell 1. */
++    if (d->cells[1].check >= 0)
++        goto fail;
++    p = 1;
++    do {
++        TrieIndex next = -d->cells[p].check;
++        if (++linked > free_count || d->cells[next].base != -p ||
++            (next != 1 && next <= p))
++            goto fail;
++        p = next;
++    } while (p != 1);
++    if (linked != free_count)
++        goto fail;
++
++    colors = (unsigned char *) calloc (count, 1);
++    if (!colors)
++        goto fail;
++    colors[2] = 2;
++    for (i = DA_POOL_BEGIN; i < d->num_cells; ++i) {
++        if (d->cells[i].check < 0 || colors[i] == 2)
++            continue;
++        p = i;
++        while (!colors[p]) {
++            colors[p] = 1;
++            p = d->cells[p].check;
++            if (p < 2 || d->cells[p].check < 0)
++                goto fail;
++        }
++        if (colors[p] != 2)
++            goto fail; /* parent cycle */
++        p = i;
++        while (colors[p] == 1) {
++            colors[p] = 2;
++            p = d->cells[p].check;
++        }
++    }
++    free (colors);
++    return d;
++fail:
++    free (colors);
++    da_free (d);
++    return NULL;
++}
++
++Bool
++da_validate_tails (const DArray *d, const Tail *t)
++{
++    TrieIndex i;
++    for (i = DA_POOL_BEGIN; i < d->num_cells; ++i) {
++        if (d->cells[i].check >= 2 && d->cells[i].base < 0) {
++            TrieIndex tail = -d->cells[i].base;
++            if (!tail_is_allocated (t, tail) ||
++                (i == d->cells[d->cells[i].check].base &&
++                 tail_get_suffix (t, tail)[0] != TRIE_CHAR_TERM))
++                return FALSE;
++        }
++    }
++    return TRUE;
++}
++
+ /**
+  * @brief Free double-array data
+  *
+@@ -474,6 +592,8 @@
+ 
+             /* relocate BASE[s] */
+             symbols = da_output_symbols (d, s);
++            if (!symbols)
++                return TRIE_INDEX_ERROR;
+             symbols_add (symbols, c);
+             new_base = da_find_free_base (d, symbols);
+             symbols_free (symbols);
+@@ -481,7 +601,8 @@
+             if (UNLIKELY (TRIE_INDEX_ERROR == new_base))
+                 return TRIE_INDEX_ERROR;
+ 
+-            da_relocate_base (d, s, new_base);
++            if (!da_relocate_base (d, s, new_base))
++                return TRIE_INDEX_ERROR;
+             next = new_base + c;
+         }
+     } else {
+@@ -489,6 +610,8 @@
+         TrieIndex   new_base;
+ 
+         symbols = symbols_new ();
++        if (!symbols)
++            return TRIE_INDEX_ERROR;
+         symbols_add (symbols, c);
+         new_base = da_find_free_base (d, symbols);
+         symbols_free (symbols);
+@@ -541,6 +664,8 @@
+     TrieIndex   c, max_c;
+ 
+     syms = symbols_new ();
++    if (!syms)
++        return NULL;
+ 
+     base = da_get_base (d, s);
+     max_c = MIN_VAL (TRIE_CHAR_MAX, d->num_cells - base);
+@@ -609,7 +734,7 @@
+     return TRUE;
+ }
+ 
+-static void
++static Bool
+ da_relocate_base   (DArray         *d,
+                     TrieIndex       s,
+                     TrieIndex       new_base)
+@@ -620,6 +745,8 @@
+ 
+     old_base = da_get_base (d, s);
+     symbols = da_output_symbols (d, s);
++    if (!symbols)
++        return FALSE;
+ 
+     for (i = 0; i < symbols_num (symbols); i++) {
+         TrieIndex   old_next, new_next, old_next_base;
+@@ -656,6 +783,7 @@
+ 
+     /* finally, make BASE[s] point to new_base */
+     da_set_base (d, s, new_base);
++    return TRUE;
+ }
+ 
+ static Bool
+--- a/libdatrie-0.2.14/datrie/darray.h
++++ b/libdatrie-0.2.14/datrie/darray.h
+@@ -29,6 +29,8 @@
+ 
+ #include "triedefs.h"
+ #include "trie-string.h"
++#include "memory-reader.h"
++#include "tail.h"
+ 
+ /**
+  * @file darray.h
+@@ -53,6 +55,9 @@
+ DArray * da_new (void);
+ 
+ DArray * da_fread (FILE *file);
++
++DArray * da_read_memory (TrieMemoryReader *r, unsigned max_symbol);
++Bool     da_validate_tails (const DArray *d, const Tail *t);
+ 
+ void     da_free (DArray *d);
+ 
+--- /dev/null
++++ b/libdatrie-0.2.14/datrie/memory-reader.h
+@@ -0,0 +1,58 @@
++/* NativeText port, 2026. SPDX-License-Identifier: LGPL-2.1-or-later
++ * Bounded reader for the unchanged libdatrie big-endian wire format.
++ */
++#ifndef DATRIE_MEMORY_READER_H
++#define DATRIE_MEMORY_READER_H
++
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++
++typedef struct {
++    const uint8_t *data;
++    size_t size;
++    size_t pos;
++} TrieMemoryReader;
++
++static int
++trie_memory_bytes (TrieMemoryReader *r, size_t n, const uint8_t **bytes)
++{
++    if (n > r->size - r->pos)
++        return 0;
++    *bytes = r->data + r->pos;
++    r->pos += n;
++    return 1;
++}
++
++static int
++trie_memory_u32 (TrieMemoryReader *r, uint32_t *value)
++{
++    const uint8_t *p;
++    if (!trie_memory_bytes (r, 4, &p))
++        return 0;
++    *value = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16)
++           | ((uint32_t)p[2] << 8) | p[3];
++    return 1;
++}
++
++static int
++trie_memory_i32 (TrieMemoryReader *r, int32_t *value)
++{
++    uint32_t u;
++    if (!trie_memory_u32 (r, &u))
++        return 0;
++    *value = u <= INT32_MAX ? (int32_t)u : -1 - (int32_t)(UINT32_MAX - u);
++    return 1;
++}
++
++static int
++trie_memory_length (TrieMemoryReader *r, size_t *length)
++{
++    const uint8_t *p;
++    if (!trie_memory_bytes (r, 2, &p) || (p[0] & 0x80))
++        return 0; /* upstream suffix offsets and lengths are signed shorts */
++    *length = ((size_t)p[0] << 8) | p[1];
++    return 1;
++}
++
++#endif
+--- a/libdatrie-0.2.14/datrie/tail.c
++++ b/libdatrie-0.2.14/datrie/tail.c
+@@ -181,6 +181,79 @@
+ exit_file_read:
+     fseek (file, save_pos, SEEK_SET);
+     return NULL;
++}
++
++/* NativeText port: preflight every variable-size record before allocation. */
++Tail *
++tail_read_memory (TrieMemoryReader *r, unsigned max_symbol)
++{
++    TrieMemoryReader scan = *r;
++    uint32_t sig, count, first, i;
++    int32_t next, data;
++    size_t length, j;
++    const uint8_t *bytes;
++    Tail *t;
++    if (!trie_memory_u32 (&scan, &sig) || sig != TAIL_SIGNATURE ||
++        !trie_memory_u32 (&scan, &first) ||
++        !trie_memory_u32 (&scan, &count) || count >= INT32_MAX ||
++        count > SIZE_MAX / sizeof (TailBlock) ||
++        count > (scan.size - scan.pos) / 10 ||
++        (first != 0 && first >= count))
++        return NULL;
++    for (i = 0; i < count; ++i) {
++        if (!trie_memory_i32 (&scan, &next) ||
++            !trie_memory_i32 (&scan, &data) ||
++            !trie_memory_length (&scan, &length) ||
++            !trie_memory_bytes (&scan, length, &bytes) ||
++            next < -1 || (next > 0 && ((uint32_t)next >= count ||
++                                      (uint32_t)next <= i)) ||
++            (next != -1 && length != 0))
++            return NULL;
++        for (j = 0; j < length; ++j)
++            if (bytes[j] == TRIE_CHAR_TERM || bytes[j] > max_symbol)
++                return NULL;
++    }
++    t = tail_new ();
++    if (!t)
++        return NULL;
++    if (count) {
++        t->tails = (TailBlock *) calloc (count, sizeof (TailBlock));
++        if (!t->tails)
++            goto fail;
++    }
++    t->num_tails = (TrieIndex)count;
++    t->first_free = (TrieIndex)first;
++    r->pos += 12;
++    for (i = 0; i < count; ++i) {
++        trie_memory_i32 (r, &t->tails[i].next_free);
++        trie_memory_i32 (r, &t->tails[i].data);
++        trie_memory_length (r, &length);
++        trie_memory_bytes (r, length, &bytes);
++        if (t->tails[i].next_free == -1) {
++            t->tails[i].suffix = (TrieChar *) malloc (length + 1);
++            if (!t->tails[i].suffix)
++                goto fail;
++            memcpy (t->tails[i].suffix, bytes, length);
++            t->tails[i].suffix[length] = TRIE_CHAR_TERM;
++        }
++    }
++    if (first && t->tails[first].next_free == -1)
++        goto fail;
++    for (i = 0; i < count; ++i)
++        if (t->tails[i].next_free > 0 &&
++            t->tails[t->tails[i].next_free].next_free == -1)
++            goto fail;
++    return t;
++fail:
++    tail_free (t);
++    return NULL;
++}
++
++Bool
++tail_is_allocated (const Tail *t, TrieIndex index)
++{
++    return index >= TAIL_START_BLOCKNO && index <= t->num_tails &&
++           t->tails[index - TAIL_START_BLOCKNO].next_free == -1;
+ }
+ 
+ /**
+@@ -377,7 +450,10 @@
+     if (UNLIKELY (TRIE_INDEX_ERROR == new_block))
+         return TRIE_INDEX_ERROR;
+ 
+-    tail_set_suffix (t, new_block, suffix);
++    if (!tail_set_suffix (t, new_block, suffix)) {
++        tail_free_block (t, new_block);
++        return TRIE_INDEX_ERROR;
++    }
+ 
+     return new_block;
+ }
+--- a/libdatrie-0.2.14/datrie/tail.h
++++ b/libdatrie-0.2.14/datrie/tail.h
+@@ -28,6 +28,7 @@
+ #define __TAIL_H
+ 
+ #include "triedefs.h"
++#include "memory-reader.h"
+ 
+ /**
+  * @file tail.h
+@@ -42,6 +43,9 @@
+ Tail *   tail_new (void);
+ 
+ Tail *   tail_fread (FILE *file);
++
++Tail *   tail_read_memory (TrieMemoryReader *r, unsigned max_symbol);
++Bool     tail_is_allocated (const Tail *t, TrieIndex index);
+ 
+ void     tail_free (Tail *t);
+ 
+--- a/libdatrie-0.2.14/datrie/trie.c
++++ b/libdatrie-0.2.14/datrie/trie.c
+@@ -211,6 +211,46 @@
+ exit_alpha_map_created:
+     alpha_map_free (trie->alpha_map);
+ exit_trie_created:
++    free (trie);
++    return NULL;
++}
++
++/* NativeText port: no file or environment access, and no borrowed backing
++ * storage. Private readers validate sizes before allocating each component.
++ */
++Trie *
++trie_new_from_memory (const uint8_t *data, size_t size)
++{
++    TrieMemoryReader r;
++    unsigned max_symbol;
++    Trie *trie;
++    if (!data || size < 44)
++        return NULL;
++    r.data = data;
++    r.size = size;
++    r.pos = 0;
++    trie = (Trie *) calloc (1, sizeof (Trie));
++    if (!trie)
++        return NULL;
++    trie->alpha_map = alpha_map_read_memory (&r, &max_symbol);
++    if (!trie->alpha_map)
++        goto fail;
++    trie->da = da_read_memory (&r, max_symbol);
++    if (!trie->da)
++        goto fail;
++    trie->tail = tail_read_memory (&r, max_symbol);
++    if (!trie->tail || r.pos != r.size ||
++        !da_validate_tails (trie->da, trie->tail))
++        goto fail;
++    trie->is_dirty = FALSE;
++    return trie;
++fail:
++    if (trie->tail)
++        tail_free (trie->tail);
++    if (trie->da)
++        da_free (trie->da);
++    if (trie->alpha_map)
++        alpha_map_free (trie->alpha_map);
+     free (trie);
+     return NULL;
+ }
+@@ -534,6 +574,10 @@
+         ++suffix;
+ 
+     new_tail = tail_add_suffix (trie->tail, suffix);
++    if (TRIE_INDEX_ERROR == new_tail) {
++        da_prune_upto (trie->da, sep_node, new_da);
++        return FALSE;
++    }
+     tail_set_data (trie->tail, new_tail, data);
+     trie_da_set_tail_index (trie->da, new_da, new_tail);
+ 
+@@ -569,7 +613,10 @@
+ 
+     if (TRIE_CHAR_TERM != *p)
+         ++p;
+-    tail_set_suffix (trie->tail, old_tail, p);
++    if (!tail_set_suffix (trie->tail, old_tail, p)) {
++        da_prune_upto (trie->da, s, old_da);
++        goto fail;
++    }
+     trie_da_set_tail_index (trie->da, old_da, old_tail);
+ 
+     /* insert the new branch at the new separate point */
+@@ -871,6 +918,9 @@
+     if (!s->is_suffix) {
+         Symbols *syms = da_output_symbols (s->trie->da, s->index);
+         int i;
++
++        if (!syms)
++            return 0;
+ 
+         syms_num = symbols_num (syms);
+         for (i = 0; i < syms_num && i < chars_nelm; i++) {
+@@ -1024,12 +1074,19 @@
+     /* first iteration */
+     if (!s) {
+         s = iter->state = trie_state_clone (iter->root);
++        if (!s)
++            return FALSE;
+ 
+         /* for tail state, we are already at the only entry */
+         if (s->is_suffix)
+             return TRUE;
+ 
+         iter->key = trie_string_new (20);
++        if (!iter->key) {
++            trie_state_free (iter->state);
++            iter->state = NULL;
++            return FALSE;
++        }
+         sep = da_first_separate (s->trie->da, s->index, iter->key);
+         if (TRIE_INDEX_ERROR == sep)
+             return FALSE;
+--- a/libdatrie-0.2.14/datrie/trie.h
++++ b/libdatrie-0.2.14/datrie/trie.h
+@@ -29,6 +29,8 @@
+ 
+ #include <datrie/triedefs.h>
+ #include <datrie/alpha-map.h>
++#include <stddef.h>
++#include <stdint.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -89,6 +91,11 @@
+  */
+ typedef struct _Trie   Trie;
+ 
++/* NativeText port: load exactly one standard serialized trie without file I/O.
++ * Returns NULL on malformed data or OOM. Copies data; release with trie_free().
++ */
++Trie * trie_new_from_memory (const uint8_t *data, size_t size);
++
+ /**
+  * @brief Trie enumeration function
+  *

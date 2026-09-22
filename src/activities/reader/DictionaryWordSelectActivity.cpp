@@ -1,6 +1,8 @@
 #include "DictionaryWordSelectActivity.h"
 
+#ifndef CROSSPOINT_NATIVE_TEXT
 #include <FontCacheManager.h>
+#endif
 #include <GfxRenderer.h>
 #include <Memory.h>
 #include <freertos/FreeRTOS.h>
@@ -80,33 +82,38 @@ void DictionaryWordSelectActivity::extractWords() {
     if (!block || !block->valid()) continue;
 
     bool rowHasWords = false;
-    const int ascender = renderer.getFontAscenderSize(fontId);
-    const int rubyShift = block->getRubyShift(ascender);
+    const bool native = block->nativeLine() != nullptr;
+    const int rubyShift = native ? 0 : block->getRubyShift(renderer.getFontAscenderSize(fontId));
     for (uint16_t i = 0; i < block->wordCount(); i++) {
       const char* text = block->wordText(i);
-      if (!isSelectableToken(text)) continue;
+      if (!native && !isSelectableToken(text)) continue;
 
       WordBox box;
-      box.x = static_cast<int16_t>(line->xPos + block->wordXpos(i) + marginLeft);
-      box.y = static_cast<int16_t>(line->yPos + marginTop + rubyShift);
+      box.x = line->xPos + block->wordXpos(i) + marginLeft;
+      box.y = line->yPos + marginTop + (native ? block->wordTop(i) : rubyShift);
       box.style = block->wordStyle(i);
-      box.width = 0;  // measured below, once the advance table is ready
+      box.width = native ? block->wordWidth(i) : 0;
+      box.height = native ? block->wordHeight(i) : lineHeight;
+      box.block = native ? block : nullptr;
+      box.lineX = line->xPos + marginLeft;
+      box.lineY = line->yPos + marginTop;
       box.row = rowCount;
       box.text = text;
       words.push_back(box);
       rowHasWords = true;
 
-      pageText.append(text);
-      pageText.push_back(' ');
-      styleMask |= static_cast<uint8_t>(1u << (static_cast<uint8_t>(box.style) & 0x03));
+      if (!native) {
+        pageText.append(text);
+        pageText.push_back(' ');
+        styleMask |= static_cast<uint8_t>(1u << (static_cast<uint8_t>(box.style) & 0x03));
+      }
     }
     if (rowHasWords) rowCount++;
   }
 
-  if (styleMask == 0) styleMask = 0x01;  // REGULAR
-  renderer.ensureSdCardFontReady(fontId, pageText.c_str(), styleMask);
+  if (!pageText.empty()) renderer.ensureSdCardFontReady(fontId, pageText.c_str(), styleMask);
   for (auto& word : words) {
-    word.width = static_cast<int16_t>(renderer.getTextAdvanceX(fontId, word.text, word.style));
+    if (!word.block) word.width = renderer.getTextAdvanceX(fontId, word.text, word.style);
   }
 }
 
@@ -117,7 +124,7 @@ int DictionaryWordSelectActivity::wordAt(const int x, const int y) const {
   constexpr int SLOP = 4;  // matches the highlight box (+2) plus finger error
   for (int i = 0; i < static_cast<int>(words.size()); i++) {
     const WordBox& word = words[i];
-    if (x >= word.x - SLOP && x < word.x + word.width + SLOP && y >= word.y - SLOP && y < word.y + lineHeight + SLOP) {
+    if (x >= word.x - SLOP && x < word.x + word.width + SLOP && y >= word.y - SLOP && y < word.y + word.height + SLOP) {
       return i;
     }
   }
@@ -302,7 +309,7 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
   int hx = word.x - 2;
   int hy = word.y - 2;
   int hw = word.width + 4;
-  int hh = lineHeight + 4;
+  int hh = word.height + 4;
   // Clamp to the panel so save, draw and restore all use the same box.
   if (hx < 0) {
     hw += hx;
@@ -324,6 +331,22 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
   snapshotIdx = saved ? selected : -1;
 
   renderer.fillRect(hx, hy, hw, hh, true);
+#ifdef CROSSPOINT_NATIVE_TEXT
+  if (word.block) {
+    int clipX, clipY, clipW, clipH;
+    renderer.getClipRect(clipX, clipY, clipW, clipH);
+    const int left = std::max(clipX, hx), top = std::max(clipY, hy);
+    const int right = std::min(clipX + clipW, hx + hw), bottom = std::min(clipY + clipH, hy + hh);
+    renderer.setClipRect(left, top, std::max(0, right - left), std::max(0, bottom - top));
+    const bool drawn = renderer.drawNativeLine(fontId, *word.block->nativeLine(), word.lineX, word.lineY, false);
+    renderer.setClipRect(clipX, clipY, clipW, clipH);
+    if (!drawn) {
+      snapshotIdx = -1;
+      return false;
+    }
+    return saved;
+  }
+#endif
   renderer.drawText(fontId, word.x, word.y, word.text, false, word.style);
   return saved;
 }
@@ -354,10 +377,12 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   // and push — skipping the two-pass page render entirely.
   if (popup == Popup::None && snapshotIdx >= 0 && !words.empty() && selected != snapshotIdx) {
     renderer.writeFramebufferRegion(snapshotX, snapshotY, snapshotW, snapshotH, snapshot.get());
-    // The full path's PrewarmScope cleared the glyph cache on exit; batch-load
-    // just the highlighted word's glyphs before drawing them white-on-black.
-    renderer.getFontCacheManager()->prewarmCache(
-        fontId, words[selected].text, static_cast<uint8_t>(1u << (static_cast<uint8_t>(words[selected].style) & 0x03)));
+#ifndef CROSSPOINT_NATIVE_TEXT
+    if (auto* fcm = renderer.getFontCacheManager()) {
+      fcm->prewarmCache(fontId, words[selected].text,
+                        static_cast<uint8_t>(1u << (static_cast<uint8_t>(words[selected].style) & 0x03)));
+    }
+#endif
     if (drawHighlightWithSnapshot()) {
       drawHints();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
@@ -368,13 +393,24 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
 
-  // Same prewarm-scan-then-render pass the reader uses, so SD-card fonts hit
-  // the in-RAM glyph cache during the real draw.
-  auto* fcm = renderer.getFontCacheManager();
-  auto scope = fcm->createPrewarmScope();
+#ifdef CROSSPOINT_NATIVE_TEXT
+  if (!page->warmNativeText(renderer, fontId)) {
+    snapshotIdx = -1;
+    GUI.drawPopup(renderer, renderer.lastTextStatus() == TextStatus::OutOfMemory ? tr(STR_MEMORY_ERROR)
+                                                                                 : tr(STR_TEXT_RENDER_ERROR));
+    return;
+  }
   page->render(renderer, fontId, marginLeft, marginTop);
-  scope.endScanAndPrewarm();
-  page->render(renderer, fontId, marginLeft, marginTop);
+#else
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    auto scope = fcm->createPrewarmScope();
+    page->render(renderer, fontId, marginLeft, marginTop);
+    scope.endScanAndPrewarm();
+    page->render(renderer, fontId, marginLeft, marginTop);
+  } else {
+    page->render(renderer, fontId, marginLeft, marginTop);
+  }
+#endif
 
   if (!words.empty()) {
     drawHighlightWithSnapshot();

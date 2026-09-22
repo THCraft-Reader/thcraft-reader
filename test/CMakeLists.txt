@@ -24,16 +24,19 @@ FetchContent_MakeAvailable(googletest)
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+add_subdirectory(${REPO_ROOT}/lib/NativeText native_text_libraries)
+
 add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
   ${REPO_ROOT}/lib
 )
-target_compile_options(crosspoint_test_common INTERFACE
-  -Wall
-  -Wextra
-  -pedantic
-)
+if(MSVC)
+  target_compile_options(crosspoint_test_common INTERFACE /W4 /utf-8)
+  target_compile_definitions(crosspoint_test_common INTERFACE XML_STATIC strcasecmp=_stricmp strncasecmp=_strnicmp)
+else()
+  target_compile_options(crosspoint_test_common INTERFACE -Wall -Wextra -pedantic)
+endif()
 
 enable_testing()
 include(GoogleTest)
@@ -71,3 +74,5 @@ add_subdirectory(fs_helpers)
 add_subdirectory(absolute_grayscale)
 
 add_subdirectory(sd_card_font)
+
+add_subdirectory(native_text)

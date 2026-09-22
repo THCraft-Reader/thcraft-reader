@@ -51,9 +51,11 @@ class HttpDownloader {
    * downgradeRedirectsToHttp rewrites followed redirect targets from https to
    * http so the bulk transfer skips a second TLS session (and its ~17KB record
    * buffer — the OOM site on low-heap C3 boards).
+   * requireHttps rejects a non-HTTPS initial URL or resolved redirect target.
+   * It is incompatible with downgradeRedirectsToHttp and defaults off for legacy callers.
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
-                                      bool downgradeRedirectsToHttp = false);
+                                      bool downgradeRedirectsToHttp = false, bool requireHttps = false);
 };

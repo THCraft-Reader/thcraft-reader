@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "FontInstaller.h"
+#include "FontManifest.h"
 #include "SdCardFont.h"
 #include "activities/UiListActivity.h"
 
@@ -53,49 +54,19 @@ class FontDownloadActivity final : public UiListActivity {
     ERROR,
   };
 
-  // Byte offset into stringArena_; 0 is the empty string.
-  using StrRef = uint32_t;
-
-  struct ManifestFile {
-    StrRef name = 0;
-    uint32_t size = 0;
-    uint32_t crc32 = 0;
-  };
-
-  struct ManifestFamily {
-    StrRef name = 0;
-    StrRef description = 0;
-    // Range into files_, which holds every family's files back to back.
-    uint32_t fileStart = 0;
-    uint32_t fileCount = 0;
-    uint32_t totalSize = 0;
-    uint32_t scriptMask = 0;
-    bool installed = false;
-    bool hasUpdate = false;
-  };
-
-  static constexpr size_t MAX_SCRIPT_GROUPS = 32;
+  using StrRef = FontManifest::StrRef;
+  using ManifestFile = FontManifest::File;
+  using ManifestFamily = FontManifest::Family;
 
   State state_ = WIFI_SELECTION;
   FontInstaller fontInstaller_;
 
   // Manifest data
-  std::string baseUrl_;
+  FontManifest manifest_;
   // Reused for every file of every family: downloadToFile takes a std::string,
   // so a char buffer would just build a temporary per call.
   std::string downloadUrl_;
-  // Manifest strings, null-terminated and packed back to back.
-  std::unique_ptr<char[]> stringArena_;
-  uint32_t arenaUsed_ = 0;
-  uint32_t arenaCapacity_ = 0;
-  std::vector<ManifestFamily> families_;
-  // Every family's files back to back; sized once from the manifest, so it is
-  // allocated nothrow like the arena rather than through vector::reserve.
-  std::unique_ptr<ManifestFile[]> files_;
-  uint32_t fileEntryCount_ = 0;
-  // Manifest-defined labels are dynamic; cap them at the 32-bit membership
-  // mask and retain only labels after parsing so group tags consume no steady-state heap.
-  std::vector<StrRef> scriptGroupLabels_;
+  // Parsed arrays and strings are bounded, arena-backed, and owned by manifest_.
   // One 4-byte index per manifest family, allocated once and reused for every group.
   std::vector<int> filteredIndices_;
   freeink::ui::ListNav groupNav_;
@@ -134,10 +105,7 @@ class FontDownloadActivity final : public UiListActivity {
 
   void onWifiSelectionComplete(bool success);
   bool fetchAndParseManifest();
-  // cppcheck-suppress arithOperationsOnVoidPointer // unique_ptr<char[]>::get() is char*, not void*
-  const char* str(StrRef ref) const { return stringArena_ ? stringArena_.get() + ref : ""; }
-  // Returns false if the string does not fit the arena reserved for the manifest.
-  bool internString(const char* text, StrRef& outRef);
+  const char* str(StrRef ref) const { return manifest_.str(ref); }
   void clearManifest();
   void downloadFamily(ManifestFamily& family);
   void downloadAll();
@@ -153,8 +121,8 @@ class FontDownloadActivity final : public UiListActivity {
   void onDeleteConfirmationResult(const ActivityResult& result);
   int familyIndexFromList(int listIndex) const;
   int listItemCount() const;
-  bool hasGroupScreen() const { return !scriptGroupLabels_.empty(); }
-  int groupListItemCount() const { return 1 + static_cast<int>(scriptGroupLabels_.size()); }
+  bool hasGroupScreen() const { return !manifest_.groups().empty(); }
+  int groupListItemCount() const { return 1 + static_cast<int>(manifest_.groups().size()); }
   int groupMemberCount(int scriptGroupIndex) const;
   void buildFilteredIndices(int groupListIndex);
   void enterGroup(int groupListIndex);

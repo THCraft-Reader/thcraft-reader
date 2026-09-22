@@ -1,5 +1,510 @@
 #include "ParsedText.h"
 
+#ifdef CROSSPOINT_NATIVE_TEXT
+#include <GfxRenderer.h>
+#include <Logging.h>
+#include <Memory.h>
+#include <NativeTextEngine.h>
+#include <NativeUtf8.h>
+extern "C" {
+#include <minibidi.h>
+}
+#undef when
+#undef otherwise
+
+#include <algorithm>
+#include <cstring>
+#include <limits>
+
+namespace {
+constexpr size_t NATIVE_WINDOW_SCALARS = 4096;
+constexpr size_t NATIVE_WINDOW_BYTES = 16384;
+// Expat's parser adapter flushes after each complete MAX_WORD_SIZE chunk.
+constexpr size_t NATIVE_CHUNK_CARRY = 200;
+
+template <class T>
+bool reserveNative(NativeBuffer<T>& buffer, const size_t needed, const size_t maximum) {
+  if (needed > maximum) return false;
+  if (needed <= buffer.capacity()) return true;
+  return buffer.reserve(std::min(maximum, std::max(needed, std::max<size_t>(16, buffer.capacity() * 2))));
+}
+
+// P2/P3 direction is also needed before fitting to decide whether CSS alignment
+// is the natural edge for first-line indentation. The fitter remains the sole
+// authority for the resolved paragraph and per-line bidi levels.
+bool nativeNaturalRtl(const std::string_view text) {
+  size_t offset = 0, isolates = 0;
+  uint32_t cp;
+  while (native_text::nextUtf8(text, offset, cp)) {
+    const auto cls = bidi_class(cp);
+    if (cls == LRI || cls == RLI || cls == FSI) {
+      ++isolates;
+      continue;
+    }
+    if (cls == PDI) {
+      if (isolates) --isolates;
+      continue;
+    }
+    if (isolates) continue;
+    if (cls == L) return false;
+    if (cls == R || cls == AL) return true;
+  }
+  return false;
+}
+
+int floorNativePixel(const int32_t value) {
+  return value >= 0 ? value / 64 : -static_cast<int>((-static_cast<int64_t>(value) + 63) / 64);
+}
+int ceilNativePixel(const int32_t value) {
+  return value >= 0 ? static_cast<int>((static_cast<int64_t>(value) + 63) / 64) : -(-value / 64);
+}
+}  // namespace
+
+void ParsedText::failNative(const TextStatus status) {
+  if (nativeStatus != TextStatus::Ok) return;
+  nativeStatus = status;
+  LOG_ERR("TEXT", "Native EPUB input/layout failed (%u)", static_cast<unsigned>(status));
+}
+
+void ParsedText::discardNativeInput() {
+  nativeText.clear();
+  nativeFragments.clear();
+  nativeAnchors.clear();
+  nativeRuby.clear();
+  nativeRubyText.clear();
+  nativeScalars = 0;
+}
+void ParsedText::addWord(const std::string_view word, const EpdFontFamily::Style fontStyle, const bool underline,
+                         const bool attachToPrevious, const uint32_t visibleTextOffset, const uint8_t linkId) {
+  appendNative(word, fontStyle, underline, attachToPrevious, visibleTextOffset, linkId, false);
+}
+
+void ParsedText::addSyntheticText(const std::string_view text, const EpdFontFamily::Style style,
+                                  const uint32_t anchorOffset, const bool attachToPrevious, const uint8_t linkId) {
+  appendNative(text, style, false, attachToPrevious, anchorOffset, linkId, true);
+}
+
+void ParsedText::appendNative(const std::string_view word, const EpdFontFamily::Style fontStyle, const bool underline,
+                              const bool attachToPrevious, const uint32_t visibleTextOffset, const uint8_t linkId,
+                              const bool synthetic) {
+  if (nativeStatus != TextStatus::Ok || word.empty()) return;
+  size_t offset = 0, scalars = 0;
+  uint32_t cp;
+  while (offset < word.size()) {
+    if (!native_text::nextUtf8(word, offset, cp) || cp == 0) {
+      failNative(TextStatus::InvalidText);
+      return;
+    }
+    ++scalars;
+  }
+  const bool space = !attachToPrevious && !nativeText.empty();
+  const size_t addedBytes = word.size() + space, addedScalars = scalars + space;
+  if (addedBytes > NATIVE_WINDOW_BYTES + NATIVE_CHUNK_CARRY - nativeText.size() ||
+      addedScalars > NATIVE_WINDOW_SCALARS + NATIVE_CHUNK_CARRY - nativeScalars ||
+      (!synthetic && scalars > UINT32_MAX - visibleTextOffset)) {
+    failNative(TextStatus::CapacityExceeded);
+    return;
+  }
+  if (linkId > nativeLinkTargets.size()) {
+    failNative(TextStatus::InvalidText);
+    return;
+  }
+  const size_t oldBytes = nativeText.size();
+  const size_t newBytes = oldBytes + addedBytes;
+  const size_t oldScalars = nativeScalars;
+  const size_t newScalars = oldScalars + addedScalars;
+  if (!reserveNative(nativeText, newBytes, NATIVE_WINDOW_BYTES + NATIVE_CHUNK_CARRY) ||
+      !reserveNative(nativeFragments, nativeFragments.size() + 1, NATIVE_WINDOW_SCALARS + NATIVE_CHUNK_CARRY) ||
+      !reserveNative(nativeAnchors, newScalars + 1, NATIVE_WINDOW_SCALARS + NATIVE_CHUNK_CARRY + 1)) {
+    failNative(TextStatus::OutOfMemory);
+    return;
+  }
+  nativeText.resize(newBytes);
+  nativeAnchors.resize(newScalars + 1);
+  if (space) {
+    nativeText[oldBytes] = ' ';
+    // Collapsed HTML whitespace occupies its original source interval, which
+    // can span more than one codepoint. The following fragment owns its end.
+    nativeAnchors[oldScalars].byteOffset = static_cast<uint32_t>(oldBytes);
+    if (synthetic) nativeAnchors[oldScalars].sourceOffset = visibleTextOffset;
+  }
+  const size_t startByte = oldBytes + space;
+  std::memcpy(nativeText.data() + startByte, word.data(), word.size());
+  offset = 0;
+  size_t index = oldScalars + space;
+  uint32_t source = visibleTextOffset;
+  while (offset < word.size()) {
+    nativeAnchors[index++] = {static_cast<uint32_t>(startByte + offset), source};
+    if (!synthetic) ++source;
+    native_text::nextUtf8(word, offset, cp);
+  }
+  nativeAnchors[index] = {static_cast<uint32_t>(newBytes), source};
+  const uint8_t style = static_cast<uint8_t>(fontStyle) | (underline ? EpdFontFamily::UNDERLINE : 0);
+  const size_t fragment = nativeFragments.size();
+  nativeFragments.resize(fragment + 1);
+  nativeFragments[fragment] = {static_cast<uint32_t>(startByte), static_cast<uint32_t>(newBytes), style, linkId};
+  nativeScalars = newScalars;
+}
+
+uint8_t ParsedText::addLinkTarget(const char* href) {
+  if (nativeStatus != TextStatus::Ok || !href || !*href) return 0;
+  const size_t bytes = strnlen(href, FOOTNOTE_HREF_LEN);
+  if (bytes >= FOOTNOTE_HREF_LEN) return 0;
+  // Reuse the identity, including across retained layout windows.
+  for (size_t i = 0; i < nativeLinkTargets.size(); ++i)
+    if (std::strcmp(nativeLinkTargets[i].href, href) == 0) return nativeLastLinkId = static_cast<uint8_t>(i + 1);
+  for (size_t i = 0; i < nativeLinkTargets.size(); ++i) {
+    if (*nativeLinkTargets[i].href) continue;
+    std::memcpy(nativeLinkTargets[i].href, href, bytes + 1);
+    return nativeLastLinkId = static_cast<uint8_t>(i + 1);
+  }
+  if (nativeLinkTargets.size() == UINT8_MAX) {
+    failNative(TextStatus::CapacityExceeded);
+    return 0;
+  }
+  const size_t index = nativeLinkTargets.size();
+  if (!reserveNative(nativeLinkTargets, index + 1, UINT8_MAX)) {
+    failNative(TextStatus::OutOfMemory);
+    return 0;
+  }
+  nativeLinkTargets.resize(index + 1);
+  std::memcpy(nativeLinkTargets[index].href, href, bytes + 1);
+  return nativeLastLinkId = static_cast<uint8_t>(index + 1);
+}
+
+bool ParsedText::linkTargetMatches(const uint8_t linkId, const char* href) const {
+  return href && linkId && linkId <= nativeLinkTargets.size() &&
+         std::strcmp(nativeLinkTargets[linkId - 1].href, href) == 0;
+}
+
+EpdFontFamily::Style ParsedText::getWordStyleAt(const size_t index) const {
+  return index < nativeFragments.size() ? static_cast<EpdFontFamily::Style>(nativeFragments[index].style)
+                                        : EpdFontFamily::REGULAR;
+}
+
+std::string_view ParsedText::getRubyTextAt(const size_t index) const {
+  if (index < nativeFragments.size()) {
+    for (const auto& ruby : nativeRuby.span()) {
+      if (ruby.startByte == nativeFragments[index].startByte)
+        return ruby.textBytes ? std::string_view(nativeRubyText.data() + ruby.textOffset, ruby.textBytes)
+                              : std::string_view();
+    }
+  }
+  return {};
+}
+
+void ParsedText::setRubyForWordAt(const size_t index, const std::string_view ruby) {
+  if (index >= nativeFragments.size()) return;
+  size_t count = 1;
+  for (const auto& group : nativeRuby.span()) {
+    if (group.startByte != nativeFragments[index].startByte) continue;
+    while (index + count < nativeFragments.size() && nativeFragments[index + count].startByte < group.endByte) ++count;
+    break;
+  }
+  setRubyGroupAt(index, count, ruby);
+}
+
+void ParsedText::setRubyGroupAt(const size_t startIndex, const size_t count, std::string_view text) {
+  if (nativeStatus != TextStatus::Ok || startIndex >= nativeFragments.size() || !count) return;
+  size_t offset = 0;
+  uint32_t cp;
+  while (offset < text.size()) {
+    if (!native_text::nextUtf8(text, offset, cp) || cp == 0) {
+      failNative(TextStatus::InvalidText);
+      return;
+    }
+  }
+  const size_t stopIndex = startIndex + std::min(count, nativeFragments.size() - startIndex);
+  const uint32_t start = nativeFragments[startIndex].startByte, end = nativeFragments[stopIndex - 1].endByte;
+  size_t at = 0;
+  while (at < nativeRuby.size() && nativeRuby[at].startByte < start) ++at;
+  const bool replace = at < nativeRuby.size() && nativeRuby[at].startByte == start;
+  if ((at && nativeRuby[at - 1].endByte > start) ||
+      (at + replace < nativeRuby.size() && nativeRuby[at + replace].startByte < end)) {
+    failNative(TextStatus::InvalidText);
+    return;
+  }
+  const size_t oldLength = replace ? nativeRuby[at].textBytes : 0;
+  const size_t oldOffset = replace ? nativeRuby[at].textOffset
+                                   : (at < nativeRuby.size() ? nativeRuby[at].textOffset : nativeRubyText.size());
+  if (text.size() > NATIVE_WINDOW_BYTES - (nativeRubyText.size() - oldLength)) {
+    failNative(TextStatus::CapacityExceeded);
+    return;
+  }
+  // The public getter borrows this arena. Preserve such a view before growth
+  // or moving a later annotation into the replacement's tail.
+  NativeBuffer<char> borrowed;
+  const auto sourceAddress = reinterpret_cast<uintptr_t>(text.data());
+  const auto arenaAddress = reinterpret_cast<uintptr_t>(nativeRubyText.data());
+  if (!text.empty() && sourceAddress >= arenaAddress && sourceAddress - arenaAddress < nativeRubyText.size()) {
+    if (!borrowed.assign({text.data(), text.size()})) {
+      failNative(TextStatus::OutOfMemory);
+      return;
+    }
+    text = {borrowed.data(), borrowed.size()};
+  }
+  const size_t newSize = nativeRubyText.size() - oldLength + text.size();
+  if (!reserveNative(nativeRubyText, newSize, NATIVE_WINDOW_BYTES) ||
+      !reserveNative(nativeRuby, nativeRuby.size() + !replace, NATIVE_WINDOW_SCALARS + NATIVE_CHUNK_CARRY)) {
+    failNative(TextStatus::OutOfMemory);
+    return;
+  }
+  if (replace) {
+    for (size_t i = startIndex + 1; i < nativeFragments.size() && nativeFragments[i].startByte < nativeRuby[at].endByte;
+         ++i)
+      nativeFragments[i].style &= ~EpdFontFamily::RUBY_CONTINUE;
+  }
+  const size_t tail = nativeRubyText.size() - oldOffset - oldLength;
+  if (tail)
+    std::memmove(nativeRubyText.data() + oldOffset + text.size(), nativeRubyText.data() + oldOffset + oldLength, tail);
+  nativeRubyText.resize(newSize);
+  if (!text.empty()) std::memcpy(nativeRubyText.data() + oldOffset, text.data(), text.size());
+  if (!replace) {
+    const size_t oldCount = nativeRuby.size();
+    nativeRuby.resize(oldCount + 1);
+    if (oldCount > at)
+      std::memmove(nativeRuby.data() + at + 1, nativeRuby.data() + at, (oldCount - at) * sizeof(NativeRubyRecord));
+  }
+  for (size_t i = at + 1; i < nativeRuby.size(); ++i)
+    nativeRuby[i].textOffset = static_cast<uint32_t>(nativeRuby[i].textOffset - oldLength + text.size());
+  nativeRuby[at] = {start, end, static_cast<uint32_t>(oldOffset), static_cast<uint32_t>(text.size()),
+                    static_cast<uint8_t>(nativeFragments[startIndex].style & ~EpdFontFamily::RUBY_CONTINUE)};
+  for (size_t i = startIndex + 1; i < stopIndex; ++i) nativeFragments[i].style |= EpdFontFamily::RUBY_CONTINUE;
+}
+
+void ParsedText::ensureRubyCapacity() {
+  // All ruby storage grows through the checked native allocator on attachment.
+}
+
+void ParsedText::consumeNativePrefix(const size_t bytes) {
+  size_t scalars = 0;
+  while (scalars < nativeScalars && nativeAnchors[scalars].byteOffset < bytes) ++scalars;
+  const size_t remaining = nativeText.size() - bytes;
+  if (remaining) std::memmove(nativeText.data(), nativeText.data() + bytes, remaining);
+  nativeText.resize(remaining);
+  const size_t anchorCount = nativeAnchors.size() - scalars;
+  std::memmove(nativeAnchors.data(), nativeAnchors.data() + scalars, anchorCount * sizeof(NativeSourceAnchor));
+  nativeAnchors.resize(anchorCount);
+  for (auto& anchor : nativeAnchors.span()) anchor.byteOffset -= static_cast<uint32_t>(bytes);
+  nativeScalars -= scalars;
+  size_t write = 0;
+  for (auto fragment : nativeFragments.span()) {
+    if (fragment.endByte <= bytes) continue;
+    fragment.startByte = static_cast<uint32_t>(std::max<size_t>(fragment.startByte, bytes) - bytes);
+    fragment.endByte -= static_cast<uint32_t>(bytes);
+    nativeFragments[write++] = fragment;
+  }
+  nativeFragments.resize(write);
+  size_t rubyBytes = 0;
+  write = 0;
+  for (auto ruby : nativeRuby.span()) {
+    if (ruby.endByte <= bytes) continue;
+    ruby.startByte -= static_cast<uint32_t>(bytes);
+    ruby.endByte -= static_cast<uint32_t>(bytes);
+    if (ruby.textBytes)
+      std::memmove(nativeRubyText.data() + rubyBytes, nativeRubyText.data() + ruby.textOffset, ruby.textBytes);
+    ruby.textOffset = static_cast<uint32_t>(rubyBytes);
+    rubyBytes += ruby.textBytes;
+    nativeRuby[write++] = ruby;
+  }
+  nativeRuby.resize(write);
+  nativeRubyText.resize(rubyBytes);
+  // A link can still be open when its last currently buffered fragment commits.
+  bool referenced[UINT8_MAX] = {};
+  if (nativeLastLinkId) referenced[nativeLastLinkId - 1] = true;
+  for (const auto& fragment : nativeFragments.span())
+    if (fragment.linkId) referenced[fragment.linkId - 1] = true;
+  for (size_t i = 0; i < nativeLinkTargets.size(); ++i)
+    if (!referenced[i]) nativeLinkTargets[i].href[0] = '\0';
+}
+
+bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
+                                       const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
+                                       const bool includeLastLine) {
+  return layoutNative(renderer, fontId, viewportWidth, processLine, includeLastLine, false);
+}
+
+bool ParsedText::layoutBeforeRuby(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
+                                  const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine) {
+  return layoutNative(renderer, fontId, viewportWidth, processLine, false, true);
+}
+
+bool ParsedText::layoutNative(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
+                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
+                              const bool includeLastLine, const bool semanticBoundary) {
+  const auto fail = [&](const TextStatus status) {
+    failNative(status);
+    discardNativeInput();
+    renderer.recordTextFailure(nativeStatus);
+    return false;
+  };
+  if (nativeStatus != TextStatus::Ok) return fail(nativeStatus);
+  if (nativeText.empty()) return true;
+  if (!includeLastLine && !semanticBoundary && !nativeNeedsLayout()) return true;
+  if (!renderer.nativeTextEngine()) return fail(TextStatus::InvalidFont);
+  if (!processLine || !viewportWidth) return fail(TextStatus::InvalidText);
+  renderer.clearTextStatus();
+
+  // A fitter failure must not publish part of this operation to the parser.
+  // Staging is bounded by the source window, and every control/payload is charged
+  // to the same native budget. The public callback itself remains borrowed.
+  struct PendingLines {
+    NativeBuffer<TextBlock*> blocks;
+    ParsedText* owner;
+    ~PendingLines() {
+      for (auto* block : blocks.span()) delete block;
+    }
+  } pending{{}, this};
+  if (!pending.blocks.reserve(nativeScalars)) return fail(TextStatus::OutOfMemory);
+  const auto emit = [](void* context, NativeLayoutEmission&& value) -> TextStatus {
+    auto& pending = *static_cast<PendingLines*>(context);
+    auto& owner = *pending.owner;
+    NativeBuffer<TextBlock::LinkSpan> links;
+    if (!links.resize(value.links.size())) return TextStatus::OutOfMemory;
+    for (size_t i = 0; i < value.links.size(); ++i) {
+      const auto& input = value.links[i];
+      if (!input.id || input.id > owner.nativeLinkTargets.size()) return TextStatus::InvalidText;
+      const int left = floorNativePixel(input.x26);
+      const int right = ceilNativePixel(input.x26 + input.width26);
+      if (left < INT16_MIN || left > INT16_MAX || right - left > INT16_MAX) return TextStatus::CapacityExceeded;
+      auto& link = links[i];
+      std::memcpy(link.href, owner.nativeLinkTargets[input.id - 1].href, sizeof(link.href));
+      link.x = static_cast<int16_t>(left);
+      link.width = static_cast<int16_t>(right - left);
+      link.topLift = 0;
+      link.top = input.top;
+      link.height = input.height;
+    }
+    BlockStyle style = owner.blockStyle;
+    style.isRtl = (value.line.paragraphLevel & 1) != 0;
+    auto block = makeUniqueNoThrow<TextBlock>(std::move(value.line), style, std::move(links));
+    if (!block || !block->valid()) return TextStatus::OutOfMemory;
+    block->setSourceRange(value.sourceStart, value.sourceEnd);
+    const size_t index = pending.blocks.size();
+    if (!pending.blocks.resize(index + 1)) return TextStatus::OutOfMemory;
+    pending.blocks[index] = block.release();
+    return TextStatus::Ok;
+  };
+
+  NativeParagraphLayout fitter(*renderer.nativeTextEngine());
+  NativeBuffer<NativeStyleSpan> spans;
+  NativeBuffer<NativeLinkRange> links;
+  NativeBuffer<NativeRubyInput> ruby;
+  bool atSemanticBoundary = semanticBoundary;
+  while (!nativeText.empty() && (includeLastLine || nativeNeedsLayout() || atSemanticBoundary)) {
+    const std::string_view text(nativeText.data(), nativeText.size());
+    size_t windowBytes = 0;
+    const auto prefixStatus = NativeParagraphLayout::windowPrefix(text, windowBytes, true);
+    if (prefixStatus != TextStatus::Ok) return fail(prefixStatus);
+    if (!windowBytes) return fail(TextStatus::CapacityExceeded);
+    if (!spans.reserve(nativeFragments.size()) || !links.reserve(nativeFragments.size()) ||
+        !ruby.resize(nativeRuby.size()))
+      return fail(TextStatus::OutOfMemory);
+    spans.clear();
+    links.clear();
+    for (const auto& fragment : nativeFragments.span()) {
+      const uint8_t style = fragment.style & ~EpdFontFamily::RUBY_CONTINUE;
+      const uint32_t start = spans.empty() ? 0 : spans[spans.size() - 1].endByte;
+      if (!spans.empty()) spans[spans.size() - 1].endByte = fragment.startByte;
+      if (!spans.empty() && spans[spans.size() - 1].style == style) {
+        spans[spans.size() - 1].endByte = fragment.endByte;
+      } else {
+        const size_t index = spans.size();
+        spans.resize(index + 1);
+        spans[index] = {index ? fragment.startByte : 0, fragment.endByte, style, 0};
+      }
+      if (fragment.linkId) {
+        if (!links.empty() && links[links.size() - 1].id == fragment.linkId &&
+            links[links.size() - 1].endByte == start) {
+          links[links.size() - 1].endByte = fragment.endByte;
+        } else {
+          const size_t index = links.size();
+          links.resize(index + 1);
+          links[index] = {fragment.startByte, fragment.endByte, fragment.linkId};
+        }
+      }
+    }
+    for (size_t i = 0; i < nativeRuby.size(); ++i) {
+      const auto& input = nativeRuby[i];
+      ruby[i] = {input.startByte,
+                 input.endByte,
+                 {input.textBytes ? nativeRubyText.data() + input.textOffset : "", input.textBytes},
+                 input.style};
+    }
+    NativeParagraphView view;
+    view.text = text;
+    view.spans = spans.span();
+    view.sourceAnchors = nativeAnchors.span();
+    view.links = links.span();
+    view.ruby = ruby.span();
+    view.paragraphLevel = nativeParagraphLevel < 0 && blockStyle.directionDefined
+                              ? static_cast<int8_t>(blockStyle.isRtl)
+                              : nativeParagraphLevel;
+    view.final = includeLastLine && windowBytes == text.size();
+    view.semanticBoundary = atSemanticBoundary;
+    atSemanticBoundary = false;
+    NativeLayoutOptions options;
+    options.fontId = fontId;
+    options.width = viewportWidth;  // Parser already removed horizontal insets.
+    options.hyphenation = hyphenationEnabled;
+    options.emergencyHyphenation = true;
+    options.focus = focusReadingEnabled;
+    options.readerFeatures = true;
+    options.firstLine = nativeFirstLine;
+    switch (blockStyle.alignment) {
+      case CssTextAlign::Left:
+        options.alignment = NativeAlignment::Left;
+        break;
+      case CssTextAlign::Right:
+        options.alignment = NativeAlignment::Right;
+        break;
+      case CssTextAlign::Center:
+        options.alignment = NativeAlignment::Center;
+        break;
+      case CssTextAlign::Justify:
+        options.alignment = NativeAlignment::Justify;
+        break;
+      default:
+        options.alignment = NativeAlignment::Start;
+        break;
+    }
+    const bool rtl =
+        view.paragraphLevel >= 0 ? (view.paragraphLevel & 1) : nativeNaturalRtl(text.substr(0, windowBytes));
+    const bool natural =
+        options.alignment == NativeAlignment::Start || options.alignment == NativeAlignment::Justify ||
+        (rtl ? options.alignment == NativeAlignment::Right : options.alignment == NativeAlignment::Left);
+    if (nativeFirstLine && natural) {
+      if (blockStyle.textIndentDefined) {
+        if (blockStyle.textIndent < 0 || !extraParagraphSpacing) options.firstLineIndent = blockStyle.textIndent;
+      } else if (!extraParagraphSpacing) {
+        const int spaceWidth = renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR);
+        if (renderer.lastTextStatus() != TextStatus::Ok) return fail(renderer.lastTextStatus());
+        if (spaceWidth > INT16_MAX / 3) return fail(TextStatus::CapacityExceeded);
+        options.firstLineIndent = static_cast<int16_t>(spaceWidth * 3);
+      }
+    }
+    size_t consumed = 0;
+    const auto status = fitter.layout(view, options, emit, &pending, consumed, nativeParagraphLevel);
+    if (status != TextStatus::Ok) return fail(status);
+    if (!consumed) {
+      if (view.semanticBoundary) break;
+      return fail(TextStatus::CapacityExceeded);
+    }
+    nativeFirstLine = false;
+    blockStyle.isRtl = (nativeParagraphLevel & 1) != 0;
+    consumeNativePrefix(consumed);
+  }
+  for (auto*& block : pending.blocks.span()) {
+    const uint32_t source = block->sourceStartOffset();
+    std::unique_ptr<TextBlock> owned(block);
+    block = nullptr;
+    processLine(std::move(owned), source);
+  }
+  return true;
+}
+
+#else
+
 #include <BidiUtils.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
@@ -13,6 +518,7 @@
 #include <limits>
 #include <vector>
 
+#include "CjkBreakPolicy.h"
 #include "TokenBoundary.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
@@ -63,71 +569,9 @@ uint32_t lastCodepoint(const std::string& word) {
 
 bool containsSoftHyphen(const std::string& word) { return word.find(SOFT_HYPHEN_UTF8) != std::string::npos; }
 
-bool isNoBreakBeforeCjkPunctuation(const uint32_t cp) {
-  switch (cp) {
-    case '.':
-    case ',':
-    case ':':
-    case ';':
-    case '!':
-    case '?':
-    case ')':
-    case ']':
-    case '}':
-    case 0x00BB:  // »
-    case 0x2019:  // ’
-    case 0x201D:  // ”
-    case 0x3001:  // 、
-    case 0x3002:  // 。
-    case 0x3009:  // 〉
-    case 0x300B:  // 》
-    case 0x300D:  // 」
-    case 0x300F:  // 』
-    case 0x3011:  // 】
-    case 0x3015:  // 〕
-    case 0x3017:  // 〗
-    case 0x3019:  // 〙
-    case 0x301B:  // 〛
-    case 0xFF01:  // ！
-    case 0xFF09:  // ）
-    case 0xFF0C:  // ，
-    case 0xFF0E:  // ．
-    case 0xFF1A:  // ：
-    case 0xFF1B:  // ；
-    case 0xFF1F:  // ？
-    case 0xFF3D:  // ］
-    case 0xFF5D:  // ｝
-      return true;
-    default:
-      return false;
-  }
-}
-
-bool isNoBreakAfterCjkPunctuation(const uint32_t cp) {
-  switch (cp) {
-    case '(':
-    case '[':
-    case '{':
-    case 0x00AB:  // «
-    case 0x2018:  // ‘
-    case 0x201C:  // “
-    case 0x3008:  // 〈
-    case 0x300A:  // 《
-    case 0x300C:  // 「
-    case 0x300E:  // 『
-    case 0x3010:  // 【
-    case 0x3014:  // 〔
-    case 0x3016:  // 〖
-    case 0x3018:  // 〘
-    case 0x301A:  // 〚
-    case 0xFF08:  // （
-    case 0xFF3B:  // ［
-    case 0xFF5B:  // ｛
-      return true;
-    default:
-      return false;
-  }
-}
+using CjkBreakPolicy::hasCjkBreakOpportunityBetween;
+using CjkBreakPolicy::isNoBreakAfterCjkPunctuation;
+using CjkBreakPolicy::isNoBreakBeforeCjkPunctuation;
 
 bool containsCjkBreakableCodepoint(const std::string& text) {
   const auto* ptr = reinterpret_cast<const unsigned char*>(text.c_str());
@@ -149,13 +593,6 @@ uint32_t countCodepoints(const std::string_view text) {
     count++;
   }
   return count;
-}
-
-bool hasCjkBreakOpportunityBetween(const uint32_t leftCp, const uint32_t rightCp) {
-  if (!utf8IsCjkBreakable(leftCp) && !utf8IsCjkBreakable(rightCp)) return false;
-  if (isNoBreakAfterCjkPunctuation(leftCp) || isNoBreakBeforeCjkPunctuation(rightCp)) return false;
-  if (utf8IsCombiningMark(rightCp)) return false;
-  return true;
 }
 
 std::vector<size_t> cjkCharacterBreakByteOffsets(const std::string& text) {
@@ -678,11 +1115,11 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
   return 0;
 }
 // Consumes data to minimize memory usage
-void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
+bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
                                        const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                                        const bool includeLastLine) {
   if (words.empty()) {
-    return;
+    return true;
   }
 
   // Per-paragraph RTL auto-detection: only when CSS/HTML didn't explicitly set direction.
@@ -733,8 +1170,10 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   const size_t lineCount = includeLastLine ? lineBreakIndices.size() : lineBreakIndices.size() - 1;
 
   for (size_t i = 0; i < lineCount; ++i) {
-    extractLine(i, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore, lineBreakIndices, processLine, renderer,
-                fontId);
+    if (!extractLine(i, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore, lineBreakIndices, processLine,
+                     renderer, fontId)) {
+      return false;
+    }
   }
 
   // Remove consumed words so size() reflects only remaining words
@@ -752,6 +1191,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
       rubyTexts.erase(rubyTexts.begin(), rubyTexts.begin() + rtConsumed);
     }
   }
+  return true;
 }
 
 static inline bool isCjkIdeograph(uint32_t cp) {
@@ -1252,7 +1692,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   return true;
 }
 
-void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const std::vector<uint16_t>& wordWidths,
+bool ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const std::vector<uint16_t>& wordWidths,
                              const std::vector<bool>& continuesVec, const std::vector<bool>& noSpaceBeforeVec,
                              const std::vector<size_t>& lineBreakIndices,
                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
@@ -1604,11 +2044,11 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
                                               std::vector<uint16_t>{}, blockStyle, std::move(lineRubyTexts),
                                               std::move(lineLinks));
     if (!block || !block->valid()) {
-      LOG_ERR("PTX", "Dropping line: TextBlock or arena allocation failed");
-      return;
+      LOG_ERR("PTX", "Layout failed: TextBlock or arena allocation failed");
+      return false;
     }
     processLine(std::move(block), lineVisibleOffset);
-    return;
+    return true;
   }
 
   // Each word is one TextBlock entry carrying its own boundary; all that remains is the suffix x
@@ -1627,8 +2067,10 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   auto block = makeUniqueNoThrow<TextBlock>(lineWords, lineXPos, lineWordStyles, outBoundaries, outSuffixX, blockStyle,
                                             std::move(lineRubyTexts), std::move(lineLinks));
   if (!block || !block->valid()) {
-    LOG_ERR("PTX", "Dropping line: TextBlock or arena allocation failed");
-    return;
+    LOG_ERR("PTX", "Layout failed: TextBlock or arena allocation failed");
+    return false;
   }
   processLine(std::move(block), lineVisibleOffset);
+  return true;
 }
+#endif

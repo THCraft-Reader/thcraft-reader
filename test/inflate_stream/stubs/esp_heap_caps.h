@@ -1,9 +1,14 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 constexpr uint32_t MALLOC_CAP_DEFAULT = 1;
 constexpr uint32_t MALLOC_CAP_SPIRAM = 2;
 constexpr uint32_t MALLOC_CAP_INTERNAL = 4;
+constexpr uint32_t MALLOC_CAP_8BIT = 8;
+inline void* heap_caps_malloc(size_t bytes, uint32_t) { return std::malloc(bytes); }
+inline void* heap_caps_realloc(void* pointer, size_t bytes, uint32_t) { return std::realloc(pointer, bytes); }
+inline void heap_caps_free(void* pointer) { std::free(pointer); }
 inline size_t heap_caps_get_free_size(uint32_t) { return 0; }
 inline size_t heap_caps_get_largest_free_block(uint32_t) { return 0; }
 inline size_t heap_caps_get_total_size(uint32_t) { return 0; }

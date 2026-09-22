@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "upstream": {
+    "libdatrie": "0.2.14",
+    "libthai": "0.1.30",
+    "pins": "../vendor-sources.json"
+  },
+  "license": "LGPL-2.1-or-later; original source notices retained",
+  "patches": [
+    {
+      "files": [
+        "libdatrie-0.2.14/datrie/memory-reader.h",
+        "libdatrie-0.2.14/datrie/alpha-map.c",
+        "libdatrie-0.2.14/datrie/alpha-map-private.h",
+        "libdatrie-0.2.14/datrie/darray.c",
+        "libdatrie-0.2.14/datrie/darray.h",
+        "libdatrie-0.2.14/datrie/tail.c",
+        "libdatrie-0.2.14/datrie/tail.h",
+        "libdatrie-0.2.14/datrie/trie.c",
+        "libdatrie-0.2.14/datrie/trie.h"
+      ],
+      "change": "Add trie_new_from_memory and bounded private readers for the unchanged big-endian alphabet/double-array/tail format. Validate ranges, count/byte-size bounds, signed suffix lengths, symbols, root/parent/free-list structure, cycles, tail references and exact input consumption; clean partial allocations on failure. The input is copied and may be released immediately. Keep upstream file APIs. Propagate allocation failures in alphabet file loading, symbol/relocation allocation, tail insertion/replacement and iterator construction."
+    },
+    {
+      "files": [
+        "libthai-0.1.30/include/thai/thbrk.h",
+        "libthai-0.1.30/src/thbrk/thbrk.c",
+        "libthai-0.1.30/src/thbrk/brk-maximal.c"
+      ],
+      "change": "Add th_brk_new_from_memory with existing trie ownership/destruction. Guard environment/root/clone allocation failures, release pooled nodes on best-break allocation failure and cloned state on position-buffer failure, and avoid zero-length copies from null root buffers. Matching and unknown-word recovery are unchanged."
+    }
+  ],
+  "integration": "No new compilation unit. Existing forced-include NativeThaiAllocator.h routes allocations. LibThai's existing zero-boundary OOM return remains ABI-compatible: consumers must inspect the native allocator failure latch and discard partial boundaries.",
+  "memoryInputPolicy": "One complete trie, without trailing bytes; ordered nonoverlapping positive alphabet ranges below INT32_MAX, at most 255 nonterminal symbols; suffix length at most INT16_MAX. Structural validation is linear in serialized cells/bytes, using one temporary byte per double-array cell."
+}

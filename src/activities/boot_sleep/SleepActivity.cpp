@@ -3,7 +3,11 @@
 #include <BitmapHelpers.h>
 #include <Epub.h>
 #include <Epub/converters/PngToFramebufferConverter.h>
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <NativeTextEngine.h>
+#else
 #include <FontCacheManager.h>
+#endif
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
@@ -492,17 +496,22 @@ bool drawSleepPopupPreservingFrame(GfxRenderer& renderer) {
 }
 
 void releaseSdFontCachesForDecode(const GfxRenderer& renderer) {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#else
   if (auto* fcm = renderer.getFontCacheManager()) {
     LOG_DBG("SLP", "Free heap before SD font cache release: %d bytes", ESP.getFreeHeap());
     fcm->releaseSdFontCaches();
     LOG_DBG("SLP", "Free heap before sleep image decode: %d bytes", ESP.getFreeHeap());
   }
+#endif
 }
 
 }  // namespace
 
 void SleepActivity::onEnter() {
   Activity::onEnter();
+  renderer.clearTextStatus();
 
   const bool frameWasInverted = display.isInverted();
 

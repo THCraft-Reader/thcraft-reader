@@ -133,7 +133,30 @@ See [Development quick start](#development-quick-start) below.
 
 ## Custom SD-card fonts
 
-Convert your own TTF/OTF files into `.cpfont` files that load from the SD card. No firmware reflash is needed.
+Fonts load from the SD card without reflashing. **Use the format for your device:**
+
+### Xteink X4 Pro: native TTF/OTF
+
+Download fonts through **Settings > Reader > Manage Fonts**, or upload original
+`.ttf`/`.otf` files through the web interface's **Fonts** tab. Do not convert them
+to `.cpfont`: the Pro uses scalable native fonts.
+
+For a manual install, copy `YourFont-Regular.ttf` (or `.otf`) to
+`/.fonts/YourFont/` or `/fonts/YourFont/`; optional styles are
+`YourFont-Bold`, `YourFont-Italic`, and `YourFont-BoldItalic` with the same font
+extensions. Restart after copying, then select **Settings > Reader > Font Family**.
+One set of files serves all reading sizes (12/14/16/18 pt) and UI fallback sizes.
+Bundled Thai rendering and word breaking work offline in menus, EPUB and TXT
+without an SD font or segmentation dictionary.
+
+An old saved `.cpfont` selection falls back visibly to a bundled font, without
+deleting the files or saved family name. Installing a native family with that
+same name restores the selection.
+
+### Other devices: converted cpfont
+
+Other devices, including X4 Classic and non-Pro ESP32-S3 boards, retain the
+`.cpfont` format. Convert your own TTF/OTF files as follows:
 
 1. Go to https://crosspointreader.com/fonts and open the "SD-card font builder" form.
 2. Upload up to four styles (regular, bold, italic, bold-italic), set the family name, point sizes, and Unicode range.
@@ -142,6 +165,9 @@ Convert your own TTF/OTF files into `.cpfont` files that load from the SD card. 
 5. Select the font on the device from the font settings.
 
 Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` script unmodified, so output matches a local host build.
+
+See [SD Card Fonts](./docs/sd-card-fonts.md) for native naming, supported formats,
+safe upload/update behavior, variable-font settings, and legacy conversion.
 
 ---
 

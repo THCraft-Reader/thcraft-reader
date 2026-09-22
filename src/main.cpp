@@ -1,8 +1,12 @@
 #include <Arduino.h>
 #include <BoardConfig.h>
 #include <Epub.h>
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <NativeTextEngine.h>
+#else
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
+#endif
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalDisplay.h>
@@ -18,7 +22,11 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <XteinkDetect.h>
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <builtinFonts/notosans_8_regular.h>
+#else
 #include <builtinFonts/all.h>
+#endif
 
 #include <cstring>
 
@@ -43,9 +51,14 @@
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
 ActivityManager activityManager(renderer, mappedInputManager);
+#if defined(CROSSPOINT_NATIVE_TEXT)
+NativeTextEngine nativeTextEngine;
+static bool nativeTextStartupFailed = false;
+#else
 FontDecompressor fontDecompressor;
-SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
+#endif
+SdCardFontSystem sdFontSystem;
 static unsigned long allowSleepAt = 0;
 static unsigned long lastX4ProPowerClickAt = 0;
 
@@ -59,6 +72,7 @@ constexpr unsigned long X4PRO_POWER_CLICK_MAX_HOLD_MS = 300;
 static bool wakePowerReleasePending = false;
 
 // Fonts
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 EpdFont notoserif14RegularFont(&notoserif_14_regular);
 EpdFont notoserif14BoldFont(&notoserif_14_bold);
 EpdFont notoserif14ItalicFont(&notoserif_14_italic);
@@ -111,10 +125,12 @@ EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, 
                                    &notosans18BoldItalicFont);
 
 #endif  // OMIT_FONTS
+#endif  // !CROSSPOINT_NATIVE_TEXT
 
 EpdFont smallFont(&notosans_8_regular);
 EpdFontFamily smallFontFamily(&smallFont);
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 EpdFont ui10RegularFont(&ubuntu_10_regular);
 EpdFont ui10BoldFont(&ubuntu_10_bold);
 EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
@@ -122,6 +138,7 @@ EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
 EpdFont ui12RegularFont(&ubuntu_12_regular);
 EpdFont ui12BoldFont(&ubuntu_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+#endif
 
 // Definitions for SilentRestart.h. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
@@ -251,6 +268,18 @@ static bool loadSleepFrameBuffer() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextStartupFailed) {
+    // The emergency surface must not enter a normal activity or load SD fonts.
+    deepSleepInProgress = true;
+    nativeTextEngine.releaseSdFaces();
+    halTiltSensor.deepSleep();
+    display.deepSleep();
+    Storage.prepareForDeepSleep();
+    powerManager.startDeepSleep(gpio);
+    return;
+  }
+#endif
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
   const bool isQuickResumeSleep =
@@ -267,6 +296,17 @@ void enterDeepSleep(bool fromTimeout = false) {
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
   activityManager.goToSleep(fromTimeout);
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (renderer.lastTextStatus() != TextStatus::Ok && renderer.hasFrameBuffer()) {
+    RenderLock lock;
+    const auto status = renderer.lastTextStatus();
+    nativeTextEngine.clearCaches();
+    renderer.waitRefreshComplete();
+    renderer.setRenderMode(GfxRenderer::BW);
+    renderer.clearScreen();
+    GUI.drawPopup(renderer, status == TextStatus::OutOfMemory ? tr(STR_MEMORY_ERROR) : tr(STR_TEXT_RENDER_ERROR));
+  }
+#endif
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
@@ -284,13 +324,16 @@ void enterDeepSleep(bool fromTimeout = false) {
 
   halTiltSensor.deepSleep();
   display.deepSleep();
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  nativeTextEngine.releaseSdFaces();
+#endif
   Storage.prepareForDeepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
 
   powerManager.startDeepSleep(gpio);
 }
 
-void setupDisplayAndFonts(bool seamless = false) {
+bool setupDisplayAndFonts(bool seamless = false) {
 #if !FREEINK_MCU_C3
   // C3 resolves its controller in HalGPIO::begin() before SPI claims the
   // display pins. X4 Pro skips that C3-only path, so probe here before
@@ -306,9 +349,31 @@ void setupDisplayAndFonts(bool seamless = false) {
 
   display.begin(seamless);
   renderer.begin();
+#if !defined(CROSSPOINT_NATIVE_TEXT)
   activityManager.begin();
+#endif
   LOG_DBG("MAIN", "Display initialized");
 
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  // initialize() registers all logical built-ins and loads the bundled Thai
+  // dictionary without SD access. Its allocator requires external PSRAM.
+  const auto status = nativeTextEngine.initialize();
+  if (status != TextStatus::Ok) {
+    LOG_ERR("TEXT", "Native text startup failed (%u)", static_cast<unsigned>(status));
+    nativeTextStartupFailed = true;
+    nativeTextEngine.shutdown();
+    renderer.setNativeTextEngine(nullptr);
+    renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
+    renderer.clearScreen();
+    renderer.drawCenteredText(SMALL_FONT_ID, renderer.getScreenHeight() / 2, tr(STR_TEXT_ENGINE_INIT_FAILED));
+    if (status == TextStatus::OutOfMemory) {
+      renderer.drawCenteredText(SMALL_FONT_ID, renderer.getScreenHeight() / 2 + 30, tr(STR_MEMORY_ERROR));
+    }
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    return false;
+  }
+  renderer.setNativeTextEngine(&nativeTextEngine);
+#else
   // Initialize font decompressor for compressed reader fonts
   if (!fontDecompressor.init()) {
     LOG_ERR("MAIN", "Font decompressor init failed");
@@ -329,11 +394,16 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
+#endif
 
   // Discover and load SD card fonts
   sdFontSystem.begin(renderer);
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  activityManager.begin();
+#endif
 
   LOG_DBG("MAIN", "Fonts setup");
+  return true;
 }
 
 void setup() {
@@ -396,7 +466,7 @@ void setup() {
   // We need 6 open files concurrently when parsing a new chapter
   if (!Storage.begin()) {
     LOG_ERR("MAIN", "SD card initialization failed");
-    setupDisplayAndFonts(isSilentReboot);
+    if (!setupDisplayAndFonts(isSilentReboot)) return;
     activityManager.goToFullScreenMessage("SD card error", EpdFontFamily::BOLD);
     return;
   }
@@ -486,7 +556,7 @@ void setup() {
   bool allowFastInitialReaderRefresh = false;
   bool needsWakeRefresh = false;
 
-  setupDisplayAndFonts(resume != BootResume::Splash);
+  if (!setupDisplayAndFonts(resume != BootResume::Splash)) return;
 
   switch (resume) {
     case BootResume::Silent:
@@ -588,6 +658,22 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextStartupFailed) {
+    // Keep the diagnostic on screen; only allow power-off (or auto-sleep).
+    // In particular, no activity navigation may silently select bitmaps.
+    static bool powerReleased = false;
+    if (!gpio.isPressed(HalGPIO::BTN_POWER)) powerReleased = true;
+    const auto timeout = SETTINGS.getSleepTimeoutMs();
+    if ((powerReleased && gpio.isPressed(HalGPIO::BTN_POWER) &&
+         gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) ||
+        (timeout > 0 && millis() >= timeout)) {
+      enterDeepSleep();
+    }
+    delay(50);
+    return;
+  }
+#endif
 
   if (activityManager.requiresExclusiveStorageLoop()) {
     // USB Drive handed the raw SD card to the host. Do not run screenshots,

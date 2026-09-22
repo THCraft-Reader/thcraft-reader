@@ -1,6 +1,12 @@
 #include "DictionaryDefinitionActivity.h"
 
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <Memory.h>
+#include <NativeParagraphLayout.h>
+#include <NativeTextEngine.h>
+#else
 #include <FontCacheManager.h>
+#endif
 #include <GfxRenderer.h>
 #include <I18n.h>
 
@@ -16,39 +22,56 @@
 
 namespace {
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 // Longest measurable/drawable span. Wrapped lines stay under the screen width
 // (far below this); only pathological unbreakable tokens are split at this cap.
 constexpr size_t MAX_LINE_BYTES = 191;
+#endif
 
 // Body text left/right inset, matching the reader's default feel.
 constexpr int SIDE_PADDING = 20;
 
-// Styled-path ceiling: the laid-out Pages keep the whole definition resident
-// (TextBlock arenas ≈ text + ~7 bytes/word plus per-line objects), roughly
-// doubling the string's footprint while this activity is stacked over the
-// reader and word-select. Bigger definitions take the span-based plain-text
-// path, which holds no per-page copies.
+// Limit HTML parser work. Large definitions use the plain-text adapter
+// (shared shaped Pages on native; retained byte spans on legacy).
 constexpr size_t MAX_STYLED_HTML_BYTES = 16 * 1024;
 
 }  // namespace
 
 void DictionaryDefinitionActivity::onEnter() {
   Activity::onEnter();
+  renderer.clearTextStatus();
   // Normalize StarDict multi-type separators so the wrap loop and the
   // C-string font APIs below both see the whole definition.
   std::replace(definition.begin(), definition.end(), '\0', '\n');
-  if (!(htmlDefinition && definition.size() <= MAX_STYLED_HTML_BYTES && layoutHtmlPages())) {
+  const bool styled = htmlDefinition && definition.size() <= MAX_STYLED_HTML_BYTES && layoutHtmlPages();
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  nativeLayoutStatus = renderer.lastTextStatus();
+  if (!styled && nativeLayoutStatus == TextStatus::Ok) {
+    definition = htmlToPlainText(definition);
+    nativeLayoutStatus = layoutNativeText();
+  }
+  if (nativeLayoutStatus != TextStatus::Ok) {
+    LOG_ERR("TEXT", "Dictionary text layout failed (%u)", static_cast<unsigned>(nativeLayoutStatus));
+    pages.clear();
+  }
+#else
+  if (!styled) {
     definition = htmlToPlainText(definition);
     wrapText();
   }
+#endif
   requestUpdate();
 }
 
 void DictionaryDefinitionActivity::onExit() {
   Activity::onExit();
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#else
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->releaseSdFontCaches();
   }
+#endif
 }
 
 DictionaryDefinitionActivity::BodyArea DictionaryDefinitionActivity::bodyArea() const {
@@ -81,6 +104,111 @@ bool DictionaryDefinitionActivity::layoutHtmlPages() {
   return true;
 }
 
+#if defined(CROSSPOINT_NATIVE_TEXT)
+TextStatus DictionaryDefinitionActivity::layoutNativeText() {
+  pages.clear();
+  currentPage = 0;
+  totalPages = 1;
+  auto* engine = renderer.nativeTextEngine();
+  if (!engine) return TextStatus::InvalidFont;
+  const BodyArea body = bodyArea();
+  if (body.width <= 0 || body.width > UINT16_MAX || body.height <= 0 || body.height > INT16_MAX ||
+      definition.size() > UINT32_MAX)
+    return TextStatus::CapacityExceeded;
+  const int fontId = SETTINGS.getReaderFontId();
+  const int nominalHeight = renderer.getLineHeight(fontId);
+  if (renderer.lastTextStatus() != TextStatus::Ok) return renderer.lastTextStatus();
+  if (nominalHeight <= 0 || nominalHeight > INT16_MAX) return TextStatus::CapacityExceeded;
+
+  struct PageContext {
+    GfxRenderer& renderer;
+    std::vector<std::unique_ptr<Page>>& pages;
+    int fontId;
+    int viewportHeight;
+    int y = 0;
+    std::unique_ptr<Page> pending;
+  } context{renderer, pages, fontId, body.height};
+  const auto emit = [](void* raw, NativeLayoutEmission&& emission) -> TextStatus {
+    auto& ctx = *static_cast<PageContext*>(raw);
+    BlockStyle style;
+    style.alignment = emission.line.paragraphLevel & 1 ? CssTextAlign::Right : CssTextAlign::Left;
+    auto block = makeUniqueNoThrow<TextBlock>(std::move(emission.line), style);
+    if (!block || !block->valid()) return TextStatus::OutOfMemory;
+    const int height = block->layoutHeight(ctx.renderer, ctx.fontId, 1.0f);
+    if (ctx.renderer.lastTextStatus() != TextStatus::Ok) return ctx.renderer.lastTextStatus();
+    if (height <= 0) return TextStatus::InvalidText;
+    if (ctx.pending && ctx.y > 0 && height > ctx.viewportHeight - ctx.y) {
+      if (ctx.pages.size() >= INT32_MAX) return TextStatus::CapacityExceeded;
+      ctx.pages.push_back(std::move(ctx.pending));
+      ctx.y = 0;
+    }
+    if (!ctx.pending) {
+      ctx.pending = makeUniqueNoThrow<Page>();
+      if (!ctx.pending) return TextStatus::OutOfMemory;
+    }
+    if (ctx.pending->elements.size() >= Page::MAX_ELEMENTS_PER_PAGE) return TextStatus::CapacityExceeded;
+    auto line = makeUniqueNoThrow<PageLine>(std::move(block), 0, static_cast<int16_t>(ctx.y));
+    if (!line) return TextStatus::OutOfMemory;
+    if (!ctx.pending->addElement(std::move(line))) return TextStatus::OutOfMemory;
+    // An over-tall first line is consumed once and clipped by drawBody().
+    ctx.y += height;
+    return TextStatus::Ok;
+  };
+
+  NativeParagraphLayout fitter(*engine);
+  NativeLayoutOptions options;
+  options.fontId = fontId;
+  options.width = static_cast<uint16_t>(body.width);
+  options.alignment = NativeAlignment::Start;
+  const std::string_view source(definition);
+  size_t paragraphStart = 0;
+  while (paragraphStart < source.size()) {
+    const size_t newline = source.find('\n', paragraphStart);
+    const size_t paragraphEnd = newline == std::string_view::npos ? source.size() : newline;
+    auto paragraph = source.substr(paragraphStart, paragraphEnd - paragraphStart);
+    if (!paragraph.empty() && paragraph.back() == '\r') paragraph.remove_suffix(1);
+    if (paragraph.empty()) {
+      NativeLayoutEmission blank;
+      blank.line.lineHeight = static_cast<int16_t>(nominalHeight);
+      const auto status = emit(&context, std::move(blank));
+      if (status != TextStatus::Ok) return status;
+    } else {
+      size_t offset = 0;
+      int8_t paragraphLevel = -1;
+      options.firstLine = true;
+      while (offset < paragraph.size()) {
+        const auto remaining = paragraph.substr(offset);
+        size_t bytes = 0;
+        auto status = NativeParagraphLayout::windowPrefix(remaining, bytes, true);
+        if (status != TextStatus::Ok) return status;
+        if (bytes == 0) return TextStatus::CapacityExceeded;
+        NativeParagraphView view;
+        view.text = remaining.substr(0, bytes);
+        view.sourceStart = static_cast<uint32_t>(paragraphStart + offset);
+        view.sourceUnit = NativeSourceUnit::Byte;
+        view.paragraphLevel = paragraphLevel;
+        view.final = bytes == remaining.size();
+        size_t consumed = 0;
+        status = fitter.layout(view, options, emit, &context, consumed, paragraphLevel);
+        if (status != TextStatus::Ok) return status;
+        if (consumed == 0 || consumed > bytes) return TextStatus::CapacityExceeded;
+        offset += consumed;
+        options.firstLine = false;
+      }
+    }
+    if (newline == std::string_view::npos) break;
+    paragraphStart = newline + 1;
+  }
+  if (context.pending) {
+    if (pages.size() >= INT32_MAX) return TextStatus::CapacityExceeded;
+    pages.push_back(std::move(context.pending));
+  }
+  totalPages = std::max(1, static_cast<int>(pages.size()));
+  definition.clear();
+  definition.shrink_to_fit();
+  return TextStatus::Ok;
+}
+#else
 int DictionaryDefinitionActivity::measureSpan(const int fontId, const char* text, size_t len) const {
   char buf[MAX_LINE_BYTES + 1];
   len = std::min(len, MAX_LINE_BYTES);
@@ -196,6 +324,7 @@ void DictionaryDefinitionActivity::wrapText() {
   totalPages = std::max(1, (static_cast<int>(lines.size()) + linesPerPage - 1) / linesPerPage);
   currentPage = 0;
 }
+#endif
 
 void DictionaryDefinitionActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -235,15 +364,26 @@ void DictionaryDefinitionActivity::loop() {
   });
 }
 
-// Draws the current page: a styled Page when the HTML layout succeeded,
-// otherwise the wrapped line spans (copied into a stack buffer for NUL
-// termination). Called twice per render: once in font-cache scan mode, once
-// for the real paint.
+// Native and styled definitions paint Pages. Only legacy plain definitions
+// use byte spans; the legacy cache scan also calls this before real painting.
 void DictionaryDefinitionActivity::drawBody(const int fontId, const int x, const int startY) const {
   if (!pages.empty()) {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+    int clipX, clipY, clipWidth, clipHeight;
+    renderer.getClipRect(clipX, clipY, clipWidth, clipHeight);
+    const auto body = bodyArea();
+    const int left = std::max(x, clipX);
+    const int top = std::max(startY, clipY);
+    renderer.setClipRect(left, top, std::max(0, std::min(x + body.width, clipX + clipWidth) - left),
+                         std::max(0, std::min(startY + body.height, clipY + clipHeight) - top));
+#endif
     pages[currentPage]->render(renderer, fontId, x, startY);
+#if defined(CROSSPOINT_NATIVE_TEXT)
+    renderer.setClipRect(clipX, clipY, clipWidth, clipHeight);
+#endif
     return;
   }
+#if !defined(CROSSPOINT_NATIVE_TEXT)
   const int lineHeight = renderer.getLineHeight(fontId);
   char buf[MAX_LINE_BYTES + 1];
   const int firstLine = currentPage * linesPerPage;
@@ -255,10 +395,19 @@ void DictionaryDefinitionActivity::drawBody(const int fontId, const int x, const
     buf[len] = '\0';
     renderer.drawText(fontId, x, startY + (i - firstLine) * lineHeight, buf);
   }
+#endif
 }
 
 void DictionaryDefinitionActivity::render(RenderLock&&) {
   renderer.clearScreen();
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeLayoutStatus != TextStatus::Ok) {
+    if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+    GUI.drawPopup(renderer,
+                  nativeLayoutStatus == TextStatus::OutOfMemory ? tr(STR_MEMORY_ERROR) : tr(STR_TEXT_RENDER_ERROR));
+    return;
+  }
+#endif
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto orientation = renderer.getOrientation();
@@ -280,19 +429,25 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - SIDE_PADDING - counterWidth, headerY, counter);
   }
 
-  // Body: two-pass draw inside a prewarm scope (same pattern as the reader's
-  // renderContents) so SD-card font glyphs load from SD in one batch instead
-  // of one on-demand overflow read per character on every page turn.
+  // Warm real native glyphs without a framebuffer scan; legacy SD fonts keep
+  // their scan/prewarm/draw transaction.
   const int fontId = SETTINGS.getReaderFontId();
   const int bodyStartY = contentY + metrics.topPadding + metrics.headerHeight;
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (!pages.empty() && !pages[currentPage]->warmNativeText(renderer, fontId)) return;
+#else
   auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
   drawBody(fontId, contentX + SIDE_PADDING, bodyStartY);  // scan pass: records codepoints only
   scope.endScanAndPrewarm();
+#endif
   drawBody(fontId, contentX + SIDE_PADDING, bodyStartY);
 
   const auto labels =
       mappedInput.mapLabels(tr(STR_BACK), "", (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (renderer.lastTextStatus() != TextStatus::Ok) return;
+#endif
   renderer.displayBuffer();
 }

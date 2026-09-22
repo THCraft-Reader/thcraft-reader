@@ -1,6 +1,10 @@
 #include "Section.h"
 
+#ifndef CROSSPOINT_NATIVE_TEXT
 #include <FontCacheManager.h>
+#else
+#include <NativeTextEngine.h>
+#endif
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -51,7 +55,8 @@ namespace {
 // v45: Internal EPUB links preserve CSS superscript/subscript positioning.
 // v46: Ordered lists number their items, list-style-type: none suppresses markers,
 //      and <ul>/<ol> containers contribute their own margins/padding to child insets.
-constexpr uint8_t SECTION_FILE_VERSION = 46;
+// v47: native/legacy text representation tag and backend/font layout fingerprint.
+constexpr uint8_t SECTION_FILE_VERSION = 47;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
@@ -71,8 +76,8 @@ constexpr uint8_t SECTION_FILE_INCOMPLETE_VERSION = 0;
 constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFE - (SECTION_FILE_VERSION - 28);
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
-                                 sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
+                                 sizeof(uint8_t) + sizeof(bool) + sizeof(uint64_t) + sizeof(uint32_t) +
+                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
 }  // namespace
 
 // Out-of-line so the unique_ptr<ChapterHtmlSlimParser> in BuildContext can be
@@ -88,7 +93,17 @@ Section::Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRen
 // (no-op once a build has completed or never started).
 Section::~Section() { suspendBuild(); }
 
+bool Section::textLayoutMatches() const {
+#ifdef CROSSPOINT_NATIVE_TEXT
+  return !hasLayoutSnapshot_ || layoutFingerprint_ == renderer.textLayoutFingerprint(layoutFontId_);
+#else
+  return true;
+#endif
+}
+
 uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
+  // Do not tear down the parser from inside its page-complete callback.
+  if (!textLayoutMatches()) return 0;
   if (!file) {
     LOG_ERR("SCT", "File not open for writing page %d", builtPageCount_);
     return 0;
@@ -119,8 +134,9 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
                                    sizeof(spec.extraParagraphSpacing) + sizeof(spec.paragraphAlignment) +
                                    sizeof(spec.viewportWidth) + sizeof(spec.viewportHeight) + sizeof(pageCount) +
                                    sizeof(spec.hyphenationEnabled) + sizeof(spec.embeddedStyle) +
-                                   sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) + sizeof(uint32_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
+                                   sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) + sizeof(uint64_t) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                   sizeof(uint32_t),
                 "Header size mismatch");
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.
@@ -135,6 +151,11 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
   serialization::writePod(file, spec.embeddedStyle);
   serialization::writePod(file, spec.imageRendering);
   serialization::writePod(file, spec.focusReadingEnabled);
+#ifdef CROSSPOINT_NATIVE_TEXT
+  serialization::writePod(file, layoutFingerprint_);
+#else
+  serialization::writePod(file, uint64_t{0});
+#endif
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -144,86 +165,71 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
 }
 
 bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
-  if (!Storage.openFileForRead("SCT", filePath, file)) {
+  if (build_) {
+    if (!textLayoutMatches()) discardBuild(false);
+    return false;
+  }
+  if (!Storage.openFileForRead("SCT", filePath, file)) return false;
+  const auto invalid = [this]() {
+    file.close();
+    LOG_ERR("SCT", "Invalid or stale section layout");
+    clearCache();
+    pageCount = 0;
+    partial_ = false;
+    partialPageCount_ = 0;
+    return false;
+  };
+  const auto read = [this](auto& value) { return file.read(&value, sizeof(value)) == sizeof(value); };
+  if (file.size() < HEADER_SIZE) return invalid();
+  uint8_t version = 0, spacing = 0, alignment = 0, hyphenation = 0, embedded = 0, imageRendering = 0, focus = 0;
+  int fontId = 0;
+  float compression = 0;
+  uint16_t width = 0, height = 0, count = 0;
+  uint64_t fingerprint = 0;
+  uint32_t pageLut = 0, anchorMap = 0, paragraphLut = 0, liLut = 0, visibleLut = 0;
+  if (!read(version) || (version != SECTION_FILE_VERSION && version != SECTION_FILE_PARTIAL_VERSION) || !read(fontId) ||
+      !read(compression) || !read(spacing) || !read(alignment) || !read(width) || !read(height) || !read(hyphenation) ||
+      !read(embedded) || !read(imageRendering) || !read(focus) || !read(fingerprint) || !read(count) ||
+      !read(pageLut) || !read(anchorMap) || !read(paragraphLut) || !read(liLut) || !read(visibleLut) ||
+      fontId != spec.fontId || compression != spec.lineCompression || spacing != spec.extraParagraphSpacing ||
+      alignment != spec.paragraphAlignment || width != spec.viewportWidth || height != spec.viewportHeight ||
+      hyphenation != spec.hyphenationEnabled || embedded != spec.embeddedStyle ||
+      imageRendering != spec.imageRendering || focus != spec.focusReadingEnabled)
+    return invalid();
+  if (fingerprint != renderer.textLayoutFingerprint(spec.fontId)) {
+    // Retain the prior complete/partial cache until a replacement is committed.
+    file.close();
+    pageCount = 0;
+    partial_ = false;
+    partialPageCount_ = 0;
     return false;
   }
 
-  // Match parameters
-  bool filePartial = false;
-  {
-    uint8_t version;
-    serialization::readPod(file, version);
-    if (version != SECTION_FILE_VERSION && version != SECTION_FILE_PARTIAL_VERSION) {
-      // Explicit close() required: member variable persists beyond function scope
-      file.close();
-      LOG_ERR("SCT", "Deserialization failed: Unknown version %u", version);
-      clearCache();
-      return false;
-    }
-    filePartial = (version == SECTION_FILE_PARTIAL_VERSION);
-
-    int fileFontId;
-    uint16_t fileViewportWidth, fileViewportHeight;
-    float fileLineCompression;
-    bool fileExtraParagraphSpacing;
-    uint8_t fileParagraphAlignment;
-    bool fileHyphenationEnabled;
-    bool fileEmbeddedStyle;
-    uint8_t fileImageRendering;
-    bool fileFocusReadingEnabled;
-    serialization::readPod(file, fileFontId);
-    serialization::readPod(file, fileLineCompression);
-    serialization::readPod(file, fileExtraParagraphSpacing);
-    serialization::readPod(file, fileParagraphAlignment);
-    serialization::readPod(file, fileViewportWidth);
-    serialization::readPod(file, fileViewportHeight);
-    serialization::readPod(file, fileHyphenationEnabled);
-    serialization::readPod(file, fileEmbeddedStyle);
-    serialization::readPod(file, fileImageRendering);
-    serialization::readPod(file, fileFocusReadingEnabled);
-
-    if (spec.fontId != fileFontId || spec.lineCompression != fileLineCompression ||
-        spec.extraParagraphSpacing != fileExtraParagraphSpacing || spec.paragraphAlignment != fileParagraphAlignment ||
-        spec.viewportWidth != fileViewportWidth || spec.viewportHeight != fileViewportHeight ||
-        spec.hyphenationEnabled != fileHyphenationEnabled || spec.embeddedStyle != fileEmbeddedStyle ||
-        spec.imageRendering != fileImageRendering || spec.focusReadingEnabled != fileFocusReadingEnabled) {
-      file.close();
-      LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
-      clearCache();
-      return false;
-    }
-  }
-
-  serialization::readPod(file, pageCount);
-
+  const size_t size = file.size();
+  const auto range = [size](uint32_t start, size_t bytes) {
+    return start >= HEADER_SIZE && start <= size && bytes <= size - start;
+  };
+  if (!range(pageLut, size_t(count) * 4) || !range(anchorMap, 2) || !range(paragraphLut, 2 + size_t(count) * 2) ||
+      !range(liLut, size_t(count) * 2) || !range(visibleLut, size_t(count) * 4) ||
+      pageLut + size_t(count) * 4 > anchorMap || anchorMap >= paragraphLut ||
+      paragraphLut + 2 + size_t(count) * 2 > liLut || liLut + size_t(count) * 2 > visibleLut)
+    return invalid();
+  const bool filePartial = version == SECTION_FILE_PARTIAL_VERSION;
   if (filePartial) {
-    // A partial's pageCount is the watermark of a suspended build. Read the watermark
-    // trailer (appended after the visible-offset LUT) so estimatedTotalPages can extrapolate.
-    uint32_t liLutOffset = 0;
-    file.seek(HEADER_SIZE - sizeof(uint32_t) * 2);
-    serialization::readPod(file, liLutOffset);
-    uint32_t visibleLutOffset = 0;
-    file.seek(HEADER_SIZE - sizeof(uint32_t));
-    serialization::readPod(file, visibleLutOffset);
-    const uint32_t trailerOffset = visibleLutOffset + static_cast<uint32_t>(pageCount) * sizeof(uint32_t);
-    const bool trailerValid = pageCount > 0 && liLutOffset >= HEADER_SIZE && visibleLutOffset > liLutOffset &&
-                              trailerOffset + 2 * sizeof(uint32_t) <= file.size();
-    if (!trailerValid) {
-      file.close();
-      LOG_ERR("SCT", "Deserialization failed: malformed partial section");
-      clearCache();
-      pageCount = 0;
-      return false;
-    }
-    file.seek(trailerOffset);
-    serialization::readPod(file, partialBytesConsumed_);
-    serialization::readPod(file, partialTotalBytes_);
-    partial_ = true;
-    partialPageCount_ = pageCount;
+    const size_t trailer = size_t(visibleLut) + size_t(count) * 4;
+    if (!count || trailer > size || size - trailer < 8 || !file.seek(trailer) || !read(partialBytesConsumed_) ||
+        !read(partialTotalBytes_) || partialBytesConsumed_ > partialTotalBytes_)
+      return invalid();
   }
-
-  // Explicit close() required: member variable persists beyond function scope
+  pageCount = count;
+  partial_ = filePartial;
+  partialPageCount_ = filePartial ? count : 0;
   file.close();
+#ifdef CROSSPOINT_NATIVE_TEXT
+  layoutFontId_ = spec.fontId;
+  layoutFingerprint_ = fingerprint;
+  hasLayoutSnapshot_ = true;
+#endif
   LOG_DBG("SCT", "Deserialization succeeded: %d pages%s", pageCount, filePartial ? " (partial)" : "");
   return true;
 }
@@ -262,12 +268,23 @@ bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::functio
 bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void()>& popupFn) {
   if (build_) {
     LOG_ERR("SCT", "startBuild called while a build is already active");
+    if (!textLayoutMatches()) discardBuild(false);
     return false;
   }
-  // Reclaim rebuildable font caches before CSS and layout allocations.
-  if (auto* fontCache = renderer.getFontCacheManager()) {
-    fontCache->releaseSdFontCaches();
+#ifdef CROSSPOINT_NATIVE_TEXT
+  const uint64_t fingerprint = renderer.textLayoutFingerprint(spec.fontId);
+  // A new build must not expose an old partial under its new identity.
+  if (!textLayoutMatches() || layoutFontId_ != spec.fontId) {
+    partial_ = false;
+    partialPageCount_ = 0;
   }
+#endif
+  // Reclaim rebuildable font caches before CSS and layout allocations.
+#ifdef CROSSPOINT_NATIVE_TEXT
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#else
+  if (auto* fontCache = renderer.getFontCacheManager()) fontCache->releaseSdFontCaches();
+#endif
   buildComplete_ = false;
   builtPageCount_ = 0;
   // Pages from a loaded partial stay readable (from filePath) while this build writes
@@ -360,8 +377,6 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
     return false;
   }
-  // Header is written with the incomplete-version sentinel; finalizeBuild() commits it.
-  writeSectionFileHeader(spec);
 
   auto ctx = makeUniqueNoThrow<BuildContext>();
   if (!ctx) {
@@ -444,9 +459,20 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
 
   if (!build_->parser->beginParse()) {
     LOG_ERR("SCT", "Failed to begin parse");
-    abandonBuild();
+    discardBuild(false);
     return false;
   }
+#ifdef CROSSPOINT_NATIVE_TEXT
+  if (fingerprint != renderer.textLayoutFingerprint(spec.fontId)) {
+    discardBuild(false);
+    return false;
+  }
+  layoutFontId_ = spec.fontId;
+  layoutFingerprint_ = fingerprint;
+  hasLayoutSnapshot_ = true;
+#endif
+  // No pages are emitted by beginParse; freeze identity before writing the header.
+  writeSectionFileHeader(spec);
   build_->totalBytes = build_->parser->parseTotalBytes();
   return true;
 }
@@ -461,7 +487,15 @@ bool Section::buildSomeMore(const int maxPages) {
   // would otherwise turn one "small" chunk into a blocking rebuild of the whole watermark.
   const int startCount = builtPageCount_;
   for (;;) {
+    if (!textLayoutMatches()) {
+      discardBuild(false);
+      return false;
+    }
     const auto status = build_->parser->parseStep();
+    if (!textLayoutMatches()) {
+      discardBuild(false);
+      return false;
+    }
     if (status == ChapterHtmlSlimParser::ParseStatus::Error) {
       LOG_ERR("SCT", "Parse error during incremental build");
       abandonBuild();
@@ -549,6 +583,11 @@ uint16_t Section::estimatedTotalPages() const {
 // the total page count. The parser must still be alive (anchors are read from it).
 // On failure the tmp is removed and any pre-existing file at filePath is left intact.
 bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsumed, const uint32_t totalBytes) {
+  if (!textLayoutMatches()) {
+    file.close();
+    Storage.remove(binTmpPath().c_str());
+    return false;
+  }
   const bool asPartial = (version == SECTION_FILE_PARTIAL_VERSION);
 
   const auto failCommit = [this]() {
@@ -612,12 +651,14 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
   serialization::writePod(file, paragraphLutOffset);
   serialization::writePod(file, liLutFileOffset);
   serialization::writePod(file, visibleLutFileOffset);
+  if (!textLayoutMatches()) return failCommit();
   // ...then commit by overwriting the sentinel version with the real one. Writing the
   // version last makes it the commit point: a crash before here leaves version 0.
   file.seek(0);
   serialization::writePod(file, version);
   // Explicit close() required: member variable persists beyond function scope
   file.close();
+  if (!textLayoutMatches()) return failCommit();
 
   // Swap into place. A crash between remove and rename loses the old file but keeps a
   // fully-committed tmp; the next build just removes it and rebuilds.
@@ -634,7 +675,19 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
 
 bool Section::finalizeBuild() {
   // Flush the trailing page (emits the last page via the completePageFn into the LUT).
-  build_->parser->finishParse();
+  if (!textLayoutMatches()) {
+    discardBuild(false);
+    return false;
+  }
+  const bool parsed = build_->parser->finishParse();
+  if (!textLayoutMatches()) {
+    discardBuild(false);
+    return false;
+  }
+  if (!parsed) {
+    abandonBuild();
+    return false;
+  }
 
   if (!build_->reusedHtml) {
     // Parse succeeded: promote the freshly unzipped HTML to the persistent cache so future
@@ -665,6 +718,10 @@ bool Section::finalizeBuild() {
 
 void Section::suspendBuild() {
   if (!build_) return;
+  if (!textLayoutMatches()) {
+    discardBuild(false);
+    return;
+  }
 
   // Only worth persisting if this build produced pages a pre-existing partial doesn't
   // already cover; otherwise keep the older (bigger) partial and just drop the tmp.
@@ -702,7 +759,9 @@ void Section::suspendBuild() {
   builtPageCount_ = 0;
 }
 
-void Section::abandonBuild() {
+void Section::abandonBuild() { discardBuild(true); }
+
+void Section::discardBuild(const bool removeCache) {
   if (!build_) return;
   if (build_->parser) build_->parser->abortParse();
   if (build_->cssParser) build_->cssParser->clear();
@@ -713,7 +772,7 @@ void Section::abandonBuild() {
   }
   // A parse error would recur against the same HTML, so drop any partial too -- resuming
   // from it would just re-enter the failing build every open.
-  if (Storage.exists(filePath.c_str())) {
+  if (removeCache && Storage.exists(filePath.c_str())) {
     Storage.remove(filePath.c_str());
   }
   if (!build_->reusedHtml && Storage.exists(build_->tmpHtmlPath.c_str())) {
@@ -786,11 +845,20 @@ std::unique_ptr<Page> Section::loadPageAt(const int page) const {
 }
 
 std::unique_ptr<Page> Section::loadPage(const int page) {
+  if (!textLayoutMatches()) {
+    discardBuild(false);
+    return nullptr;
+  }
   if (page < 0) {
     return nullptr;
   }
   if (build_ && page < static_cast<int>(build_->lut.size())) {
-    return loadPageDuringBuild(page);
+    auto result = loadPageDuringBuild(page);
+    if (!textLayoutMatches()) {
+      discardBuild(false);
+      return nullptr;
+    }
+    return result;
   }
   // Not (yet) in the active build: serve from the file on disk -- a finalized section,
   // or a partial from a previous session whose pages the rebuild hasn't reached again.
@@ -798,7 +866,8 @@ std::unique_ptr<Page> Section::loadPage(const int page) {
   if (page >= onDisk) {
     return nullptr;
   }
-  return loadPageAt(page);
+  auto result = loadPageAt(page);
+  return textLayoutMatches() ? std::move(result) : nullptr;
 }
 
 std::string Section::getTextFromSectionFile() {
@@ -810,6 +879,12 @@ std::string Section::getTextFromSectionFile() {
         const auto& line = static_cast<const PageLine&>(*el);
         if (line.getBlock()) {
           const auto& block = *line.getBlock();
+#ifdef CROSSPOINT_NATIVE_TEXT
+          if (const auto* native = block.nativeLine()) {
+            fullText.append(native->logicalText());
+            continue;
+          }
+#endif
           for (uint16_t i = 0; i < block.wordCount(); i++) {
             if (!fullText.empty()) fullText += " ";
             fullText += block.wordText(i);

@@ -18,8 +18,10 @@
 #
 # Variable fonts:
 #   Some fonts (Bitter, Inter, Alegreya) are distributed as variable fonts.
-#   freetype-py can't set variable font axis values, so the build script
-#   uses fonttools.instancer to extract static instances automatically.
+#   Legacy .cpfont generation uses fonttools.instancer to extract static
+#   instances because freetype-py cannot set variable font axis values.
+#   Native Pro catalogues retain the original SFNT and apply these coordinates
+#   at runtime; build-native-font-catalogue.py --refresh updates their source lock.
 #
 #   To use a variable font, add a 'variable' key to the style spec with
 #   axis values to pin:

@@ -1,0 +1,2 @@
+# Keep upstream byte digests identical on Windows and Unix checkouts.
+* -text

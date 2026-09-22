@@ -5,6 +5,7 @@ import re
 import math
 import argparse
 from collections import namedtuple
+from font_ranges import BUILTIN_INTERVALS
 
 # Force UTF-8 stdout so that `python fontconvert.py … > foo.h` on Windows
 # (default cp1252) doesn't emit UTF-16 LE / replacement chars in the generated
@@ -39,102 +40,7 @@ load_flags = freetype.FT_LOAD_RENDER
 if args.force_autohint:
     load_flags |= freetype.FT_LOAD_FORCE_AUTOHINT
 
-# inclusive unicode code point intervals
-# must not overlap and be in ascending order
-intervals = [
-    ### Basic Latin ###
-    # ASCII letters, digits, punctuation, control characters
-    (0x0000, 0x007F),
-    ### Latin-1 Supplement ###
-    # Accented characters for Western European languages
-    (0x0080, 0x00FF),
-    ### Latin Extended-A ###
-    # Eastern European and Baltic languages
-    (0x0100, 0x017F),
-    ### Latin Extended-B (Vietnamese subset only) ###
-    # Only Ơ/ơ (U+01A0-01A1), Ư/ư (U+01AF-01B0) for Vietnamese
-    (0x01A0, 0x01A1),
-    (0x01AF, 0x01B0),
-    ### Latin Extended-B (European subset only) ###
-    # Croatian digraphs (DŽ/Lj/Nj), Pinyin caron variants,
-    # European diacritical variants, Romanian (Ș/ș/Ț/ț)
-    (0x01C4, 0x021F),
-    ### Vietnamese Extended ###
-    # All precomposed Vietnamese characters with tone marks
-    # Ả Ấ Ầ Ẩ Ẫ Ậ Ắ Ằ Ẳ Ẵ Ặ Ẹ Ẻ Ẽ Ế Ề Ể Ễ Ệ Ỉ Ị Ọ Ỏ Ố Ồ Ổ Ỗ Ộ Ớ Ờ Ở Ỡ Ợ Ụ Ủ Ứ Ừ Ử Ữ Ự Ỳ Ỵ Ỷ Ỹ
-    (0x1EA0, 0x1EF9),
-    ### General Punctuation (core subset) ###
-    # Smart quotes, en dash, em dash, ellipsis, NO-BREAK SPACE
-    (0x2000, 0x206F),
-    ### Basic Symbols From "Latin-1 + Misc" ###
-    # dashes, quotes, prime marks
-    (0x2010, 0x203A),
-    # misc punctuation
-    (0x2040, 0x205F),
-    # common currency symbols
-    (0x20A0, 0x20CF),
-    ### Combining Diacritical Marks (minimal subset) ###
-    # Needed for proper rendering of many extended Latin languages
-    (0x0300, 0x036F),
-    ### Greek & Coptic ###
-    # Used in science, maths, philosophy, some academic texts
-    # (0x0370, 0x03FF),
-    ### Cyrillic ###
-    # Russian, Ukrainian, Bulgarian, etc.
-    (0x0400, 0x04FF),
-    ### Math Symbols (common subset) ###
-    # Superscripts and Subscripts
-    (0x2070, 0x209F),
-    # General math operators
-    (0x2200, 0x22FF),
-    # Arrows
-    (0x2190, 0x21FF),
-    ### CJK ###
-    # Core Unified Ideographs
-    # (0x4E00, 0x9FFF),
-    # # Extension A
-    # (0x3400, 0x4DBF),
-    # # Extension B
-    # (0x20000, 0x2A6DF),
-    # # Extension C–F
-    # (0x2A700, 0x2EBEF),
-    # # Extension G
-    # (0x30000, 0x3134F),
-    # # Hiragana
-    # (0x3040, 0x309F),
-    # # Katakana
-    # (0x30A0, 0x30FF),
-    # # Katakana Phonetic Extensions
-    # (0x31F0, 0x31FF),
-    # # Halfwidth Katakana
-    # (0xFF60, 0xFF9F),
-    # # Hangul Syllables
-    # (0xAC00, 0xD7AF),
-    # # Hangul Jamo
-    # (0x1100, 0x11FF),
-    # # Hangul Compatibility Jamo
-    # (0x3130, 0x318F),
-    # # Hangul Jamo Extended-A
-    # (0xA960, 0xA97F),
-    # # Hangul Jamo Extended-B
-    # (0xD7B0, 0xD7FF),
-    # # CJK Radicals Supplement
-    # (0x2E80, 0x2EFF),
-    # # Kangxi Radicals
-    # (0x2F00, 0x2FDF),
-    # # CJK Symbols and Punctuation
-    # (0x3000, 0x303F),
-    # # CJK Compatibility Forms
-    # (0xFE30, 0xFE4F),
-    # # CJK Compatibility Ideographs
-    # (0xF900, 0xFAFF),
-    ### Alphabetic Presentation Forms (Latin ligatures) ###
-    # ff, fi, fl, ffi, ffl, long-st, st
-    (0xFB00, 0xFB06),
-    ### Specials
-    # Replacement Character
-    (0xFFFD, 0xFFFD),
-]
+intervals = BUILTIN_INTERVALS
 
 add_ints = []
 if args.additional_intervals:

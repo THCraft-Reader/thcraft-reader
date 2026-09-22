@@ -13,12 +13,20 @@ enum class BidiBaseDir : signed char { AUTO = -1, LTR = 0, RTL = 1 };
 
 class FontCacheManager;
 class SdCardFont;
+class NativeTextEngine;
+struct NativeLineData;
+struct NativeLineInput;
+struct NativeGlyphRun;
+enum class TextStatus : uint8_t;
 
 #include <cstring>
 #include <deque>
 #include <map>
 #include <string>
 #include <vector>
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <string_view>
+#endif
 
 #include "Bitmap.h"
 
@@ -64,6 +72,31 @@ class GfxRenderer {
   // recording to the (non-const) FontCacheManager. Same pragmatic compromise
   // as before, concentrated in a single pointer instead of four fields.
   mutable FontCacheManager* fontCacheManager_ = nullptr;
+
+  NativeTextEngine* nativeTextEngine_ = nullptr;
+  mutable TextStatus textStatus_ = static_cast<TextStatus>(0);
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  struct NativeTextState;
+  mutable NativeTextState* nativeTextState_ = nullptr;
+  mutable bool nativeErrorShown_ = false;
+  NativeTextState* nativeState() const;
+  void releaseNativeState();
+  bool reportNativeStatus(TextStatus status) const;
+  void showNativeError(int x, int y, bool black) const;
+  int nativeMeasure(int fontId, const char* text, EpdFontFamily::Style style, int8_t level, bool advance) const;
+  int nativeMetric(int fontId, bool ascender) const;
+  int nativePairAdvance(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style, bool space) const;
+  void drawNativeText(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style, int8_t level,
+                      bool rotated, bool centered = false) const;
+  bool warmNativeText(int fontId, const char* text, EpdFontFamily::Style style) const;
+  TextStatus stageNativeRun(const NativeGlyphRun& run, int32_t x26, int32_t y26, bool rotated, bool warm) const;
+  TextStatus stageNativeLine(int fontId, const NativeLineData& line, int x, int y, bool warm) const;
+  void paintNativeRun(bool black, bool rotated) const;
+  std::string truncateNativeText(int fontId, std::string_view text, int maxWidth, EpdFontFamily::Style style,
+                                 bool forceEllipsis = false) const;
+  std::vector<std::string> wrapNativeText(int fontId, const char* text, int maxWidth, int maxLines,
+                                          EpdFontFamily::Style style) const;
+#endif
 
   // One-shot refresh promotion (see promoteNextRefresh). Mutable because
   // displayBuffer() is const but must consume the flag.
@@ -130,7 +163,9 @@ class GfxRenderer {
  public:
   explicit GfxRenderer(HalDisplay& halDisplay)
       : display(halDisplay), renderMode(BW), orientation(Portrait), fadingFix(false) {}
-  ~GfxRenderer() { freeBwBufferChunks(); }
+  ~GfxRenderer();
+  GfxRenderer(const GfxRenderer&) = delete;
+  GfxRenderer& operator=(const GfxRenderer&) = delete;
 
   // Setup
   void begin();  // must be called right after display.begin()
@@ -145,6 +180,18 @@ class GfxRenderer {
   }
   void setFontCacheManager(FontCacheManager* m) { fontCacheManager_ = m; }
   FontCacheManager* getFontCacheManager() const { return fontCacheManager_; }
+  // Native methods never register synthetic legacy font-map/cache entries.
+  void setNativeTextEngine(NativeTextEngine* engine);
+  bool usesNativeText() const { return nativeTextEngine_ != nullptr; }
+  NativeTextEngine* nativeTextEngine() const { return nativeTextEngine_; }
+  uint64_t textLayoutFingerprint(int fontId) const;
+  TextStatus lastTextStatus() const { return textStatus_; }
+  void clearTextStatus() const;
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  void recordTextFailure(TextStatus status) const { reportNativeStatus(status); }
+#endif
+  bool drawNativeLine(int fontId, const NativeLineData& line, int x, int y, bool black = true) const;
+  bool warmNativeLine(int fontId, const NativeLineData& line) const;
   // Batch-prewarm CJK fallback glyphs for a screenful of static strings in ONE
   // SD pass. List screens redraw every visible row on each repaint; without an
   // up-front batch each row's draw prewarms per-string, and under heap
@@ -263,6 +310,12 @@ class GfxRenderer {
     clipTop_ = y;
     clipRight_ = x + width;
     clipBottom_ = y + height;
+  }
+  void getClipRect(int& x, int& y, int& width, int& height) const {
+    x = clipLeft_;
+    y = clipTop_;
+    width = clipRight_ - clipLeft_;
+    height = clipBottom_ - clipTop_;
   }
   void drawPixel(int x, int y, bool state = true) const;
   void drawLine(int x1, int y1, int x2, int y2, bool state = true) const;

@@ -38,13 +38,21 @@ class ChapterHtmlSlimParser {
   // leave one char at end for null pointer
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
+#ifdef CROSSPOINT_NATIVE_TEXT
+  bool partWordSynthetic = false;
+  bool nativeWhitespacePending = false;
+#endif
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   // Ruby text state
   bool inRuby = false;
   int rubyStartWordIndex = -1;
   bool collectingRubyText = false;
+#ifdef CROSSPOINT_NATIVE_TEXT
+  NativeBuffer<char> rubyTextBuffer;
+#else
   std::string rubyTextBuffer;
+#endif
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
   int fontId;
@@ -96,11 +104,18 @@ class ChapterHtmlSlimParser {
   bool insideTableCell = false;
   bool tableRowStacked = false;
   bool tableRowRtl = false;
+  bool tableRowSliceActive = false;
   uint16_t tableRowsSpannedRemaining = 0;
   size_t tableCellTextBytes = 0;
   std::vector<std::unique_ptr<ParsedText>> tableRowCells;
   std::array<std::vector<std::unique_ptr<TextBlock>>, MAX_GRID_TABLE_COLUMNS> tableCellLines;
   std::vector<uint32_t> tableLineVisibleOffsets;
+#ifdef CROSSPOINT_NATIVE_TEXT
+  // Oversized cells use full-width layout, but remain owned by their row until
+  // it closes; a parser chunk must never publish a partial table row.
+  NativeBuffer<TextBlock*> nativeStackedTableLines;
+  bool nativeParagraphStarted = false;
+#endif
   bool listItemBulletOnly = false;  // true when currentTextBlock has only the <li> bullet
 
   // Tracks the innermost open <ul>/<ol> so <li> knows whether to number itself,
@@ -133,6 +148,7 @@ class ChapterHtmlSlimParser {
   bool currentPageVisibleOffsetSet = false;
   bool insideBody = false;
   bool htmlEnded_ = false;
+  bool layoutFailed = false;
   bool syntheticCharacterData = false;
   uint16_t nonVisibleTextDepth = 0;
 
@@ -142,8 +158,13 @@ class ChapterHtmlSlimParser {
   uint8_t currentFootnoteLinkId = 0;
   FootnoteEntry currentFootnote = {};
   int currentFootnoteLinkTextLen = 0;
-  std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
+  std::vector<std::pair<uint32_t, FootnoteEntry>> pendingFootnotes;  // native source anchor / legacy word index
   int wordsExtractedInBlock = 0;
+#ifdef CROSSPOINT_NATIVE_TEXT
+  uint32_t nativeFootnoteAnchor = UINT32_MAX;
+  bool nativeFootnoteQueued = false;
+  bool nativeFootnotePendingSpace = false;
+#endif
 
   // Resumable parse state. The one-shot parseAndBuildPages() drives these
   // internally; the incremental section builder drives them across render ticks
@@ -159,11 +180,19 @@ class ChapterHtmlSlimParser {
   void startNewTextBlock(const BlockStyle& blockStyle);
   void flushPendingAnchor();
   void flushPartWordBuffer();
+#ifdef CROSSPOINT_NATIVE_TEXT
+  bool checkNativeTextStatus(const ParsedText* text);
+  void flushNativeWindow(bool beforeRuby = false);
+  void collectNativeTableLines(bool includeLastLine, bool beforeRuby = false);
+  void clearNativeTableLines();
+  void updateNativeFootnote();
+#endif
   void fallbackTableRowToStacked();
   void closeTableCell();
   void finishTableRow();
   void addTableRowSeparator();
   void setCurrentPageVisibleOffset(uint32_t offset);
+  void failLayout();
   void makePages();
   static EpdFontFamily::Style fontStyleForTextDecoration(CssTextDecoration decoration);
   static void applyDirectionToEntry(StyleStackEntry& entry, const CssStyle& css);
@@ -222,7 +251,7 @@ class ChapterHtmlSlimParser {
   enum class ParseStatus { More, Done, Error };
   bool beginParse();
   ParseStatus parseStep();
-  bool finishParse();  // flush the trailing page and tear down; returns true
+  bool finishParse();  // flush the trailing page and tear down; false on layout failure
   void abortParse();   // tear down without flushing (error / abandon)
 
   void addLineToPage(std::unique_ptr<TextBlock> line, uint32_t visibleOffset);

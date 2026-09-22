@@ -2,7 +2,11 @@
 
 #include <DNSServer.h>
 #include <ESPmDNS.h>
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <NativeTextEngine.h>
+#else
 #include <FontCacheManager.h>
+#endif
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <WiFi.h>
@@ -71,10 +75,14 @@ void CrossPointWebServerActivity::onEnter() {
   // fallback (mini glyph/kern arenas, kern class tables) are rebuildable on
   // demand — release them up front instead of aborting in startWebServer()
   // when the heap comes up short (observed on X3 with a Korean SD font).
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#else
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->releaseSdFontCaches();
     LOG_DBG("WEBACT", "Free heap after SD font cache release: %d bytes", ESP.getFreeHeap());
   }
+#endif
 
   // Reset state
   state = WebServerActivityState::MODE_SELECTION;
@@ -269,11 +277,15 @@ void CrossPointWebServerActivity::startWebServer() {
 
   // Repeat the release right before the allocation: the WiFi selection screen
   // rendered since onEnter(), and a CJK SSID repopulates the SD-font caches.
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#else
   if (auto* fcm = renderer.getFontCacheManager()) {
     LOG_DBG("WEBACT", "Free heap before SD font cache release: %d bytes", ESP.getFreeHeap());
     fcm->releaseSdFontCaches();
     LOG_DBG("WEBACT", "Free heap before server alloc: %d bytes", ESP.getFreeHeap());
   }
+#endif
 
   // Create the web server instance
   webServer.reset(new CrossPointWebServer());

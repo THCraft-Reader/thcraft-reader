@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "FontWebApi.h"
+
 // Structure to hold file information
 struct FileInfo {
   String name;
@@ -110,25 +112,13 @@ class CrossPointWebServer {
 
   // Font management handlers
   void handleFontsPage() const;
-  void handleFontList() const;
+  void handleFontList();
   void handleFontUpload();
   void handleFontUploadData();
   void handleFontDelete();
 
-  // Font upload state
-  struct FontUploadState {
-    HalFile file;
-    std::string familyName;
-    std::string filePath;
-    bool valid = false;
-    bool magicChecked = false;
-    size_t bytesWritten = 0;
-    static constexpr size_t BUFFER_SIZE = 4096;
-    std::vector<uint8_t> buffer;
-    size_t bufferPos = 0;
-
-    FontUploadState() { buffer.resize(BUFFER_SIZE); }
-  } fontUpload;
+  FontWebApi fontApi;
+  bool fontUploadStarted = false;
 
   // OPDS server handlers
   void handleGetOpdsServers() const;

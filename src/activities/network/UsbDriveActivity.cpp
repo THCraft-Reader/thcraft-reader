@@ -6,6 +6,9 @@
 
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include "SdCardFontSystem.h"
+#endif
 #include "components/UITheme.h"
 
 namespace fui = freeink::ui;
@@ -17,16 +20,23 @@ void UsbDriveActivity::onEnter() {
 
   // Show the safety instructions before giving the raw SD card to the USB host.
   requestUpdateAndWait();
-  if (!Storage.beginUsbDrive()) {
-    LOG_ERR("USB", "Unable to start USB Drive");
-    preparing = false;
-    startFailed = true;
-    state = State::IoError;
-    startFailureStartedAt = millis();
-    requestUpdate();
-    return;
+  {
+    RenderLock lock;
+#if defined(CROSSPOINT_NATIVE_TEXT)
+    // Removing custom mappings as well as closing faces keeps subsequent USB
+    // status paints on bundled fonts while the host owns the filesystem.
+    sdFontSystem.releaseNativeFonts();
+#endif
+    if (!Storage.beginUsbDrive()) {
+      LOG_ERR("USB", "Unable to start USB Drive");
+      preparing = false;
+      startFailed = true;
+      state = State::IoError;
+      startFailureStartedAt = millis();
+      requestUpdate();
+      return;
+    }
   }
-
   preparing = false;
   state = State::WaitingForHost;
   hostWaitStartedAt = millis();

@@ -36,3 +36,7 @@ struct LiangWordConfig {
 // Shared Liang pattern evaluator used by every language-specific hyphenator.
 std::vector<size_t> liangBreakIndexes(const std::vector<CodepointInfo>& cps,
                                       const SerializedHyphenationPatterns& patterns, const LiangWordConfig& config);
+
+// Allocation-free form. Returns the number written (at most capacity).
+size_t liangBreakIndexes(const CodepointInfo* cps, size_t count, const SerializedHyphenationPatterns& patterns,
+                         const LiangWordConfig& config, size_t* indexes, size_t capacity);

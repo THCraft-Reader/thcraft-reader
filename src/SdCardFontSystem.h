@@ -1,11 +1,16 @@
 #pragma once
 
+#if !defined(CROSSPOINT_NATIVE_TEXT) || !CROSSPOINT_NATIVE_TEXT
 #include <SdCardFontManager.h>
+#endif
 #include <SdCardFontRegistry.h>
 
 #include <atomic>
 
 class GfxRenderer;
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+class NativeTextEngine;
+#endif
 
 /// Facade that owns the SD card font registry, manager, and resolver logic.
 /// Hides implementation details behind a single begin() + ensureLoaded() API.
@@ -39,13 +44,20 @@ class SdCardFontSystem {
   /// If the registry is dirty, re-scan the SD card now and clear the flag.
   /// Used by the web UI so uploaded/deleted fonts appear in the list
   /// without waiting for the reader activity to run ensureLoaded().
-  void refreshIfDirty() {
-    if (registryDirty_.exchange(false, std::memory_order_acquire)) {
-      registry_.discover();
-    }
-  }
+  void refreshIfDirty();
+
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  /// Close SD handles and remove custom mappings before mutation/USB handoff.
+  /// Does not rediscover files or alter the saved selection; caller holds no storage lock.
+  void releaseNativeFonts();
+  /// Validate staged or installed SFNT bytes without registering a family.
+  TextStatus validateNativeFontFile(std::string_view path, std::span<const NativeVariation> axes = {});
+  /// Translated diagnostic, once per boot/selection failure; nullptr when none is pending.
+  const char* takeNotice();
+#endif
 
  private:
+#if !defined(CROSSPOINT_NATIVE_TEXT) || !CROSSPOINT_NATIVE_TEXT
   // Load the active SD family at the built-in UI point sizes and register each
   // as a size-matched script fallback for the corresponding UI font, so book
   // titles/list rows in scripts the built-ins lack (CJK, Greek, Cyrillic, ...)
@@ -53,9 +65,22 @@ class SdCardFontSystem {
   // family is loaded. Safe to call repeatedly (sizes already loaded are
   // reused).
   void setupUiFallbacks(GfxRenderer& renderer);
+#endif
 
   SdCardFontRegistry registry_;
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  NativeTextEngine* nativeEngine_ = nullptr;
+  char loadedFamily_[32]{};
+  char attemptedFamily_[32]{};
+  int readerIds_[4]{};
+  bool attemptedSerif_ = false;
+  bool noticeIssued_ = false;
+  bool nativeReloadNeeded_ = true;
+  enum class Notice : uint8_t { None, Migration, Invalid, Memory, Render };
+  Notice notice_ = Notice::None;
+#else
   SdCardFontManager manager_;
+#endif
   std::atomic<bool> registryDirty_{false};
 };
 

@@ -1,0 +1,1273 @@
+{
+  "version": 1,
+  "format": "opentype",
+  "scriptGroups": [
+    {
+      "tag": "latin",
+      "label": "Latin"
+    },
+    {
+      "tag": "cyrillic",
+      "label": "Cyrillic"
+    },
+    {
+      "tag": "greek",
+      "label": "Greek"
+    },
+    {
+      "tag": "hebrew",
+      "label": "Hebrew"
+    },
+    {
+      "tag": "arabic",
+      "label": "Arabic"
+    },
+    {
+      "tag": "georgian",
+      "label": "Georgian"
+    },
+    {
+      "tag": "armenian",
+      "label": "Armenian"
+    },
+    {
+      "tag": "ethiopic",
+      "label": "Ethiopic"
+    },
+    {
+      "tag": "hangul",
+      "label": "Korean"
+    }
+  ],
+  "families": [
+    {
+      "name": "Literata",
+      "description": "Screen-optimized serif (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "Literata-Regular.ttf",
+          "size": 319964,
+          "crc32": 3444607403,
+          "url": "https://raw.githubusercontent.com/googlefonts/literata/0c2761b727a1b3a7cffd313c37f0f5163dfc7a63/fonts/ttf/Literata-Regular.ttf"
+        },
+        {
+          "name": "Literata-Bold.ttf",
+          "size": 331304,
+          "crc32": 4025781391,
+          "url": "https://raw.githubusercontent.com/googlefonts/literata/0c2761b727a1b3a7cffd313c37f0f5163dfc7a63/fonts/ttf/Literata-Bold.ttf"
+        },
+        {
+          "name": "Literata-Italic.ttf",
+          "size": 304104,
+          "crc32": 3743048182,
+          "url": "https://raw.githubusercontent.com/googlefonts/literata/0c2761b727a1b3a7cffd313c37f0f5163dfc7a63/fonts/ttf/Literata-Italic.ttf"
+        },
+        {
+          "name": "Literata-BoldItalic.ttf",
+          "size": 318888,
+          "crc32": 4031374081,
+          "url": "https://raw.githubusercontent.com/googlefonts/literata/0c2761b727a1b3a7cffd313c37f0f5163dfc7a63/fonts/ttf/Literata-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "SourceSerif4",
+      "description": "Adobe transitional serif (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "SourceSerif4-Regular.ttf",
+          "size": 261868,
+          "crc32": 1989561168,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/TTF/SourceSerif4-Regular.ttf"
+        },
+        {
+          "name": "SourceSerif4-Bold.ttf",
+          "size": 271568,
+          "crc32": 1502692782,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/TTF/SourceSerif4-Bold.ttf"
+        },
+        {
+          "name": "SourceSerif4-Italic.ttf",
+          "size": 187808,
+          "crc32": 2756640830,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/TTF/SourceSerif4-It.ttf"
+        },
+        {
+          "name": "SourceSerif4-BoldItalic.ttf",
+          "size": 191832,
+          "crc32": 3351126733,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/TTF/SourceSerif4-BoldIt.ttf"
+        }
+      ]
+    },
+    {
+      "name": "NotoSerifExtended",
+      "description": "Serif (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "NotoSerifExtended-Regular.ttf",
+          "size": 395844,
+          "crc32": 1561104259,
+          "url": "https://raw.githubusercontent.com/notofonts/NotoSerif/4281f314d93789462225d8a995e2f98def764189/fonts/ttf/unhinted/instance_ttf/NotoSerif-Regular.ttf"
+        },
+        {
+          "name": "NotoSerifExtended-Bold.ttf",
+          "size": 398220,
+          "crc32": 3201158568,
+          "url": "https://raw.githubusercontent.com/notofonts/NotoSerif/4281f314d93789462225d8a995e2f98def764189/fonts/ttf/unhinted/instance_ttf/NotoSerif-Bold.ttf"
+        },
+        {
+          "name": "NotoSerifExtended-Italic.ttf",
+          "size": 430188,
+          "crc32": 3518984969,
+          "url": "https://raw.githubusercontent.com/notofonts/NotoSerif-Italic/001c4affbf960ec0dcfda2fb54acaaa4e122fe1e/fonts/ttf/unhinted/instance_ttf/NotoSerif-Italic.ttf"
+        },
+        {
+          "name": "NotoSerifExtended-BoldItalic.ttf",
+          "size": 431356,
+          "crc32": 4043908593,
+          "url": "https://raw.githubusercontent.com/notofonts/NotoSerif-Italic/001c4affbf960ec0dcfda2fb54acaaa4e122fe1e/fonts/ttf/unhinted/instance_ttf/NotoSerif-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "Merriweather",
+      "description": "Warm serif for long-form reading (Latin, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic"
+      ],
+      "files": [
+        {
+          "name": "Merriweather-Regular.ttf",
+          "size": 282844,
+          "crc32": 377522616,
+          "url": "https://raw.githubusercontent.com/SorkinType/Merriweather/4481226b336843648b5b2ee64f75737f262ded15/fonts/ttf/Merriweather-Regular.ttf"
+        },
+        {
+          "name": "Merriweather-Bold.ttf",
+          "size": 282608,
+          "crc32": 2657724140,
+          "url": "https://raw.githubusercontent.com/SorkinType/Merriweather/4481226b336843648b5b2ee64f75737f262ded15/fonts/ttf/Merriweather-Bold.ttf"
+        },
+        {
+          "name": "Merriweather-Italic.ttf",
+          "size": 272256,
+          "crc32": 2626502056,
+          "url": "https://raw.githubusercontent.com/SorkinType/Merriweather/4481226b336843648b5b2ee64f75737f262ded15/fonts/ttf/Merriweather-Italic.ttf"
+        },
+        {
+          "name": "Merriweather-BoldItalic.ttf",
+          "size": 272088,
+          "crc32": 2030812648,
+          "url": "https://raw.githubusercontent.com/SorkinType/Merriweather/4481226b336843648b5b2ee64f75737f262ded15/fonts/ttf/Merriweather-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "Lora",
+      "description": "Calligraphic serif for literary reading (Latin, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic"
+      ],
+      "files": [
+        {
+          "name": "Lora-Regular.ttf",
+          "size": 198380,
+          "crc32": 1994259967,
+          "url": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/2d53b449b60e185b39f671b44fded83e0910ad30/fonts/ttf/Lora-Regular.ttf"
+        },
+        {
+          "name": "Lora-Bold.ttf",
+          "size": 218640,
+          "crc32": 524342852,
+          "url": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/2d53b449b60e185b39f671b44fded83e0910ad30/fonts/ttf/Lora-Bold.ttf"
+        },
+        {
+          "name": "Lora-Italic.ttf",
+          "size": 206912,
+          "crc32": 1900356837,
+          "url": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/2d53b449b60e185b39f671b44fded83e0910ad30/fonts/ttf/Lora-Italic.ttf"
+        },
+        {
+          "name": "Lora-BoldItalic.ttf",
+          "size": 213560,
+          "crc32": 1752403913,
+          "url": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/2d53b449b60e185b39f671b44fded83e0910ad30/fonts/ttf/Lora-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "GentiumBookPlus",
+      "description": "Scholarly serif with wide Unicode coverage (Latin, Greek, Cyrillic, IPA)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "GentiumBookPlus-Regular.ttf",
+          "size": 818952,
+          "crc32": 3923420276,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/gentiumbookplus/GentiumBookPlus-Regular.ttf"
+        },
+        {
+          "name": "GentiumBookPlus-Bold.ttf",
+          "size": 834852,
+          "crc32": 3286977953,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/gentiumbookplus/GentiumBookPlus-Bold.ttf"
+        },
+        {
+          "name": "GentiumBookPlus-Italic.ttf",
+          "size": 882904,
+          "crc32": 3028679181,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/gentiumbookplus/GentiumBookPlus-Italic.ttf"
+        },
+        {
+          "name": "GentiumBookPlus-BoldItalic.ttf",
+          "size": 891412,
+          "crc32": 2481830883,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/gentiumbookplus/GentiumBookPlus-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "IBMPlexSerif",
+      "description": "Professional serif (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "IBMPlexSerif-Regular.ttf",
+          "size": 163068,
+          "crc32": 3309864318,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexserif/IBMPlexSerif-Regular.ttf"
+        },
+        {
+          "name": "IBMPlexSerif-Bold.ttf",
+          "size": 163800,
+          "crc32": 2020398207,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexserif/IBMPlexSerif-Bold.ttf"
+        },
+        {
+          "name": "IBMPlexSerif-Italic.ttf",
+          "size": 173004,
+          "crc32": 2789790603,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexserif/IBMPlexSerif-Italic.ttf"
+        },
+        {
+          "name": "IBMPlexSerif-BoldItalic.ttf",
+          "size": 173032,
+          "crc32": 3330427808,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexserif/IBMPlexSerif-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "Bitter",
+      "description": "Slab serif designed for e-ink (Latin, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic"
+      ],
+      "files": [
+        {
+          "name": "Bitter-Regular.ttf",
+          "size": 328636,
+          "crc32": 2437098615,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/bitter/Bitter%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 500
+          }
+        },
+        {
+          "name": "Bitter-Bold.ttf",
+          "size": 328636,
+          "crc32": 2437098615,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/bitter/Bitter%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 700
+          }
+        },
+        {
+          "name": "Bitter-Italic.ttf",
+          "size": 317652,
+          "crc32": 2411669676,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/bitter/Bitter-Italic%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 500
+          }
+        },
+        {
+          "name": "Bitter-BoldItalic.ttf",
+          "size": 317652,
+          "crc32": 2411669676,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/bitter/Bitter-Italic%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 700
+          }
+        }
+      ]
+    },
+    {
+      "name": "Domitian",
+      "description": "A humanist serif for literary reading (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "Domitian-Regular.otf",
+          "size": 231752,
+          "crc32": 3808589737,
+          "url": "https://mirror.kku.ac.th/CTAN/fonts/domitian/opentype/Domitian-Roman.otf"
+        },
+        {
+          "name": "Domitian-Bold.otf",
+          "size": 189032,
+          "crc32": 3737315066,
+          "url": "https://mirror.kku.ac.th/CTAN/fonts/domitian/opentype/Domitian-Bold.otf"
+        },
+        {
+          "name": "Domitian-Italic.otf",
+          "size": 191252,
+          "crc32": 1215909694,
+          "url": "https://mirror.kku.ac.th/CTAN/fonts/domitian/opentype/Domitian-Italic.otf"
+        },
+        {
+          "name": "Domitian-BoldItalic.otf",
+          "size": 190824,
+          "crc32": 3790435459,
+          "url": "https://mirror.kku.ac.th/CTAN/fonts/domitian/opentype/Domitian-BoldItalic.otf"
+        }
+      ]
+    },
+    {
+      "name": "LibreBaskerville",
+      "description": "A serif reimplementing the classic Baskerville (Latin)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "LibreBaskerville-Regular.ttf",
+          "size": 156008,
+          "crc32": 3467909852,
+          "url": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/9852edf75ece3af500a5ec61245f94788c3d4633/fonts/ttf/LibreBaskerville-Regular.ttf"
+        },
+        {
+          "name": "LibreBaskerville-Bold.ttf",
+          "size": 154332,
+          "crc32": 2218003418,
+          "url": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/9852edf75ece3af500a5ec61245f94788c3d4633/fonts/ttf/LibreBaskerville-Bold.ttf"
+        },
+        {
+          "name": "LibreBaskerville-Italic.ttf",
+          "size": 162224,
+          "crc32": 2032237074,
+          "url": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/9852edf75ece3af500a5ec61245f94788c3d4633/fonts/ttf/LibreBaskerville-Italic.ttf"
+        },
+        {
+          "name": "LibreBaskerville-BoldItalic.ttf",
+          "size": 163664,
+          "crc32": 2421798343,
+          "url": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/9852edf75ece3af500a5ec61245f94788c3d4633/fonts/ttf/LibreBaskerville-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "Vollkorn",
+      "description": "A serif for bread and butter use by Friedrich Althausen (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "Vollkorn-Regular.ttf",
+          "size": 577864,
+          "crc32": 2774057425,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/vollkorn/Vollkorn%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 400.0
+          }
+        },
+        {
+          "name": "Vollkorn-Bold.ttf",
+          "size": 577864,
+          "crc32": 2774057425,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/vollkorn/Vollkorn%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 700
+          }
+        },
+        {
+          "name": "Vollkorn-Italic.ttf",
+          "size": 441264,
+          "crc32": 745804378,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/vollkorn/Vollkorn-Italic%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 400.0
+          }
+        },
+        {
+          "name": "Vollkorn-BoldItalic.ttf",
+          "size": 441264,
+          "crc32": 745804378,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/vollkorn/Vollkorn-Italic%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 700
+          }
+        }
+      ]
+    },
+    {
+      "name": "NotoSansExtended",
+      "description": "Sans-serif (Latin, Greek, Cyrillic, Georgian, Armenian, Ethiopic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek",
+        "georgian",
+        "armenian",
+        "ethiopic"
+      ],
+      "files": [
+        {
+          "name": "NotoSansExtended-Regular.ttf",
+          "size": 629024,
+          "crc32": 3699047267,
+          "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Regular.ttf"
+        },
+        {
+          "name": "NotoSansExtended-Bold.ttf",
+          "size": 630968,
+          "crc32": 3970095610,
+          "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Bold.ttf"
+        },
+        {
+          "name": "NotoSansExtended-Italic.ttf",
+          "size": 642344,
+          "crc32": 1313021333,
+          "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Italic.ttf"
+        },
+        {
+          "name": "NotoSansExtended-BoldItalic.ttf",
+          "size": 644344,
+          "crc32": 4229278926,
+          "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "Inter",
+      "description": "Modern sans-serif (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "Inter-Regular.ttf",
+          "size": 876576,
+          "crc32": 321817288,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+          "axes": {
+            "wght": 400,
+            "opsz": 14.0
+          }
+        },
+        {
+          "name": "Inter-Bold.ttf",
+          "size": 876576,
+          "crc32": 321817288,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+          "axes": {
+            "wght": 700,
+            "opsz": 14.0
+          }
+        },
+        {
+          "name": "Inter-Italic.ttf",
+          "size": 906596,
+          "crc32": 569757674,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/inter/Inter-Italic%5Bopsz%2Cwght%5D.ttf",
+          "axes": {
+            "wght": 400,
+            "opsz": 14.0
+          }
+        },
+        {
+          "name": "Inter-BoldItalic.ttf",
+          "size": 906596,
+          "crc32": 569757674,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/inter/Inter-Italic%5Bopsz%2Cwght%5D.ttf",
+          "axes": {
+            "wght": 700,
+            "opsz": 14.0
+          }
+        }
+      ]
+    },
+    {
+      "name": "SourceSans3",
+      "description": "Adobe humanist sans-serif (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "SourceSans3-Regular.ttf",
+          "size": 431196,
+          "crc32": 2460776237,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/TTF/SourceSans3-Regular.ttf"
+        },
+        {
+          "name": "SourceSans3-Bold.ttf",
+          "size": 428176,
+          "crc32": 2629117167,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/TTF/SourceSans3-Bold.ttf"
+        },
+        {
+          "name": "SourceSans3-Italic.ttf",
+          "size": 315812,
+          "crc32": 811236899,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/TTF/SourceSans3-It.ttf"
+        },
+        {
+          "name": "SourceSans3-BoldItalic.ttf",
+          "size": 318700,
+          "crc32": 21398946,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/TTF/SourceSans3-BoldIt.ttf"
+        }
+      ]
+    },
+    {
+      "name": "IBMPlexSans",
+      "description": "IBM corporate sans-serif (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "IBMPlexSans-Regular.ttf",
+          "size": 200500,
+          "crc32": 1935212979,
+          "url": "https://raw.githubusercontent.com/IBM/plex/78cd4223d8de9fcb78cba84eadecb269c56093c5/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Regular.ttf"
+        },
+        {
+          "name": "IBMPlexSans-Bold.ttf",
+          "size": 200872,
+          "crc32": 1322749701,
+          "url": "https://raw.githubusercontent.com/IBM/plex/78cd4223d8de9fcb78cba84eadecb269c56093c5/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Bold.ttf"
+        },
+        {
+          "name": "IBMPlexSans-Italic.ttf",
+          "size": 207920,
+          "crc32": 591213603,
+          "url": "https://raw.githubusercontent.com/IBM/plex/78cd4223d8de9fcb78cba84eadecb269c56093c5/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Italic.ttf"
+        },
+        {
+          "name": "IBMPlexSans-BoldItalic.ttf",
+          "size": 208588,
+          "crc32": 2746897641,
+          "url": "https://raw.githubusercontent.com/IBM/plex/78cd4223d8de9fcb78cba84eadecb269c56093c5/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "Alegreya",
+      "description": "Calligraphic serif/display (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "Alegreya-Regular.ttf",
+          "size": 425288,
+          "crc32": 656850706,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alegreya/Alegreya%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 400.0
+          }
+        },
+        {
+          "name": "Alegreya-Bold.ttf",
+          "size": 425288,
+          "crc32": 656850706,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alegreya/Alegreya%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 700
+          }
+        },
+        {
+          "name": "Alegreya-Italic.ttf",
+          "size": 425852,
+          "crc32": 4289970284,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alegreya/Alegreya-Italic%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 400.0
+          }
+        },
+        {
+          "name": "Alegreya-BoldItalic.ttf",
+          "size": 425852,
+          "crc32": 4289970284,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alegreya/Alegreya-Italic%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 700
+          }
+        }
+      ]
+    },
+    {
+      "name": "IBMPlexMono",
+      "description": "Monospace for code and technical reading (Latin, Greek, Cyrillic)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin",
+        "cyrillic",
+        "greek"
+      ],
+      "files": [
+        {
+          "name": "IBMPlexMono-Regular.ttf",
+          "size": 135580,
+          "crc32": 669197564,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexmono/IBMPlexMono-Regular.ttf"
+        },
+        {
+          "name": "IBMPlexMono-Bold.ttf",
+          "size": 137784,
+          "crc32": 3337667120,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexmono/IBMPlexMono-Bold.ttf"
+        },
+        {
+          "name": "IBMPlexMono-Italic.ttf",
+          "size": 143920,
+          "crc32": 863417465,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexmono/IBMPlexMono-Italic.ttf"
+        },
+        {
+          "name": "IBMPlexMono-BoldItalic.ttf",
+          "size": 144512,
+          "crc32": 628439670,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexmono/IBMPlexMono-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "SourceCodePro",
+      "description": "Adobe monospace with excellent hinting (Latin)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "SourceCodePro-Regular.ttf",
+          "size": 210312,
+          "crc32": 2362040184,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/TTF/SourceCodePro-Regular.ttf"
+        },
+        {
+          "name": "SourceCodePro-Bold.ttf",
+          "size": 206804,
+          "crc32": 2726449194,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/TTF/SourceCodePro-Bold.ttf"
+        },
+        {
+          "name": "SourceCodePro-Italic.ttf",
+          "size": 166548,
+          "crc32": 2588859825,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/TTF/SourceCodePro-It.ttf"
+        },
+        {
+          "name": "SourceCodePro-BoldItalic.ttf",
+          "size": 169140,
+          "crc32": 1995697800,
+          "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/TTF/SourceCodePro-BoldIt.ttf"
+        }
+      ]
+    },
+    {
+      "name": "OpenDyslexic",
+      "description": "Dyslexia-friendly font (Latin)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "OpenDyslexic-Regular.otf",
+          "size": 175808,
+          "crc32": 3012573229,
+          "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Regular.otf"
+        },
+        {
+          "name": "OpenDyslexic-Bold.otf",
+          "size": 184004,
+          "crc32": 3499055985,
+          "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Bold.otf"
+        },
+        {
+          "name": "OpenDyslexic-Italic.otf",
+          "size": 189768,
+          "crc32": 74446048,
+          "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Italic.otf"
+        },
+        {
+          "name": "OpenDyslexic-BoldItalic.otf",
+          "size": 234364,
+          "crc32": 3174597887,
+          "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-BoldItalic.otf"
+        }
+      ]
+    },
+    {
+      "name": "AtkinsonHyperlegibleNext",
+      "description": "Accessibility font for low vision (Latin)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "AtkinsonHyperlegibleNext-Regular.ttf",
+          "size": 65068,
+          "crc32": 3253905585,
+          "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/7925f50f649b3813257faf2f4c0b381011f434f1/fonts/ttf/AtkinsonHyperlegibleNext-Regular.ttf"
+        },
+        {
+          "name": "AtkinsonHyperlegibleNext-Bold.ttf",
+          "size": 66792,
+          "crc32": 3856828507,
+          "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/7925f50f649b3813257faf2f4c0b381011f434f1/fonts/ttf/AtkinsonHyperlegibleNext-Bold.ttf"
+        },
+        {
+          "name": "AtkinsonHyperlegibleNext-Italic.ttf",
+          "size": 69812,
+          "crc32": 2713075107,
+          "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/7925f50f649b3813257faf2f4c0b381011f434f1/fonts/ttf/AtkinsonHyperlegibleNext-Italic.ttf"
+        },
+        {
+          "name": "AtkinsonHyperlegibleNext-BoldItalic.ttf",
+          "size": 71456,
+          "crc32": 3804911087,
+          "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/7925f50f649b3813257faf2f4c0b381011f434f1/fonts/ttf/AtkinsonHyperlegibleNext-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "LexicaUltralegible",
+      "description": "Accessibility font for low vision / dyslexia (Latin)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "LexicaUltralegible-Regular.ttf",
+          "size": 72108,
+          "crc32": 3476349974,
+          "url": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/198700e57554026460c7dfd547ac91d910b8b0f5/fonts/ttf/LexicaUltralegible-Regular.ttf"
+        },
+        {
+          "name": "LexicaUltralegible-Bold.ttf",
+          "size": 70156,
+          "crc32": 2925991977,
+          "url": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/198700e57554026460c7dfd547ac91d910b8b0f5/fonts/ttf/LexicaUltralegible-Bold.ttf"
+        },
+        {
+          "name": "LexicaUltralegible-Italic.ttf",
+          "size": 72140,
+          "crc32": 317159752,
+          "url": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/198700e57554026460c7dfd547ac91d910b8b0f5/fonts/ttf/LexicaUltralegible-Italic.ttf"
+        },
+        {
+          "name": "LexicaUltralegible-BoldItalic.ttf",
+          "size": 69416,
+          "crc32": 42426342,
+          "url": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/198700e57554026460c7dfd547ac91d910b8b0f5/fonts/ttf/LexicaUltralegible-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "FrankRuhlLibre",
+      "description": "Hebrew serif (Hebrew, Latin)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "hebrew",
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "FrankRuhlLibre-Regular.ttf",
+          "size": 178468,
+          "crc32": 2533730180,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/frankruhllibre/FrankRuhlLibre%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 400
+          }
+        },
+        {
+          "name": "FrankRuhlLibre-Bold.ttf",
+          "size": 178468,
+          "crc32": 2533730180,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/frankruhllibre/FrankRuhlLibre%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 700
+          }
+        }
+      ]
+    },
+    {
+      "name": "DavidLibre",
+      "description": "Traditional Hebrew serif (Hebrew, Latin)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "hebrew",
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "DavidLibre-Regular.ttf",
+          "size": 127740,
+          "crc32": 3866647383,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/davidlibre/DavidLibre-Regular.ttf"
+        },
+        {
+          "name": "DavidLibre-Bold.ttf",
+          "size": 132840,
+          "crc32": 628646408,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/davidlibre/DavidLibre-Bold.ttf"
+        }
+      ]
+    },
+    {
+      "name": "Alef",
+      "description": "Simple, legible Hebrew sans-serif (Hebrew, Latin)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "hebrew",
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "Alef-Regular.ttf",
+          "size": 90996,
+          "crc32": 1571465604,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alef/Alef-Regular.ttf"
+        },
+        {
+          "name": "Alef-Bold.ttf",
+          "size": 92312,
+          "crc32": 297651746,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alef/Alef-Bold.ttf"
+        }
+      ]
+    },
+    {
+      "name": "Amiri",
+      "description": "Arabic naskh-style serif (Arabic, Latin)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "scripts": [
+        "arabic",
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "Amiri-Regular.ttf",
+          "size": 431116,
+          "crc32": 826632668,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/amiri/Amiri-Regular.ttf"
+        },
+        {
+          "name": "Amiri-Bold.ttf",
+          "size": 413480,
+          "crc32": 2776215910,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/amiri/Amiri-Bold.ttf"
+        },
+        {
+          "name": "Amiri-Italic.ttf",
+          "size": 428532,
+          "crc32": 759265297,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/amiri/Amiri-Italic.ttf"
+        },
+        {
+          "name": "Amiri-BoldItalic.ttf",
+          "size": 409692,
+          "crc32": 3908610631,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/amiri/Amiri-BoldItalic.ttf"
+        }
+      ]
+    },
+    {
+      "name": "NotoNaskhArabicUI",
+      "description": "Arabic naskh tuned for screen reading (Arabic)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "arabic"
+      ],
+      "files": [
+        {
+          "name": "NotoNaskhArabicUI-Regular.ttf",
+          "size": 210728,
+          "crc32": 598796126,
+          "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/29e0840b6666c8603be41de7d5c8ac5bc2d64699/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-Regular.ttf"
+        },
+        {
+          "name": "NotoNaskhArabicUI-Bold.ttf",
+          "size": 217696,
+          "crc32": 2192905841,
+          "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/29e0840b6666c8603be41de7d5c8ac5bc2d64699/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-Bold.ttf"
+        }
+      ]
+    },
+    {
+      "name": "NotoNaskhArabicUISemiBold",
+      "description": "Noto Naskh Arabic UI at SemiBold weight, heavier body text (Arabic)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "arabic"
+      ],
+      "files": [
+        {
+          "name": "NotoNaskhArabicUISemiBold-Regular.ttf",
+          "size": 217732,
+          "crc32": 3369439487,
+          "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/29e0840b6666c8603be41de7d5c8ac5bc2d64699/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-SemiBold.ttf"
+        },
+        {
+          "name": "NotoNaskhArabicUISemiBold-Bold.ttf",
+          "size": 217696,
+          "crc32": 2192905841,
+          "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/29e0840b6666c8603be41de7d5c8ac5bc2d64699/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-Bold.ttf"
+        }
+      ]
+    },
+    {
+      "name": "NotoKufiArabic",
+      "description": "Arabic kufi-style sans-serif (Arabic, Latin)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "arabic",
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "NotoKufiArabic-Regular.ttf",
+          "size": 434204,
+          "crc32": 4100607520,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/notokufiarabic/NotoKufiArabic%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 400
+          }
+        },
+        {
+          "name": "NotoKufiArabic-Bold.ttf",
+          "size": 434204,
+          "crc32": 4100607520,
+          "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/notokufiarabic/NotoKufiArabic%5Bwght%5D.ttf",
+          "axes": {
+            "wght": 700
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pretendard",
+      "description": "Modern Korean sans-serif (Hangul, Latin)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "hangul",
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "Pretendard-Regular.otf",
+          "size": 1574352,
+          "crc32": 1829287541,
+          "url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard/dist/public/static/Pretendard-Regular.otf"
+        },
+        {
+          "name": "Pretendard-Bold.otf",
+          "size": 1576660,
+          "crc32": 10055484,
+          "url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard/dist/public/static/Pretendard-Bold.otf"
+        }
+      ]
+    },
+    {
+      "name": "PretendardMedium",
+      "description": "Pretendard at Medium weight, slightly heavier body text (Hangul, Latin)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "hangul",
+        "latin"
+      ],
+      "files": [
+        {
+          "name": "PretendardMedium-Regular.otf",
+          "size": 1584068,
+          "crc32": 3412503428,
+          "url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard/dist/public/static/Pretendard-Medium.otf"
+        },
+        {
+          "name": "PretendardMedium-Bold.otf",
+          "size": 1568512,
+          "crc32": 3878757652,
+          "url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard/dist/public/static/Pretendard-ExtraBold.otf"
+        }
+      ]
+    },
+    {
+      "name": "RIDIBatang",
+      "description": "RIDI's e-book serif, single weight (Hangul, Latin)",
+      "styles": [
+        "regular"
+      ],
+      "scripts": [
+        "hangul"
+      ],
+      "files": [
+        {
+          "name": "RIDIBatang-Regular.otf",
+          "size": 1453448,
+          "crc32": 660440667,
+          "url": "https://raw.githubusercontent.com/fonts-archive/RIDIBatang/f1628238e56fd41c12451dfc7d975527b61ebfc7/RIDIBatang.otf"
+        }
+      ]
+    },
+    {
+      "name": "MaruBuri",
+      "description": "Naver's serif for screen reading (Hangul, Latin)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "hangul"
+      ],
+      "files": [
+        {
+          "name": "MaruBuri-Regular.otf",
+          "size": 642936,
+          "crc32": 1232521650,
+          "url": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-Regular.otf"
+        },
+        {
+          "name": "MaruBuri-Bold.otf",
+          "size": 688436,
+          "crc32": 3304173280,
+          "url": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-Bold.otf"
+        }
+      ]
+    },
+    {
+      "name": "MaruBuriSemiBold",
+      "description": "MaruBuri at SemiBold weight, heavier body text (Hangul, Latin)",
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "scripts": [
+        "hangul"
+      ],
+      "files": [
+        {
+          "name": "MaruBuriSemiBold-Regular.otf",
+          "size": 742176,
+          "crc32": 2915809090,
+          "url": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-SemiBold.otf"
+        },
+        {
+          "name": "MaruBuriSemiBold-Bold.otf",
+          "size": 688436,
+          "crc32": 3304173280,
+          "url": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-Bold.otf"
+        }
+      ]
+    }
+  ]
+}

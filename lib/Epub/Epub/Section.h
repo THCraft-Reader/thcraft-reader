@@ -19,6 +19,13 @@ class Section {
   GfxRenderer& renderer;
   std::string filePath;
   HalFile file;
+#ifdef CROSSPOINT_NATIVE_TEXT
+  int layoutFontId_ = 0;
+  uint64_t layoutFingerprint_ = 0;
+  bool hasLayoutSnapshot_ = false;
+#endif
+  // Identity invalidation drops only this build's temporary output, not the previous cache.
+  void discardBuild(bool removeCache);
 
   void writeSectionFileHeader(const ReaderRenderSpec& spec);
   uint32_t onPageComplete(std::unique_ptr<Page> page);
@@ -86,6 +93,8 @@ class Section {
   explicit Section(const std::shared_ptr<Epub>& epub, int spineIndex, GfxRenderer& renderer);
   ~Section();
   bool loadSectionFile(const ReaderRenderSpec& spec);
+  // Source-position metadata remains readable on a mismatch, but page geometry does not.
+  bool textLayoutMatches() const;
   bool clearCache() const;
   bool createSectionFile(const ReaderRenderSpec& spec, const std::function<void()>& popupFn = nullptr);
 

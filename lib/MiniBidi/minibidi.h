@@ -35,6 +35,9 @@ typedef uint32_t ucschar; /* Unicode codepoint; BMP-only content fits uint16_t
    Adjust to your actual screen width.  Stack cost = ~5×MAX bytes. */
 #define BIDI_MAX_LINE 128
 
+/* Native callers provide workspace instead of enlarging the legacy stack. */
+#define BIDI_MAX_NATIVE_LINE 4096
+
 /* ── bidi_char ───────────────────────────────────────────────────────── */
 /* origwc:  the codepoint as it came from the epub text stream
    wc:      working codepoint (may be replaced by mirrored form after
@@ -107,6 +110,27 @@ uchar bidi_class(ucschar ch);
  *   Use to fast-skip lines with no RTL content.
  */
 bool is_rtl_class(uchar bc);
+
+/*
+ * bidi_scratch_size(count)
+ *   Required workspace bytes for 1..BIDI_MAX_NATIVE_LINE scalars; zero for
+ *   empty or unsupported counts. Workspace may have any byte alignment.
+ *
+ * resolve_bidi_levels(autodir, paragraphLevel, line, count, levels,
+ *                     scratch, scratchBytes)
+ *   Resolves logical paragraph levels through UAX#9 I1/I2, using the same
+ *   core as do_bidi. Does not apply per-line L1/L2, mirror, reorder, shape,
+ *   or modify line. Native shaping applies L1/L2 at final line boundaries.
+ *   paragraphLevel must be 0 or 1 (also the auto-direction fallback).
+ *   Returns the resolved paragraph level, or -1 for invalid arguments,
+ *   overlapping buffers, insufficient workspace, or excessive count.
+ *   Empty input returns paragraphLevel and permits null buffers.
+ *   Nonempty line, levels and scratch must be separate buffers; levels has
+ *   count bytes. Output levels must be discarded after an error.
+ */
+size_t bidi_scratch_size(size_t count);
+int resolve_bidi_levels(bool autodir, int paragraphLevel, const bidi_char* line, int count, uchar* levels,
+                        void* scratch, size_t scratchBytes);
 
 /*
  * mirror(ch)

@@ -1,0 +1,7 @@
+vendor/libdatrie-0.2.14/datrie/alpha-map.c
+vendor/libdatrie-0.2.14/datrie/darray.c
+vendor/libdatrie-0.2.14/datrie/tail.c
+vendor/libdatrie-0.2.14/datrie/trie.c
+vendor/libdatrie-0.2.14/datrie/dstring.c
+vendor/libdatrie-0.2.14/datrie/trie-string.c
+vendor/libdatrie-0.2.14/datrie/fileutils.c

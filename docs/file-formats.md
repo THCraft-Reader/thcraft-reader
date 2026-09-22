@@ -1,6 +1,7 @@
 # File Formats
 
-These formats describe the SD-card cache files under `/.crosspoint/epub_<hash>/`.
+EPUB cache files live under `/.crosspoint/epub_<hash>/`; native TXT cache files
+use the separate per-book directory described below.
 All POD fields are written in the ESP32 little-endian representation used by
 `Serialization.h`; strings are length-prefixed UTF-8.
 
@@ -89,6 +90,77 @@ if (parsedSize != fileSize) {
 ```
 
 ## `section.bin`
+
+### Version 47
+
+Version 47 adds a `u8 representation` before every TextBlock (`0 = legacy`,
+`1 = native`) and a little-endian `u64 textLayoutFingerprint` immediately after
+the Section header's Focus Reading flag. The header is now **49 bytes**.
+Finalized sections use version 47; suspended partial sections use
+`0xFE - (47 - 28) = 0xEB`, with the same header and Page representation.
+Version 0 remains an incomplete, unreadable build. All trailing header offsets
+and page-count seeks are relative to the revised header size.
+
+The fingerprint is zero for the legacy backend. Native fingerprints use stable
+FNV-1a-64 over canonical engine/resource identity: `native-text-v1`, pinned
+FreeType/HarfBuzz and dictionary revisions/digests, selected font-source content,
+all fallback faces, variation/synthetic-style configuration, DPI/load/metric
+policy, segmentation revision, and native record policy (`record=overflow-clip-v2`).
+It is calculated from resource identities
+at load/change, not by rereading fonts for every page. Both finalized and partial
+loads compare it before exposing pages. A mismatch removes only the section
+layout cache; EPUBs, book metadata, progress and bookmarks remain unchanged.
+
+Native TextBlocks store the original logical UTF-8, not glyph IDs or visual-order
+strings. There are no inserted Thai dictionary spaces. A deserialized line is
+shaped through the same engine and warmed without painting. The field-by-field
+record, immediately after representation 1, is:
+
+| Field | Encoding |
+|---|---|
+| textBytes, spanCount, wordCount, gapCount, rubyCount | five `u16` values |
+| paragraphLevel | `s8`, resolved paragraph level 0 or 1 |
+| lineHeight, baseline, rubyLift | three `s16` values, pixels |
+| alignmentX26 | `s32`, horizontal alignment in signed 26.6 pixels |
+| syntheticSuffixCp | `u32`, 0 or U+002D; no source span |
+| overflowClipWidth | `u16`, 0 for normal lines, otherwise content-box width in pixels (1–32767) |
+| logical text | exactly textBytes UTF-8 bytes, no terminator |
+| style/bidi spans | spanCount × (`u16 startByte,endByte`, `u8 style,bidiLevel`) |
+| selectable words | wordCount × (`u16 startByte,endByte`, `s32 x26,width26`, `s16 top,height`) |
+| expanded real-space/CJK gaps | gapCount × (`u16 byteOffset`, `s32 extraAdvance26`) |
+| ruby annotations | rubyCount × (`u16 baseStartByte,baseEndByte,textBytes`, `s32 x26,y26`, `u8 style`, textBytes UTF-8 bytes) |
+| BlockStyle | unchanged field order shown below |
+
+Ranges are half-open byte ranges in the original logical text. Words are in
+logical source order; their x positions are final visual positions relative to
+alignmentX26. Word top/height and the line baseline are relative to the line top.
+Ruby x already includes alignment; ruby y is the annotation baseline relative to
+the line top. Native focus emphasis lives in style spans, not a second per-word
+geometry array. Word styles and NUL-terminated selection strings are reconstructed
+from those spans/text on decode. Thai dictionary boundaries have no gap records.
+The lineHeight is the minimum ink/decorations/ruby height; layout may add
+compressed nominal line spacing but cannot shrink below this minimum.
+
+Only a forced indivisible cluster/group wider than its available line receives
+overflowClipWidth. Painting intersects the caller's clip with
+`[lineOriginX, lineOriginX + overflowClipWidth)` and restores the caller's clip
+afterward, including on failure. Words and links are clipped to that same box
+after alignment; source bytes and shaped advances are unchanged. Ordinary lines
+retain italic overhang and negative first-line indentation. The fixed native
+header is 27 bytes after the representation byte, including this two-byte field.
+Version 47 remains the first native format; the updated fingerprint rejects
+earlier unreleased native records.
+
+Decoding caps logical text at 16 KiB / 4096 Unicode scalars, each metadata count
+at 4096, and combined ruby text at 16 KiB. It checks UTF-8 boundaries, nonoverlapping
+source-ordered spans/words/ruby, valid bidi levels, nonnegative dimensions, bounded
+coordinate sums, overflow width/word containment and ruby lengths before
+allocating the metadata arrays. Native buffers and Pro TextBlock control objects
+count against the shared 4 MiB engine budget. Truncated or malformed
+records return an invalid page, never partially initialized geometry. Page
+element counts are capped at 1024; footnotes at 16 and links at 32. Legacy arena
+bytes are unchanged after the representation 0 prefix, with checked lengths,
+offsets, strings and scalar reads.
 
 ### Version 46
 
@@ -183,7 +255,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 41
+#define EXPECTED_VERSION 47
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -242,7 +314,7 @@ struct BlockStyle {
     bool directionDefined;
 };
 
-struct TextBlock {
+struct LegacyTextData {
     u16 wordCount;
     u8 hasFocus;
     u16 textBytes [[comment("Total size of text[], including one NUL per word")]];
@@ -260,6 +332,69 @@ struct TextBlock {
         char text[textBytes] [[comment("All words back to back, each NUL-terminated")]];
     }
 
+    String rubyTexts[wordCount];
+};
+
+struct NativeStyleSpan {
+    u16 startByte;
+    u16 endByte;
+    u8 style;
+    u8 bidiLevel;
+};
+
+struct NativeWord {
+    u16 startByte;
+    u16 endByte;
+    s32 x26;
+    s32 width26;
+    s16 top;
+    s16 height;
+};
+
+struct NativeGap {
+    u16 byteOffset;
+    s32 extraAdvance26;
+};
+
+struct NativeRuby {
+    u16 baseStartByte;
+    u16 baseEndByte;
+    u16 textBytes;
+    s32 x26;
+    s32 y26;
+    u8 style;
+    char text[textBytes];
+};
+
+struct NativeTextData {
+    u16 textBytes;
+    u16 spanCount;
+    u16 wordCount;
+    u16 gapCount;
+    u16 rubyCount;
+    s8 paragraphLevel;
+    s16 lineHeight;
+    s16 baseline;
+    s16 rubyLift;
+    s32 alignmentX26;
+    u32 syntheticSuffixCp;
+    u16 overflowClipWidth;
+    char text[textBytes];
+    NativeStyleSpan spans[spanCount];
+    NativeWord words[wordCount];
+    NativeGap gaps[gapCount];
+    NativeRuby ruby[rubyCount];
+};
+
+struct TextBlock {
+    u8 representation;
+    if (representation == 0) {
+        LegacyTextData legacy;
+    } else if (representation == 1) {
+        NativeTextData native;
+    } else {
+        std::error("Invalid text representation");
+    }
     BlockStyle blockStyle;
 };
 
@@ -307,12 +442,22 @@ struct FootnoteEntry {
     char href[FOOTNOTE_HREF_LEN];
 };
 
+struct PageLink {
+    char href[FOOTNOTE_HREF_LEN];
+    s16 x;
+    s16 y;
+    s16 width;
+    s16 height;
+};
+
 struct Page {
     u16 elementCount;
     PageElement elements[elementCount] [[inline]];
 
     u16 footnoteCount;
     FootnoteEntry footnotes[footnoteCount];
+    u16 linkCount;
+    PageLink links[linkCount];
 };
 
 struct AnchorEntry {
@@ -332,8 +477,8 @@ struct ParagraphLut {
 
 struct SectionBin {
     u8 version;
-    if (version != EXPECTED_VERSION) {
-        std::error(std::format("Unsupported version: {} (expected {})", version, EXPECTED_VERSION));
+    if (version != EXPECTED_VERSION && version != 0xEB) {
+        std::error(std::format("Unsupported version: {}", version));
     }
 
     s32 fontId;
@@ -346,6 +491,7 @@ struct SectionBin {
     bool embeddedStyle;
     u8 imageRendering;
     bool focusReadingEnabled;
+    u64 textLayoutFingerprint;
 
     u16 pageCount;
     u32 pageLutOffset;
@@ -378,6 +524,10 @@ struct SectionBin {
     if (visibleTextLutOffset != 0) {
 	u32 visibleTextOffset[pageCount] @ visibleTextLutOffset;
     }
+    if (version == 0xEB) {
+        u32 bytesConsumed @ (visibleTextLutOffset + pageCount * 4);
+        u32 totalBytes @ (visibleTextLutOffset + pageCount * 4 + 4);
+    }
 };
 
 SectionBin section @ 0x00;
@@ -388,6 +538,112 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## Native TXT cache — X4 Pro
+
+Native TXT and literal Markdown reading use `<Txt::getCachePath()>/native/`.
+This directory is separate from the root legacy TXT `index.bin` (version 3)
+and four-byte `progress.bin`; native firmware neither overwrites nor deletes
+those legacy files. Other devices continue using the legacy formats.
+
+### `native/index.bin` — version 1
+
+Fields are serialized explicitly in little-endian order, with no struct
+padding. The file contains a **42-byte header**, serialized `Page` bodies,
+then `pageCount` **16-byte lookup records** at `lutOffset`.
+
+| Header offset | Field | Encoding |
+|---|---|---|
+| 0 | magic | `u32`, `0x4E545854` (bytes `TXTN`) |
+| 4 | version | `u8`, 1 complete; 0 incomplete and unreadable |
+| 5 | sourceSize | `u32`, original file size in bytes |
+| 9 | sourceHash | `u64`, FNV-1a-64 of every original file byte |
+| 17 | textLayoutFingerprint | `u64`, native engine/resource and TXT adapter/serializer identity |
+| 25 | fontId | `s32`, logical reading font ID |
+| 29 | viewportWidth | `u16`, content width in pixels |
+| 31 | viewportHeight | `u16`, content height in pixels |
+| 33 | alignment | `u8`, existing paragraph-alignment setting |
+| 34 | pageCount | `u32`, number of real pages; excludes the end-of-book screen |
+| 38 | lutOffset | `u32`, absolute byte offset of the lookup table |
+
+Each lookup record is:
+
+| Record offset | Field | Encoding |
+|---|---|---|
+| 0 | sourceStart | `u32`, first original source byte consumed by this page |
+| 4 | sourceEnd | `u32`, exclusive end of the consumed source range |
+| 8 | pageOffset | `u32`, absolute start of the serialized `Page` |
+| 12 | pageBytes | `u32`, exact serialized body length |
+
+Source ranges are contiguous, start at zero, and end at `sourceSize`. The
+initial UTF-8 BOM belongs to the first page's source range but is not drawn.
+LF consumes one source byte; CRLF consumes two. Physical line endings are
+not glyphs. Other source spaces and blank lines are preserved; a final line
+without a newline is flushed normally. Only zero-byte and BOM-only sources
+have zero real pages and show the empty-file surface. Blank-line-only sources
+retain their line-height layout.
+
+Bodies use the existing `Page`/`PageLine` serializer and representation-1
+native `TextBlock` format above, not a separate TXT glyph format. They retain
+logical UTF-8 and completed geometry from sequential paragraph layout,
+including resolved bidi context across pages. Loading a backward or skipped
+page therefore does not restart dictionary segmentation at an arbitrary
+source byte. Font handles, FT/HB pointers and process-local glyph IDs are
+never persisted.
+
+Opening validates source size **and content hash**, font/fallback/resource
+fingerprint, viewport and alignment. A same-length edit invalidates cached
+text. The fingerprint includes the TXT adapter/serializer revision as well
+as the shared native engine policy. Oriented safe margins, user margins and
+status-bar reservation determine the stored content viewport. Changed layout
+settings reflow the book without changing its source-byte progress.
+
+Readers reject truncated headers, version 0, overflow/out-of-file ranges,
+nonmonotone or overlapping page/source ranges, and malformed or incorrectly
+bounded `Page` bodies. Cache corruption is rebuildable; source read errors,
+malformed UTF-8, native allocation failure and text-rendering failure are
+reader errors, not an empty book.
+
+Indexing holds one pending layout window and one page. It writes Page bodies
+to `index.bin.tmp` and lookup records to `index.lut.tmp`, streams the lookup
+file into the completed index, patches counts/offsets, and writes version 1
+last. Handles close before publication by rename or temporary-file cleanup.
+An interrupted or failed build must not expose a partial page count as a
+completed book, or replace usable progress with a failed position. The source
+hash is accumulated during initial indexing, without a redundant prescan;
+cached reopen streams the source to check its hash.
+
+### `native/progress.bin` — version 1
+
+This is an explicitly serialized **21-byte** payload, saved using
+`ProgressFile::writeAtomic`:
+
+| Offset | Field | Encoding |
+|---|---|---|
+| 0 | magic | `u32`, `0x52505854` (bytes `TXPR`) |
+| 4 | version | `u8`, 1 |
+| 5 | sourceByteOffset | `u32`, first source byte of the successfully displayed page |
+| 9 | sourceSize | `u32`, source size at that save |
+| 13 | sourceHash | `u64`, complete original-file FNV-1a-64 |
+
+Progress is saved only after successful page, status-bar and enabled
+anti-alias rendering. Unchanged saves are skipped. Empty files and
+layout/render failures do not overwrite the previous progress.
+
+For matching source content, lookup finds the page containing the saved
+byte after font, orientation, viewport or native-fingerprint changes. When
+source content itself changes, restoration clamps the old byte to the new
+file bounds and chooses the containing/preceding page; this is logged as
+best effort, not a semantic text match.
+
+Without valid native progress, the reader first consults the root legacy
+progress and a bounds-checked version-3 legacy TXT index. A valid legacy page
+entry supplies its source byte; the old font/viewport need not match. If that
+index is absent or invalid, the four-byte page-number progress alone cannot
+provide an exact source location: its page number is clamped once against the
+new page count, and the successfully displayed page's byte position becomes
+native progress. Missing progress starts at the beginning. Legacy progress,
+EPUB bookmarks and synchronization formats remain unchanged.
 
 ## CLX1 — library index (`.crosspoint/library.idx`)
 

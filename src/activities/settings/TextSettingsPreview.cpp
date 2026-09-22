@@ -4,7 +4,11 @@
 #include <Epub/ParsedText.h>
 #include <Epub/blocks/BlockStyle.h>
 #include <Epub/blocks/TextBlock.h>
+#ifndef CROSSPOINT_NATIVE_TEXT
 #include <FontCacheManager.h>
+#else
+#include <NativeUtf8.h>
+#endif
 #include <GfxRenderer.h>
 #include <I18n.h>
 
@@ -30,7 +34,7 @@ CssTextAlign toCssAlign(uint8_t align) {
 }
 
 // Lay the sample text out through the reader engine into layout.lines
-void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, int textWidth) {
+bool relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, int textWidth) {
   layout.lines.clear();
 
   BlockStyle style;
@@ -40,8 +44,34 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
   ParsedText parsed(SETTINGS.extraParagraphSpacing != 0, SETTINGS.hyphenationEnabled != 0,
                     SETTINGS.focusReadingEnabled != 0, style);
 
-  // Feed one space-separated word at a time; addWord handles NFC/CJK/RTL/focus splitting
   const char* text = I18N.get(StrId::STR_FONT_PREVIEW_TEXT);
+#ifdef CROSSPOINT_NATIVE_TEXT
+  const std::string_view sample(text);
+  size_t offset = 0, wordStart = 0;
+  uint32_t sourceOffset = 0, wordSourceOffset = 0, cp = 0;
+  // UTF-8 byte length bounds the possible one-cluster line count.
+  layout.lines.reserve(sample.size() + 1);
+  while (offset < sample.size()) {
+    const size_t start = offset;
+    if (!native_text::nextUtf8(sample, offset, cp)) {
+      renderer.recordTextFailure(TextStatus::InvalidText);
+      layout.key = {};
+      return false;
+    }
+    if (cp == ' ') {
+      if (start > wordStart) {
+        parsed.addWord(sample.substr(wordStart, start - wordStart), EpdFontFamily::REGULAR, false, false,
+                       wordSourceOffset);
+      }
+      wordStart = offset;
+      wordSourceOffset = sourceOffset + 1;
+    }
+    ++sourceOffset;
+  }
+  if (wordStart < sample.size()) {
+    parsed.addWord(sample.substr(wordStart), EpdFontFamily::REGULAR, false, false, wordSourceOffset);
+  }
+#else
   std::string word;
   for (const char* p = text;; p++) {
     if (*p == ' ' || *p == '\0') {
@@ -54,10 +84,25 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
       word.push_back(*p);
     }
   }
+#endif
 
-  parsed.layoutAndExtractLines(
-      renderer, fontId, static_cast<uint16_t>(textWidth),
-      [&layout](std::unique_ptr<TextBlock> line, uint32_t) { layout.lines.push_back(std::move(line)); });
+  if (!parsed.layoutAndExtractLines(
+          renderer, fontId, static_cast<uint16_t>(textWidth),
+          [&layout](std::unique_ptr<TextBlock> line, uint32_t) { layout.lines.push_back(std::move(line)); })) {
+    layout.lines.clear();
+    layout.key = {};
+    return false;
+  }
+#ifdef CROSSPOINT_NATIVE_TEXT
+  for (const auto& line : layout.lines) {
+    if (!line->warmNativeText(renderer, fontId)) {
+      layout.lines.clear();
+      layout.key = {};
+      return false;
+    }
+  }
+#endif
+  return true;
 }
 
 }  // namespace
@@ -90,12 +135,7 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
   const int lineAdvance = std::max(1, renderer.getLineHeight(fontId, compression));
   const int paragraphGap = SETTINGS.extraParagraphSpacing ? lineAdvance / 2 : 0;
 
-  // Re-lay-out (and re-prewarm glyphs) only when a layout-affecting setting or the
-  // geometry changed; else reuse the cache. The prewarm inputs are (fontId, constant
-  // sample text, styleMask<-focusReading), all of which are key fields, so a matching
-  // key means an identical prewarm call. This relies on nothing else evicting the SD
-  // glyph cache while this activity is up — true today: the only evictor is
-  // FontCacheManager::PrewarmScope, used solely by the reader/dictionary activities.
+  // Include native source/fallback identity, not only the selected logical font ID.
   const PreviewKey key{.fontId = fontId,
                        .fontPointSize = SETTINGS.fontPointSize,
                        .screenMargin = SETTINGS.screenMargin,
@@ -104,12 +144,24 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
                        .alignment = SETTINGS.paragraphAlignment,
                        .extraParagraphSpacing = SETTINGS.extraParagraphSpacing != 0,
                        .focusReading = SETTINGS.focusReadingEnabled != 0,
-                       .hyphenation = SETTINGS.hyphenationEnabled != 0};
+                       .hyphenation = SETTINGS.hyphenationEnabled != 0,
+                       .textLayoutFingerprint = renderer.textLayoutFingerprint(fontId)};
   if (key != layout.key) {
+#ifndef CROSSPOINT_NATIVE_TEXT
     if (auto* fcm = renderer.getFontCacheManager()) {
       fcm->prewarmCache(fontId, I18N.get(StrId::STR_FONT_PREVIEW_TEXT), SETTINGS.focusReadingEnabled ? 0x03 : 0x01);
     }
-    relayout(layout, renderer, fontId, textWidth);
+#endif
+    if (!relayout(layout, renderer, fontId, textWidth)) {
+#ifdef CROSSPOINT_NATIVE_TEXT
+      const char* error =
+          renderer.lastTextStatus() == TextStatus::OutOfMemory ? tr(STR_MEMORY_ERROR) : tr(STR_TEXT_RENDER_ERROR);
+      renderer.drawText(UI_10_FONT_ID, textLeft, top + previewPadding, error);
+#else
+      renderer.drawText(UI_10_FONT_ID, textLeft, top + previewPadding, tr(STR_MEMORY_ERROR));
+#endif
+      return;
+    }
     layout.key = key;
   }
 
@@ -118,9 +170,10 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
   const int textBottomLimit = top + height - labelReserved;
   for (int paragraph = 0; paragraph < 2; paragraph++) {
     for (const auto& line : layout.lines) {
-      if (y + lineH > textBottomLimit) return;
+      const int height = line->layoutHeight(renderer, fontId, compression);
+      if (y + height > textBottomLimit) return;
       line->render(renderer, fontId, textLeft, y);
-      y += lineAdvance;
+      y += height;
     }
     y += paragraphGap;
   }

@@ -1,0 +1,1452 @@
+{
+  "version": 1,
+  "generator": "native-font-catalogue-v1",
+  "configSha256": "91d2be7bcbf4381fc0bd924a0a16df93294647cf5020c229ab0e67a8c1885b89",
+  "githubRefs": {
+    "googlefonts/literata/main": "0c2761b727a1b3a7cffd313c37f0f5163dfc7a63",
+    "adobe-fonts/source-serif/release": "80d3f8894c09c937bebfa9011247d2e1c79fd6f4",
+    "notofonts/NotoSerif/main": "4281f314d93789462225d8a995e2f98def764189",
+    "notofonts/NotoSerif-Italic/main": "001c4affbf960ec0dcfda2fb54acaaa4e122fe1e",
+    "SorkinType/Merriweather/master": "4481226b336843648b5b2ee64f75737f262ded15",
+    "cyrealtype/Lora-Cyrillic/main": "2d53b449b60e185b39f671b44fded83e0910ad30",
+    "google/fonts/main": "e44c4b011a820c2cbe2fd2cfa8052037d7edb571",
+    "impallari/Libre-Baskerville/master": "9852edf75ece3af500a5ec61245f94788c3d4633",
+    "adobe-fonts/source-sans/release": "87b37a2daaed80fcb8e8ccb0085c4d72ddade12e",
+    "IBM/plex/master": "78cd4223d8de9fcb78cba84eadecb269c56093c5",
+    "adobe-fonts/source-code-pro/release": "803b7e23ec97ae58b6232ea76519a76d428ba268",
+    "googlefonts/atkinson-hyperlegible-next/main": "7925f50f649b3813257faf2f4c0b381011f434f1",
+    "jacobxperez/lexica-ultralegible/main": "198700e57554026460c7dfd547ac91d910b8b0f5",
+    "notofonts/notofonts.github.io/main": "29e0840b6666c8603be41de7d5c8ac5bc2d64699",
+    "orioncactus/pretendard/v1.3.9": "5c41199ea0024a9e0b2cb31735265056e5472d76"
+  },
+  "sources": [
+    {
+      "size": 319964,
+      "crc32": 3444607403,
+      "sha256": "0390890de9bb9d5862a6ba4125b82c61792ccc3d66b63e73eee75c1a16fcd208",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1789,
+        "unicodeCodepoints": 1163,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/googlefonts/literata/main/fonts/ttf/Literata-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/literata/0c2761b727a1b3a7cffd313c37f0f5163dfc7a63/fonts/ttf/Literata-Regular.ttf"
+    },
+    {
+      "size": 331304,
+      "crc32": 4025781391,
+      "sha256": "b6af95b3b443cdbce964aa06741596987f2f5c3ede46a2bc846e5addd99d061f",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1789,
+        "unicodeCodepoints": 1163,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/googlefonts/literata/main/fonts/ttf/Literata-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/literata/0c2761b727a1b3a7cffd313c37f0f5163dfc7a63/fonts/ttf/Literata-Bold.ttf"
+    },
+    {
+      "size": 304104,
+      "crc32": 3743048182,
+      "sha256": "198f70cc9a17bab578553fa274b81984d58c440efe26bc06f1d841c194b6691a",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1769,
+        "unicodeCodepoints": 1163,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/googlefonts/literata/main/fonts/ttf/Literata-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/literata/0c2761b727a1b3a7cffd313c37f0f5163dfc7a63/fonts/ttf/Literata-Italic.ttf"
+    },
+    {
+      "size": 318888,
+      "crc32": 4031374081,
+      "sha256": "1dade59381ad02f4679d7e993a7a406472e587ac332af7a6168d3ad9214a99dc",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1769,
+        "unicodeCodepoints": 1163,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/googlefonts/literata/main/fonts/ttf/Literata-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/literata/0c2761b727a1b3a7cffd313c37f0f5163dfc7a63/fonts/ttf/Literata-BoldItalic.ttf"
+    },
+    {
+      "size": 261868,
+      "crc32": 1989561168,
+      "sha256": "e5a4ee6a3d87bb9024796be390c6771e2a0eb1883dae25effaf57ca01668e24b",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1464,
+        "unicodeCodepoints": 920,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-serif/release/TTF/SourceSerif4-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/TTF/SourceSerif4-Regular.ttf"
+    },
+    {
+      "size": 271568,
+      "crc32": 1502692782,
+      "sha256": "7cf4f4e1ad74f45058d5bc61716b82560442fbdcd9d3654d2dea96bf6c683d86",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1464,
+        "unicodeCodepoints": 920,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-serif/release/TTF/SourceSerif4-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/TTF/SourceSerif4-Bold.ttf"
+    },
+    {
+      "size": 187808,
+      "crc32": 2756640830,
+      "sha256": "9d2950a8f1da66e21502c35d646a1d2148e79f9ea43fd2158cf02f5232e7f430",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1093,
+        "unicodeCodepoints": 919,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-serif/release/TTF/SourceSerif4-It.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/TTF/SourceSerif4-It.ttf"
+    },
+    {
+      "size": 191832,
+      "crc32": 3351126733,
+      "sha256": "7b215b37f8873f5579f3f8d2ded3ca7c588e2f435cd996605ebfc5befe2cd5eb",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1093,
+        "unicodeCodepoints": 919,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-serif/release/TTF/SourceSerif4-BoldIt.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-serif/80d3f8894c09c937bebfa9011247d2e1c79fd6f4/TTF/SourceSerif4-BoldIt.ttf"
+    },
+    {
+      "size": 395844,
+      "crc32": 1561104259,
+      "sha256": "7032008a7534eb2addae7ba561f2f8f30127683bf015ddfbaffa2724fdf863e5",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 3256,
+        "unicodeCodepoints": 2840,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/notofonts/NotoSerif/main/fonts/ttf/unhinted/instance_ttf/NotoSerif-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/NotoSerif/4281f314d93789462225d8a995e2f98def764189/fonts/ttf/unhinted/instance_ttf/NotoSerif-Regular.ttf"
+    },
+    {
+      "size": 398220,
+      "crc32": 3201158568,
+      "sha256": "f571ddb1518b420837ee93a3c36a8576677a7bae45270b2c8907f939ebab5673",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 3256,
+        "unicodeCodepoints": 2840,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/notofonts/NotoSerif/main/fonts/ttf/unhinted/instance_ttf/NotoSerif-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/NotoSerif/4281f314d93789462225d8a995e2f98def764189/fonts/ttf/unhinted/instance_ttf/NotoSerif-Bold.ttf"
+    },
+    {
+      "size": 430188,
+      "crc32": 3518984969,
+      "sha256": "141fce94b1e3c21c4029ea18968882059f34e3e1860fccd489bd4432b6018392",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 3268,
+        "unicodeCodepoints": 2840,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/notofonts/NotoSerif-Italic/main/fonts/ttf/unhinted/instance_ttf/NotoSerif-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/NotoSerif-Italic/001c4affbf960ec0dcfda2fb54acaaa4e122fe1e/fonts/ttf/unhinted/instance_ttf/NotoSerif-Italic.ttf"
+    },
+    {
+      "size": 431356,
+      "crc32": 4043908593,
+      "sha256": "f5d535969d617a42d0a4b0b6dda8680c62332180e59c1d159dd01cb2f5491a1a",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 3268,
+        "unicodeCodepoints": 2840,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/notofonts/NotoSerif-Italic/main/fonts/ttf/unhinted/instance_ttf/NotoSerif-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/NotoSerif-Italic/001c4affbf960ec0dcfda2fb54acaaa4e122fe1e/fonts/ttf/unhinted/instance_ttf/NotoSerif-BoldItalic.ttf"
+    },
+    {
+      "size": 282844,
+      "crc32": 377522616,
+      "sha256": "10ec10d1f7a9b5f0eb1a964e06348ce20587d478c661ea36728cce7b57f3de1c",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1647,
+        "unicodeCodepoints": 1019,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/SorkinType/Merriweather/master/fonts/ttf/Merriweather-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/SorkinType/Merriweather/4481226b336843648b5b2ee64f75737f262ded15/fonts/ttf/Merriweather-Regular.ttf"
+    },
+    {
+      "size": 282608,
+      "crc32": 2657724140,
+      "sha256": "a2fa4f57946c62036f79d9e8b4b642515001d65af1e6a98afc0b94bf669e3f11",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1647,
+        "unicodeCodepoints": 1019,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/SorkinType/Merriweather/master/fonts/ttf/Merriweather-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/SorkinType/Merriweather/4481226b336843648b5b2ee64f75737f262ded15/fonts/ttf/Merriweather-Bold.ttf"
+    },
+    {
+      "size": 272256,
+      "crc32": 2626502056,
+      "sha256": "1f73096441117e56bd867a437188e98bcf8ae7dcc7f676980da2ed2b6b51554d",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1647,
+        "unicodeCodepoints": 1020,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/SorkinType/Merriweather/master/fonts/ttf/Merriweather-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/SorkinType/Merriweather/4481226b336843648b5b2ee64f75737f262ded15/fonts/ttf/Merriweather-Italic.ttf"
+    },
+    {
+      "size": 272088,
+      "crc32": 2030812648,
+      "sha256": "f9bf9c32fc1297711b7d309cee9c9ba10ebb00148f4ceda21760f4b1b7e3e8ef",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1647,
+        "unicodeCodepoints": 1020,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/SorkinType/Merriweather/master/fonts/ttf/Merriweather-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/SorkinType/Merriweather/4481226b336843648b5b2ee64f75737f262ded15/fonts/ttf/Merriweather-BoldItalic.ttf"
+    },
+    {
+      "size": 198380,
+      "crc32": 1994259967,
+      "sha256": "c72a925082ba55885e7b4ead25d34a3c91fa44edda72a16a3a2983fc7fa7cef3",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 892,
+        "unicodeCodepoints": 778,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/main/fonts/ttf/Lora-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/2d53b449b60e185b39f671b44fded83e0910ad30/fonts/ttf/Lora-Regular.ttf"
+    },
+    {
+      "size": 218640,
+      "crc32": 524342852,
+      "sha256": "32baf740eac1bf3f257904a6cf89e4e067ca1566b375bf22f743a26fc88b3791",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 892,
+        "unicodeCodepoints": 778,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/main/fonts/ttf/Lora-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/2d53b449b60e185b39f671b44fded83e0910ad30/fonts/ttf/Lora-Bold.ttf"
+    },
+    {
+      "size": 206912,
+      "crc32": 1900356837,
+      "sha256": "1985f2fa49d675c3d88ca6a0b9161be38f955bec7efb025d2a5b68bc03e471fe",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 889,
+        "unicodeCodepoints": 778,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/main/fonts/ttf/Lora-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/2d53b449b60e185b39f671b44fded83e0910ad30/fonts/ttf/Lora-Italic.ttf"
+    },
+    {
+      "size": 213560,
+      "crc32": 1752403913,
+      "sha256": "f448e41ab0bf529ec7bd4f8aef843eb4d33b5608c7ed0a53128ead588e6ea9e5",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 889,
+        "unicodeCodepoints": 778,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/main/fonts/ttf/Lora-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/cyrealtype/Lora-Cyrillic/2d53b449b60e185b39f671b44fded83e0910ad30/fonts/ttf/Lora-BoldItalic.ttf"
+    },
+    {
+      "size": 818952,
+      "crc32": 3923420276,
+      "sha256": "fe7b64eeacc430fcf46836a6f0dfe00d2c5a15483ed36692a2a185cb23ec2a5c",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 4307,
+        "unicodeCodepoints": 2783,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/gentiumbookplus/GentiumBookPlus-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/gentiumbookplus/GentiumBookPlus-Regular.ttf"
+    },
+    {
+      "size": 834852,
+      "crc32": 3286977953,
+      "sha256": "b39c3fb12e2e15e2336f2ec6d051c778618ec25f7360bc4765bfe755b408c011",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 4307,
+        "unicodeCodepoints": 2783,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/gentiumbookplus/GentiumBookPlus-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/gentiumbookplus/GentiumBookPlus-Bold.ttf"
+    },
+    {
+      "size": 882904,
+      "crc32": 3028679181,
+      "sha256": "7a0ab4bd78701fa46d325e362654c41a47e2a0a5cb4a3eebc94dce89c2ee7df1",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 4307,
+        "unicodeCodepoints": 2783,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/gentiumbookplus/GentiumBookPlus-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/gentiumbookplus/GentiumBookPlus-Italic.ttf"
+    },
+    {
+      "size": 891412,
+      "crc32": 2481830883,
+      "sha256": "e557dd7a7f818fa482c3e63c7576c6d455f6f2e3bf9d84e0a11d1617e2bc1383",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 4307,
+        "unicodeCodepoints": 2783,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/gentiumbookplus/GentiumBookPlus-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/gentiumbookplus/GentiumBookPlus-BoldItalic.ttf"
+    },
+    {
+      "size": 163068,
+      "crc32": 3309864318,
+      "sha256": "e882efa9c41949a528ac2369079ec5ef050c1c996bbd0bacce3c3326d44cf80d",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 836,
+        "unicodeCodepoints": 754,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexserif/IBMPlexSerif-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexserif/IBMPlexSerif-Regular.ttf"
+    },
+    {
+      "size": 163800,
+      "crc32": 2020398207,
+      "sha256": "534c02c295999dd86e770457ece1d43db0de9256dd98bf741426f63ae904209e",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 836,
+        "unicodeCodepoints": 754,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexserif/IBMPlexSerif-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexserif/IBMPlexSerif-Bold.ttf"
+    },
+    {
+      "size": 173004,
+      "crc32": 2789790603,
+      "sha256": "4b75b38be4673527231f49c48818d090c913d5042dd5c747b525bf6185d29ecb",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 836,
+        "unicodeCodepoints": 754,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexserif/IBMPlexSerif-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexserif/IBMPlexSerif-Italic.ttf"
+    },
+    {
+      "size": 173032,
+      "crc32": 3330427808,
+      "sha256": "2a32b76ac19c1942bf5942dbbd2a1566e5f1ae9833e421ebcf36d3522715e153",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 836,
+        "unicodeCodepoints": 754,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexserif/IBMPlexSerif-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexserif/IBMPlexSerif-BoldItalic.ttf"
+    },
+    {
+      "size": 328636,
+      "crc32": 2437098615,
+      "sha256": "ef2b9a711fb02f1e5823b34da1b7450e0fc76793b7d733a8b41006e24916d4a7",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1542,
+        "unicodeCodepoints": 977,
+        "axes": {
+          "wght": {
+            "min": 100.0,
+            "default": 100.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/bitter/Bitter%5Bwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/bitter/Bitter%5Bwght%5D.ttf"
+    },
+    {
+      "size": 317652,
+      "crc32": 2411669676,
+      "sha256": "5e6e0af503171c9d7b4be7a22c16f474d7a638cf83a80051d825bcc58d664bc3",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1511,
+        "unicodeCodepoints": 977,
+        "axes": {
+          "wght": {
+            "min": 100.0,
+            "default": 100.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/bitter/Bitter-Italic%5Bwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/bitter/Bitter-Italic%5Bwght%5D.ttf"
+    },
+    {
+      "size": 231752,
+      "crc32": 3808589737,
+      "sha256": "1f32de93c57a029c61d499c580626b8c0c311873d4a343838d9346d9f64b0917",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 1009,
+        "unicodeCodepoints": 855,
+        "axes": {}
+      },
+      "source": "https://mirrors.ctan.org/fonts/domitian/opentype/Domitian-Roman.otf",
+      "url": "https://mirror.kku.ac.th/CTAN/fonts/domitian/opentype/Domitian-Roman.otf"
+    },
+    {
+      "size": 189032,
+      "crc32": 3737315066,
+      "sha256": "7a5317f4216a3739d4bce648cc196aaaa336ebb1634a067225fdcd60cad7f9ee",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 875,
+        "unicodeCodepoints": 854,
+        "axes": {}
+      },
+      "source": "https://mirrors.ctan.org/fonts/domitian/opentype/Domitian-Bold.otf",
+      "url": "https://mirror.kku.ac.th/CTAN/fonts/domitian/opentype/Domitian-Bold.otf"
+    },
+    {
+      "size": 191252,
+      "crc32": 1215909694,
+      "sha256": "025a6fdd61034491266997cb719888465863f28e8bf2477374f5fb33cf3a692f",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 875,
+        "unicodeCodepoints": 854,
+        "axes": {}
+      },
+      "source": "https://mirrors.ctan.org/fonts/domitian/opentype/Domitian-Italic.otf",
+      "url": "https://mirror.kku.ac.th/CTAN/fonts/domitian/opentype/Domitian-Italic.otf"
+    },
+    {
+      "size": 190824,
+      "crc32": 3790435459,
+      "sha256": "1c53479b6aff0acf8e2aae5c0ef9ae7fc69ddeab2d723714bf432cdf4cd4e1a7",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 875,
+        "unicodeCodepoints": 854,
+        "axes": {}
+      },
+      "source": "https://mirrors.ctan.org/fonts/domitian/opentype/Domitian-BoldItalic.otf",
+      "url": "https://mirror.kku.ac.th/CTAN/fonts/domitian/opentype/Domitian-BoldItalic.otf"
+    },
+    {
+      "size": 156008,
+      "crc32": 3467909852,
+      "sha256": "df9fddf43dbd7de435c316b86a52b3d6b3ad2f6fb2ed3f6fd8bdc1835f30eec1",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 861,
+        "unicodeCodepoints": 789,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/master/fonts/ttf/LibreBaskerville-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/9852edf75ece3af500a5ec61245f94788c3d4633/fonts/ttf/LibreBaskerville-Regular.ttf"
+    },
+    {
+      "size": 154332,
+      "crc32": 2218003418,
+      "sha256": "62e23c5e6bf1e68fc0ef4ddeeab894ac21c808027f6cb6730cda2055a159ae03",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 861,
+        "unicodeCodepoints": 789,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/master/fonts/ttf/LibreBaskerville-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/9852edf75ece3af500a5ec61245f94788c3d4633/fonts/ttf/LibreBaskerville-Bold.ttf"
+    },
+    {
+      "size": 162224,
+      "crc32": 2032237074,
+      "sha256": "82d05fab9a1c07f4eb4bc891fb0043a74fba1bed27ea919f61d94dbc5b54a4f6",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 864,
+        "unicodeCodepoints": 789,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/master/fonts/ttf/LibreBaskerville-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/9852edf75ece3af500a5ec61245f94788c3d4633/fonts/ttf/LibreBaskerville-Italic.ttf"
+    },
+    {
+      "size": 163664,
+      "crc32": 2421798343,
+      "sha256": "5b9fcb6c9532a0f27202fc3801f81453d62a5cd0601aaa63c240fd0dea832caf",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 864,
+        "unicodeCodepoints": 789,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/master/fonts/ttf/LibreBaskerville-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/impallari/Libre-Baskerville/9852edf75ece3af500a5ec61245f94788c3d4633/fonts/ttf/LibreBaskerville-BoldItalic.ttf"
+    },
+    {
+      "size": 577864,
+      "crc32": 2774057425,
+      "sha256": "4ebef434f76f80286204840354a84db79a0dc3c87deeeb791e015b70b2ade49d",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 2303,
+        "unicodeCodepoints": 1242,
+        "axes": {
+          "wght": {
+            "min": 400.0,
+            "default": 400.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/vollkorn/Vollkorn%5Bwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/vollkorn/Vollkorn%5Bwght%5D.ttf"
+    },
+    {
+      "size": 441264,
+      "crc32": 745804378,
+      "sha256": "cd947ae49b5d46e812d8d09434fbe8ec452286cd5557ef6a762a3562e2c8d300",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1835,
+        "unicodeCodepoints": 1242,
+        "axes": {
+          "wght": {
+            "min": 400.0,
+            "default": 400.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/vollkorn/Vollkorn-Italic%5Bwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/vollkorn/Vollkorn-Italic%5Bwght%5D.ttf"
+    },
+    {
+      "size": 629024,
+      "crc32": 3699047267,
+      "sha256": "fe8c022f48d8dd29f17b744d16f9346f4357e16f7d4f7be58b000ae7c291b614",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 4503,
+        "unicodeCodepoints": 3094,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Regular.ttf"
+    },
+    {
+      "size": 630968,
+      "crc32": 3970095610,
+      "sha256": "13a813c49624ae3ba3c5c6e72c5ebffc4b9e1e6ea32f421c04069b037c6ad431",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 4503,
+        "unicodeCodepoints": 3094,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Bold.ttf"
+    },
+    {
+      "size": 642344,
+      "crc32": 1313021333,
+      "sha256": "feb3e57888ce3acb604f270c278cfb304c674306518771619ddbdefca42a066b",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 4459,
+        "unicodeCodepoints": 3091,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Italic.ttf"
+    },
+    {
+      "size": 644344,
+      "crc32": 4229278926,
+      "sha256": "7e34616e092593c340449baf9a259075a054c6419511ccf21ff0d83a1c9dd0d0",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 4459,
+        "unicodeCodepoints": 3091,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-BoldItalic.ttf"
+    },
+    {
+      "size": 876576,
+      "crc32": 321817288,
+      "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 2933,
+        "unicodeCodepoints": 2849,
+        "axes": {
+          "opsz": {
+            "min": 14.0,
+            "default": 14.0,
+            "max": 32.0
+          },
+          "wght": {
+            "min": 100.0,
+            "default": 400.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf"
+    },
+    {
+      "size": 906596,
+      "crc32": 569757674,
+      "sha256": "acd98e64795781b2058f07b18475e0ecee2a0fe2b42a49e2f9e37d0d6bf66ce6",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 2897,
+        "unicodeCodepoints": 2813,
+        "axes": {
+          "opsz": {
+            "min": 14.0,
+            "default": 14.0,
+            "max": 32.0
+          },
+          "wght": {
+            "min": 100.0,
+            "default": 400.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter-Italic%5Bopsz%2Cwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/inter/Inter-Italic%5Bopsz%2Cwght%5D.ttf"
+    },
+    {
+      "size": 431196,
+      "crc32": 2460776237,
+      "sha256": "4644c81b86ec9caaa76b634889968ed3c4f4f52f054855933acc7c2b21e53b0f",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 2478,
+        "unicodeCodepoints": 1614,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/release/TTF/SourceSans3-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/TTF/SourceSans3-Regular.ttf"
+    },
+    {
+      "size": 428176,
+      "crc32": 2629117167,
+      "sha256": "9214b9d95e4231c609802815c2646c98174e2102d0d37f88978a7f8e71006e6a",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 2478,
+        "unicodeCodepoints": 1614,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/release/TTF/SourceSans3-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/TTF/SourceSans3-Bold.ttf"
+    },
+    {
+      "size": 315812,
+      "crc32": 811236899,
+      "sha256": "192afd78f0f54a3c69eaf02d43f4d9a821e9d6110e41d3d25d61a7385cd580e4",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1998,
+        "unicodeCodepoints": 1614,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/release/TTF/SourceSans3-It.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/TTF/SourceSans3-It.ttf"
+    },
+    {
+      "size": 318700,
+      "crc32": 21398946,
+      "sha256": "7978291fc1bf314db887e0366853b33c5cf2e964c7b95cfb9ce403a6ec46a842",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1998,
+        "unicodeCodepoints": 1614,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/release/TTF/SourceSans3-BoldIt.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-sans/87b37a2daaed80fcb8e8ccb0085c4d72ddade12e/TTF/SourceSans3-BoldIt.ttf"
+    },
+    {
+      "size": 200500,
+      "crc32": 1935212979,
+      "sha256": "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1019,
+        "unicodeCodepoints": 895,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/IBM/plex/master/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/IBM/plex/78cd4223d8de9fcb78cba84eadecb269c56093c5/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Regular.ttf"
+    },
+    {
+      "size": 200872,
+      "crc32": 1322749701,
+      "sha256": "9e6c74a889a700d707613d24548fe4ffa6bc59559a0689d2cf9e133bdcdafb2f",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1019,
+        "unicodeCodepoints": 895,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/IBM/plex/master/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/IBM/plex/78cd4223d8de9fcb78cba84eadecb269c56093c5/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Bold.ttf"
+    },
+    {
+      "size": 207920,
+      "crc32": 591213603,
+      "sha256": "a9c6ef9942c49e49d11e11a6dacc0b3a087978757e9b22a06b8ac22a6400fb15",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1011,
+        "unicodeCodepoints": 895,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/IBM/plex/master/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/IBM/plex/78cd4223d8de9fcb78cba84eadecb269c56093c5/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Italic.ttf"
+    },
+    {
+      "size": 208588,
+      "crc32": 2746897641,
+      "sha256": "0e3142ba2ef31fe5c02f0c6c36424f251609cd6b73880076e21c2e81931ba2b9",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1011,
+        "unicodeCodepoints": 895,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/IBM/plex/master/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/IBM/plex/78cd4223d8de9fcb78cba84eadecb269c56093c5/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-BoldItalic.ttf"
+    },
+    {
+      "size": 425288,
+      "crc32": 656850706,
+      "sha256": "ba5564634b93a8f8ba57b48cd4f1ae7417d2b4656fbac779028679b00de3cf12",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 2172,
+        "unicodeCodepoints": 1254,
+        "axes": {
+          "wght": {
+            "min": 400.0,
+            "default": 400.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/alegreya/Alegreya%5Bwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alegreya/Alegreya%5Bwght%5D.ttf"
+    },
+    {
+      "size": 425852,
+      "crc32": 4289970284,
+      "sha256": "fa915eec76227935dc5fb678953c94b71287c360928013cfdb441dfe52f5a391",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 2179,
+        "unicodeCodepoints": 1254,
+        "axes": {
+          "wght": {
+            "min": 400.0,
+            "default": 400.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/alegreya/Alegreya-Italic%5Bwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alegreya/Alegreya-Italic%5Bwght%5D.ttf"
+    },
+    {
+      "size": 135580,
+      "crc32": 669197564,
+      "sha256": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1033,
+        "unicodeCodepoints": 930,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/IBMPlexMono-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexmono/IBMPlexMono-Regular.ttf"
+    },
+    {
+      "size": 137784,
+      "crc32": 3337667120,
+      "sha256": "ac27abd6450a64dd94467580a02fe6235156d5b92f2926ebbc8e7489df64e0be",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1033,
+        "unicodeCodepoints": 930,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/IBMPlexMono-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexmono/IBMPlexMono-Bold.ttf"
+    },
+    {
+      "size": 143920,
+      "crc32": 863417465,
+      "sha256": "3362fc791b0652193328b862c1c5f23a789bc7288b1617fa63302f88689a2a34",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1033,
+        "unicodeCodepoints": 930,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/IBMPlexMono-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexmono/IBMPlexMono-Italic.ttf"
+    },
+    {
+      "size": 144512,
+      "crc32": 628439670,
+      "sha256": "af4e05a761e98c1adf064c48a6352c9bec1a6ad70982cd2a544149323391f98e",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1033,
+        "unicodeCodepoints": 930,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/IBMPlexMono-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/ibmplexmono/IBMPlexMono-BoldItalic.ttf"
+    },
+    {
+      "size": 210312,
+      "crc32": 2362040184,
+      "sha256": "74bd80d3e42a08517cd7e1108ba3d86f2da29ac0f3065be95e0357956ab9db37",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1568,
+        "unicodeCodepoints": 1335,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/release/TTF/SourceCodePro-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/TTF/SourceCodePro-Regular.ttf"
+    },
+    {
+      "size": 206804,
+      "crc32": 2726449194,
+      "sha256": "b2095e0d657e6d28dc32444a9dacabab0c9241d0bf39d96371756cc9bdbc3a5f",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1568,
+        "unicodeCodepoints": 1335,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/release/TTF/SourceCodePro-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/TTF/SourceCodePro-Bold.ttf"
+    },
+    {
+      "size": 166548,
+      "crc32": 2588859825,
+      "sha256": "9c9e0f4d016210a3c5bdfba5262637c5b26ddff4ccc382ebbc781de5961d0042",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1271,
+        "unicodeCodepoints": 1086,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/release/TTF/SourceCodePro-It.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/TTF/SourceCodePro-It.ttf"
+    },
+    {
+      "size": 169140,
+      "crc32": 1995697800,
+      "sha256": "1b49d9304012bf8db9e5dd4104183d5c122c445d0570a2259125f71977595b90",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1271,
+        "unicodeCodepoints": 1086,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/release/TTF/SourceCodePro-BoldIt.ttf",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-code-pro/803b7e23ec97ae58b6232ea76519a76d428ba268/TTF/SourceCodePro-BoldIt.ttf"
+    },
+    {
+      "size": 175808,
+      "crc32": 3012573229,
+      "sha256": "215f0b29780dbafa8c02f2f22118fb9e2ab6b27b6686e3f13c8754041a035f64",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 1786,
+        "unicodeCodepoints": 1634,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Regular.otf",
+      "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Regular.otf"
+    },
+    {
+      "size": 184004,
+      "crc32": 3499055985,
+      "sha256": "ee7a8b9590a78e183826d16d6a22a50f6253c62e2f7f5e0e01ef44eb0676a9e0",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 1786,
+        "unicodeCodepoints": 1634,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Bold.otf",
+      "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Bold.otf"
+    },
+    {
+      "size": 189768,
+      "crc32": 74446048,
+      "sha256": "bd5c83e5c2a3e203fe816330572afe4ece576f8e2c20fb6359bd399e6ef37aaf",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 1786,
+        "unicodeCodepoints": 1634,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Italic.otf",
+      "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-Italic.otf"
+    },
+    {
+      "size": 234364,
+      "crc32": 3174597887,
+      "sha256": "b71c9e7d71ae9c575a539fd109523c6eb76dcfd1696da7fba262e2216314a8b0",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 1786,
+        "unicodeCodepoints": 1634,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-BoldItalic.otf",
+      "url": "https://raw.githubusercontent.com/THCraft-Reader/thcraft-reader/8c84ef3268fd56147ae1625e04f773f0f50b7720/lib/EpdFont/builtinFonts/source/OpenDyslexic/OpenDyslexic-BoldItalic.otf"
+    },
+    {
+      "size": 65068,
+      "crc32": 3253905585,
+      "sha256": "88ed5c31a71584c7772963b02d04bef1eb7e3d2e9c8b9cb204339b1f82cf432c",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 392,
+        "unicodeCodepoints": 362,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/main/fonts/ttf/AtkinsonHyperlegibleNext-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/7925f50f649b3813257faf2f4c0b381011f434f1/fonts/ttf/AtkinsonHyperlegibleNext-Regular.ttf"
+    },
+    {
+      "size": 66792,
+      "crc32": 3856828507,
+      "sha256": "994414047df66bb4998d01c1cb1eeb4a2ddc4622d1aa56bbb8adbeca7645b041",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 392,
+        "unicodeCodepoints": 362,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/main/fonts/ttf/AtkinsonHyperlegibleNext-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/7925f50f649b3813257faf2f4c0b381011f434f1/fonts/ttf/AtkinsonHyperlegibleNext-Bold.ttf"
+    },
+    {
+      "size": 69812,
+      "crc32": 2713075107,
+      "sha256": "b7f8f03ceb28ebadb2de2332b2e869a00e8dbfb5c8e00fdbb06385770c8227e7",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 392,
+        "unicodeCodepoints": 362,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/main/fonts/ttf/AtkinsonHyperlegibleNext-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/7925f50f649b3813257faf2f4c0b381011f434f1/fonts/ttf/AtkinsonHyperlegibleNext-Italic.ttf"
+    },
+    {
+      "size": 71456,
+      "crc32": 3804911087,
+      "sha256": "c2d3c596b54d1565ca20d383cdfb127b50b18b500b85a774fd07d4d976cd018b",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 392,
+        "unicodeCodepoints": 362,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/main/fonts/ttf/AtkinsonHyperlegibleNext-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/7925f50f649b3813257faf2f4c0b381011f434f1/fonts/ttf/AtkinsonHyperlegibleNext-BoldItalic.ttf"
+    },
+    {
+      "size": 72108,
+      "crc32": 3476349974,
+      "sha256": "588403d7e45996371969fc5fc287937a4beeef69c6409c87ea68f4d6fdca21f4",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 642,
+        "unicodeCodepoints": 634,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/main/fonts/ttf/LexicaUltralegible-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/198700e57554026460c7dfd547ac91d910b8b0f5/fonts/ttf/LexicaUltralegible-Regular.ttf"
+    },
+    {
+      "size": 70156,
+      "crc32": 2925991977,
+      "sha256": "d59de12fd9785e27cc26dbd4337aca5a69dc73b49af9a19c14eb143966b4bbf4",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 625,
+        "unicodeCodepoints": 615,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/main/fonts/ttf/LexicaUltralegible-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/198700e57554026460c7dfd547ac91d910b8b0f5/fonts/ttf/LexicaUltralegible-Bold.ttf"
+    },
+    {
+      "size": 72140,
+      "crc32": 317159752,
+      "sha256": "12b1e2a8ab52a322869b09c6da39dbfd0257ea01c3147fd27889606e3f2f9d8e",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 627,
+        "unicodeCodepoints": 617,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/main/fonts/ttf/LexicaUltralegible-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/198700e57554026460c7dfd547ac91d910b8b0f5/fonts/ttf/LexicaUltralegible-Italic.ttf"
+    },
+    {
+      "size": 69416,
+      "crc32": 42426342,
+      "sha256": "351401f2de965114f56332be8a15cb0990892464609a76c426eb158b915868a0",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 604,
+        "unicodeCodepoints": 594,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/main/fonts/ttf/LexicaUltralegible-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/198700e57554026460c7dfd547ac91d910b8b0f5/fonts/ttf/LexicaUltralegible-BoldItalic.ttf"
+    },
+    {
+      "size": 178468,
+      "crc32": 2533730180,
+      "sha256": "f9bf26966681037aae894b031bd0dcf2c1bfdfa128dd0640cf276fe62a338a43",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 604,
+        "unicodeCodepoints": 520,
+        "axes": {
+          "wght": {
+            "min": 300.0,
+            "default": 400.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/frankruhllibre/FrankRuhlLibre%5Bwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/frankruhllibre/FrankRuhlLibre%5Bwght%5D.ttf"
+    },
+    {
+      "size": 127740,
+      "crc32": 3866647383,
+      "sha256": "923f06e0f6dc84e1649d8cc5d5e12a8d663adf6aba83ba15baa5d559fb47b86e",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 851,
+        "unicodeCodepoints": 804,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/davidlibre/DavidLibre-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/davidlibre/DavidLibre-Regular.ttf"
+    },
+    {
+      "size": 132840,
+      "crc32": 628646408,
+      "sha256": "7610819c7888c8e7ecdfc573089113ec5355cf95078614ae0e30b509b05468f8",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 851,
+        "unicodeCodepoints": 804,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/davidlibre/DavidLibre-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/davidlibre/DavidLibre-Bold.ttf"
+    },
+    {
+      "size": 90996,
+      "crc32": 1571465604,
+      "sha256": "a32adcc953ac356906901778460083dc207d4560cb586fd9ea24ec5b186969ed",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 424,
+        "unicodeCodepoints": 423,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/alef/Alef-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alef/Alef-Regular.ttf"
+    },
+    {
+      "size": 92312,
+      "crc32": 297651746,
+      "sha256": "5dae0d7b2365288d8a34f5fb033d4278be96cef2547862cb93ceb8373e10bcf1",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 424,
+        "unicodeCodepoints": 423,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/alef/Alef-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/alef/Alef-Bold.ttf"
+    },
+    {
+      "size": 431116,
+      "crc32": 826632668,
+      "sha256": "ab391c4147d054c48976e98322ad0eefe1427aa0e0502a12a4c75d80a70cfcd7",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 6710,
+        "unicodeCodepoints": 1699,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/amiri/Amiri-Regular.ttf"
+    },
+    {
+      "size": 413480,
+      "crc32": 2776215910,
+      "sha256": "cfccb794268e7d573d857e6d6a67f89cf8a053e8ffd85dfa0c8ec1bb36fc4827",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 6551,
+        "unicodeCodepoints": 1548,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/amiri/Amiri-Bold.ttf"
+    },
+    {
+      "size": 428532,
+      "crc32": 759265297,
+      "sha256": "770e4da44d0459c0ddd6484483d475b95f2d088dd27ce472427624081eb68c70",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 6705,
+        "unicodeCodepoints": 1693,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Italic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/amiri/Amiri-Italic.ttf"
+    },
+    {
+      "size": 409692,
+      "crc32": 3908610631,
+      "sha256": "241300e2dcb2c541ac3617872960d99683d261e4f526dc4691d0727e7bef130b",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 6555,
+        "unicodeCodepoints": 1549,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-BoldItalic.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/amiri/Amiri-BoldItalic.ttf"
+    },
+    {
+      "size": 210728,
+      "crc32": 598796126,
+      "sha256": "e9f881051a2823b879988727913221bc2d063e9142de8c794387ab46656b6248",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1613,
+        "unicodeCodepoints": 1122,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/main/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/29e0840b6666c8603be41de7d5c8ac5bc2d64699/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-Regular.ttf"
+    },
+    {
+      "size": 217696,
+      "crc32": 2192905841,
+      "sha256": "d2bd1671179c59bb8c3d790eb2c0840e732d37fa1f5577ff34f26b659995dd17",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1613,
+        "unicodeCodepoints": 1122,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/main/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-Bold.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/29e0840b6666c8603be41de7d5c8ac5bc2d64699/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-Bold.ttf"
+    },
+    {
+      "size": 217732,
+      "crc32": 3369439487,
+      "sha256": "cb1f02aa18632dcb69df62687184918f3ca79c8d8f90ee7da863b3d41069c9e3",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1613,
+        "unicodeCodepoints": 1122,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/main/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-SemiBold.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/29e0840b6666c8603be41de7d5c8ac5bc2d64699/fonts/NotoNaskhArabicUI/hinted/ttf/NotoNaskhArabicUI-SemiBold.ttf"
+    },
+    {
+      "size": 434204,
+      "crc32": 4100607520,
+      "sha256": "494f6b61469d7a02a2d63f0fc4930bb007388d8cfe551de5eb98354e100889f3",
+      "extension": "ttf",
+      "metadata": {
+        "outline": "glyf",
+        "glyphCount": 1706,
+        "unicodeCodepoints": 1558,
+        "axes": {
+          "wght": {
+            "min": 100.0,
+            "default": 400.0,
+            "max": 900.0
+          }
+        }
+      },
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/notokufiarabic/NotoKufiArabic%5Bwght%5D.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/notokufiarabic/NotoKufiArabic%5Bwght%5D.ttf"
+    },
+    {
+      "size": 1574352,
+      "crc32": 1829287541,
+      "sha256": "3ffbacde6ab8411f1d2db54bb9b1f0b3ee2a738932033722cf0388c06aed1c93",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 14716,
+        "unicodeCodepoints": 14336,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/orioncactus/pretendard/v1.3.9/packages/pretendard/dist/public/static/Pretendard-Regular.otf",
+      "url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard/dist/public/static/Pretendard-Regular.otf"
+    },
+    {
+      "size": 1576660,
+      "crc32": 10055484,
+      "sha256": "2e91915fab54df71cc9598ebf608b2bdb54c6fe3c066ac61dff0bc44fca71cc7",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 14716,
+        "unicodeCodepoints": 14336,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/orioncactus/pretendard/v1.3.9/packages/pretendard/dist/public/static/Pretendard-Bold.otf",
+      "url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard/dist/public/static/Pretendard-Bold.otf"
+    },
+    {
+      "size": 1584068,
+      "crc32": 3412503428,
+      "sha256": "d39e50e4bb52b4993b6a4eeb821a171254745bd824446af01e1f616b89fface0",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 14716,
+        "unicodeCodepoints": 14336,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/orioncactus/pretendard/v1.3.9/packages/pretendard/dist/public/static/Pretendard-Medium.otf",
+      "url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard/dist/public/static/Pretendard-Medium.otf"
+    },
+    {
+      "size": 1568512,
+      "crc32": 3878757652,
+      "sha256": "c35fe941b7568d52a96010561540e47f9d3948dfde66ba25bc1908233e0a40cd",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 14716,
+        "unicodeCodepoints": 14336,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/orioncactus/pretendard/v1.3.9/packages/pretendard/dist/public/static/Pretendard-ExtraBold.otf",
+      "url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard/dist/public/static/Pretendard-ExtraBold.otf"
+    },
+    {
+      "size": 1453448,
+      "crc32": 660440667,
+      "sha256": "f13a49c0815d254ac15e392953a0b056613dec08ceb378e54eeed14c4fda9a54",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 12434,
+        "unicodeCodepoints": 12472,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/fonts-archive/RIDIBatang/f1628238e56fd41c12451dfc7d975527b61ebfc7/RIDIBatang.otf",
+      "url": "https://raw.githubusercontent.com/fonts-archive/RIDIBatang/f1628238e56fd41c12451dfc7d975527b61ebfc7/RIDIBatang.otf"
+    },
+    {
+      "size": 642936,
+      "crc32": 1232521650,
+      "sha256": "79451e27328ba230b6b39ab41ac039390fce3de41be2a3f745d5eb8b24f35b90",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 12466,
+        "unicodeCodepoints": 12398,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-Regular.otf",
+      "url": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-Regular.otf"
+    },
+    {
+      "size": 688436,
+      "crc32": 3304173280,
+      "sha256": "8226dcc1e975ba48d8b34cc97417e26712a5a5c3d25a8b18844d72c046d6f85b",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 12466,
+        "unicodeCodepoints": 12398,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-Bold.otf",
+      "url": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-Bold.otf"
+    },
+    {
+      "size": 742176,
+      "crc32": 2915809090,
+      "sha256": "18dfd1167d44877a5afc1386db5f09c3ea494ab83a5adf0a64953c43c208dd21",
+      "extension": "otf",
+      "metadata": {
+        "outline": "CFF ",
+        "glyphCount": 12466,
+        "unicodeCodepoints": 12398,
+        "axes": {}
+      },
+      "source": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-SemiBold.otf",
+      "url": "https://raw.githubusercontent.com/fonts-archive/MaruBuri/977eeff68d1d40bcef341f09c1f56cce1903bb8a/MaruBuri-SemiBold.otf"
+    }
+  ]
+}

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "HyphenationCommon.h"
 class LanguageHyphenator;
 
 class Hyphenator {
@@ -34,6 +35,12 @@ class Hyphenator {
   //      pattern breaks were found). Used as a last resort to prevent a single oversized
   //      word from overflowing the page width.
   static std::vector<BreakInfo> breakOffsets(const std::string& word, bool includeFallback);
+
+  // Uses original source codepoints/byte offsets, without composing or copying
+  // source text. Caller supplies at least count output slots; false means capacity
+  // was insufficient and no result may be used.
+  static bool breakOffsets(const CodepointInfo* cps, size_t count, bool includeFallback, BreakInfo* output,
+                           size_t capacity, size_t& written);
 
   // Provide a publication-level language hint (e.g. "en", "en-US", "ru") used to select hyphenation rules.
   static void setPreferredLanguage(const std::string& lang);

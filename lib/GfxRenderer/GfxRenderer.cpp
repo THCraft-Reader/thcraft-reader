@@ -3,19 +3,24 @@
 #include <BidiUtils.h>
 #include <BoardConfig.h>
 #include <BuildScratch.h>
-#include <FontDecompressor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
+#if !defined(CROSSPOINT_NATIVE_TEXT)
+#include <FontDecompressor.h>
 #include <SdCardFont.h>
+#endif
 #include <Utf8.h>
 
 #include <algorithm>
 
 #include "../Memory/Memory.h"
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 #include "FontCacheManager.h"
+#endif
 
 namespace {
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 /**
  * Resolves the requested style to the best available style in the given SD card font.
  * Falls back gracefully when the font lacks the requested variant.
@@ -35,6 +40,7 @@ uint16_t getSdCardSpaceAdvance(SdCardFont& font, const EpdFontFamily::Style styl
   const EpdGlyph* glyph = epdFont ? epdFont->getGlyph(' ') : nullptr;
   return glyph ? glyph->advanceX : 0;
 }
+#endif
 }  // namespace
 
 namespace {
@@ -48,6 +54,7 @@ const char* resolveVisualText(const char* text, std::string& visualBuffer, BidiU
 // glyph metadata + bitmap into the 8-slot overflow ring, once per glyph.
 // Tokens without RTL lead bytes (0xD6-0xDB) are skipped with a byte scan, so
 // pure-LTR text pays almost nothing.
+#if !defined(CROSSPOINT_NATIVE_TEXT)
 void appendShapedRtlTokens(const char* text, std::string& shapedOut) {
   const auto isBreak = [](const char c) { return c == ' ' || c == '\n' || c == '\r' || c == '\t'; };
   std::string token;
@@ -69,9 +76,11 @@ void appendShapedRtlTokens(const char* text, std::string& shapedOut) {
     }
   }
 }
+#endif
 }  // namespace
 
 const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const EpdGlyph* glyph) const {
+#if !defined(CROSSPOINT_NATIVE_TEXT)
   if (fontData->groups != nullptr) {
     auto* fd = fontCacheManager_ ? fontCacheManager_->getDecompressor() : nullptr;
     if (!fd) {
@@ -96,10 +105,21 @@ const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const Ep
       return sdFont->getOverflowBitmap(glyph);  // may be nullptr for zero-width glyphs
     }
   }
+#else
+  // The only Pro bitmap font is the uncompressed startup diagnostic surface.
+  if (fontData->groups || fontData->glyphMissCtx) return nullptr;
+#endif
   return &fontData->bitmap[glyph->dataOffset];
 }
 
 void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (!nativeTextEngine_) return;
+  for (uint8_t style = 0; style < 4; ++style) {
+    if ((styleMask & (1u << style)) && !warmNativeText(fontId, utf8Text, static_cast<EpdFontFamily::Style>(style)))
+      return;
+  }
+#else
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
     std::string shaped;
@@ -109,10 +129,16 @@ void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_
       LOG_DBG("GFX", "ensureSdCardFontReady: %d glyph(s) not found", missed);
     }
   }
+#endif
 }
 
 void GfxRenderer::ensureSdCardFontReady(int fontId, const std::deque<std::string>& words, bool includeHyphen,
                                         uint8_t styleMask) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (!nativeTextEngine_) return;
+  for (const auto& word : words) ensureSdCardFontReady(fontId, word.c_str(), styleMask);
+  if (includeHyphen) ensureSdCardFontReady(fontId, "-", styleMask);
+#else
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
     // Augment the persistent advance-only table for layout measurement.
@@ -128,6 +154,7 @@ void GfxRenderer::ensureSdCardFontReady(int fontId, const std::deque<std::string
       LOG_DBG("GFX", "ensureSdCardFontReady: %d glyph(s) not found", missed);
     }
   }
+#endif
 }
 
 void GfxRenderer::begin() {
@@ -142,6 +169,21 @@ void GfxRenderer::begin() {
   frameBufferSize = display.getBufferSize();
   bwBufferChunks.assign((frameBufferSize + BW_BUFFER_CHUNK_SIZE - 1) / BW_BUFFER_CHUNK_SIZE, nullptr);
 }
+
+GfxRenderer::~GfxRenderer() {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  releaseNativeState();
+#endif
+  freeBwBufferChunks();
+}
+
+#if !defined(CROSSPOINT_NATIVE_TEXT)
+void GfxRenderer::setNativeTextEngine(NativeTextEngine*) {}
+uint64_t GfxRenderer::textLayoutFingerprint(int) const { return 0; }
+void GfxRenderer::clearTextStatus() const { textStatus_ = static_cast<TextStatus>(0); }
+bool GfxRenderer::drawNativeLine(int, const NativeLineData&, int, int, bool) const { return false; }
+bool GfxRenderer::warmNativeLine(int, const NativeLineData&) const { return false; }
+#endif
 
 void GfxRenderer::releaseFrameBufferForBuild() {
   // Lend the framebuffer's bytes IN PLACE: the allocation is never freed, so
@@ -184,7 +226,13 @@ void GfxRenderer::FrameBufferLoan::end() {
   }
 }
 
-bool GfxRenderer::isFontCacheScanning() const { return fontCacheManager_ && fontCacheManager_->isScanning(); }
+bool GfxRenderer::isFontCacheScanning() const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  return false;
+#else
+  return fontCacheManager_ && fontCacheManager_->isScanning();
+#endif
+}
 
 void GfxRenderer::insertFont(const int fontId, EpdFontFamily font) {
   auto result = fontMap.insert({fontId, font});
@@ -227,6 +275,12 @@ int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const Epd
 
 void GfxRenderer::prewarmFallbackText(const int fontId, const TextGetter getter, const void* ctx,
                                       const uint32_t textCount, const EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (!nativeTextEngine_ || !getter) return;
+  for (uint32_t i = 0; i < textCount; ++i)
+    if (!warmNativeText(fontId, getter(ctx, i), style)) return;
+  warmNativeText(fontId, "\xe2\x80\xa6", style);
+#else
   if (getter == nullptr || textCount == 0) {
     return;
   }
@@ -261,9 +315,13 @@ void GfxRenderer::prewarmFallbackText(const int fontId, const TextGetter getter,
   // loadKernLig=false: see ensureSdGlyphsResident below.
   sdIt->second->prewarm(withEllipsis, &wrap, textCount + 1, styleMask, /*metadataOnly=*/false,
                         /*loadKernLig=*/false);
+#endif
 }
 
 void GfxRenderer::prewarmFallbackText(const int fontId, const char* text, const EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) warmNativeText(fontId, text, style);
+#else
   if (text == nullptr || *text == '\0') {
     return;
   }
@@ -271,10 +329,14 @@ void GfxRenderer::prewarmFallbackText(const int fontId, const char* text, const 
   if (resolvedFontId != fontId) {
     ensureSdGlyphsResident(resolvedFontId, text, style, false);
   }
+#endif
 }
 
 void GfxRenderer::ensureSdGlyphsResident(const int fontId, const char* text, const EpdFontFamily::Style style,
                                          const bool metadataOnly) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) warmNativeText(fontId, text, style);
+#else
   const auto sdIt = sdCardFonts_.find(fontId);
   if (sdIt == sdCardFonts_.end()) {
     return;
@@ -289,6 +351,7 @@ void GfxRenderer::ensureSdGlyphsResident(const int fontId, const char* text, con
   // in prewarmStyle without re-reading glyphs.
   const uint8_t styleMask = static_cast<uint8_t>(1u << (static_cast<uint8_t>(style) & 0x03));
   sdIt->second->prewarm(text, styleMask, metadataOnly, /*loadKernLig=*/false);
+#endif
 }
 
 // Translate logical (x,y) coordinates to physical panel coordinates based on current orientation
@@ -597,6 +660,7 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
     rowY = static_cast<uint32_t>(phyY - _stripY0);
   }
 
+  if (!target) return;  // The framebuffer may be on loan to chapter construction.
   // Calculate byte position and bit position
   const uint32_t byteIndex = rowY * panelWidthBytes + (phyX / 8);
   const uint8_t bitPosition = 7 - (phyX % 8);  // MSB first
@@ -610,6 +674,9 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style,
                               const BidiUtils::BidiBaseDir baseDir) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return nativeMeasure(fontId, text, style, static_cast<int8_t>(baseDir), false);
+#endif
   if (text == nullptr || *text == '\0') {
     return 0;
   }
@@ -640,12 +707,24 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
 
 void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* text, const bool black,
                                    const EpdFontFamily::Style style, const BidiUtils::BidiBaseDir baseDir) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) {
+    drawNativeText(fontId, 0, y, text, black, style, static_cast<int8_t>(baseDir), false, true);
+    return;
+  }
+#endif
   const int x = (getScreenWidth() - getTextWidth(fontId, text, style, baseDir)) / 2;
   drawText(fontId, x, y, text, black, style, baseDir);
 }
 
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
                            const EpdFontFamily::Style style, const BidiUtils::BidiBaseDir baseDir) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) {
+    drawNativeText(fontId, x, y, text, black, style, static_cast<int8_t>(baseDir), false);
+    return;
+  }
+#endif
   // cannot draw a NULL / empty string
   if (text == nullptr || *text == '\0') {
     return;
@@ -673,10 +752,12 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   int lastBaseTop = 0;
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
   if (fontCacheManager_ && fontCacheManager_->isScanning()) {
     fontCacheManager_->recordText(renderedText, resolvedFontId, style);
     return;
   }
+#endif
 
   // Redirected to the SD fallback: batch-load the string's glyphs so the draw
   // loop below doesn't fault them in one SD read at a time (#2725).
@@ -775,7 +856,7 @@ const char* resolveVisualText(const char* text, std::string& visualBuffer, const
 }  // namespace
 
 void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const bool state) const {
-  if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
+  if (isFontCacheScanning()) return;
   if (x1 == x2) {
     if (y2 < y1) {
       std::swap(y1, y2);
@@ -1001,7 +1082,7 @@ template <Color C>
 void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const int height) const {
   if constexpr (C == Color::Clear) return;
   if (width <= 0 || height <= 0) return;
-  if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
+  if (isFontCacheScanning()) return;
 
   // Clip in logical space.
   const int screenW = getScreenWidth();
@@ -1359,7 +1440,7 @@ void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, con
 
 bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
                              const float cropX, const float cropY, const bool whiteAsTransparent) const {
-  if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
+  if (isFontCacheScanning()) return false;
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
     return drawBitmap1Bit(bitmap, x, y, maxWidth, maxHeight);
@@ -1761,6 +1842,9 @@ void GfxRenderer::writeFramebufferRegion(int x, int y, int w, int h, const uint8
 
 std::string GfxRenderer::truncatedText(const int fontId, const char* text, const int maxWidth,
                                        const EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return truncateNativeText(fontId, text ? text : "", maxWidth, style);
+#endif
   if (!text || maxWidth <= 0) return "";
 
   std::string item = text;
@@ -1781,6 +1865,9 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
 
 std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* text, const int maxWidth,
                                                   const int maxLines, const EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return wrapNativeText(fontId, text, maxWidth, maxLines, style);
+#endif
   std::vector<std::string> lines;
 
   if (!text || maxWidth <= 0 || maxLines <= 0) return lines;
@@ -1987,11 +2074,15 @@ bool GfxRenderer::copyBufferToRegion(int lx, int ly, int lw, int lh, const uint8
 }
 
 int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return nativeMeasure(fontId, " ", style, -1, true);
+#else
   // Advance table fast-path for SD card fonts during layout
   auto sdIt = sdCardFonts_.find(fontId);
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
     return fp4::toPixel(getSdCardSpaceAdvance(*sdIt->second, style));
   }
+#endif
 
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
@@ -2005,6 +2096,9 @@ int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style styl
 
 int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
                                  const EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return nativePairAdvance(fontId, leftCp, rightCp, style, true);
+#else
   // Advance table fast-path for SD card fonts during layout.
   // Kern data is not loaded during layout (consistent with previous metadataOnly behavior),
   // so we return just the space advance without kerning.
@@ -2012,6 +2106,7 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
     return fp4::toPixel(getSdCardSpaceAdvance(*sdIt->second, style));
   }
+#endif
 
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) return 0;
@@ -2027,6 +2122,9 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
 
 int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
                             const EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return nativePairAdvance(fontId, leftCp, rightCp, style, false);
+#endif
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) return 0;
   const int kernFP = fontIt->second.getKerning(leftCp, rightCp, style);  // 4.4 fixed-point
@@ -2034,6 +2132,9 @@ int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint3
 }
 
 int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return nativeMeasure(fontId, text, style, -1, true);
+#endif
   // Match the font drawText would use for CJK-bearing strings (see resolveTextFontId).
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
   // Measure the exact codepoint stream drawText renders: bidi-reordered and
@@ -2045,6 +2146,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   std::string visual;
   text = resolveVisualText(text, visual, BidiUtils::BidiBaseDir::AUTO);
 
+#if !defined(CROSSPOINT_NATIVE_TEXT)
   // Advance table fast-path for SD card fonts during layout.
   // No kerning/ligature lookup — consistent with previous metadataOnly behavior
   // where kern/lig data was not loaded.
@@ -2073,6 +2175,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     }
     return fp4::toPixel(widthFP);
   }
+#endif
 
   const auto fontIt = fontMap.find(resolvedFontId);
   if (fontIt == fontMap.end()) {
@@ -2114,6 +2217,9 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
 }
 
 int GfxRenderer::getFontAscenderSize(const int fontId) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return nativeMetric(fontId, true);
+#endif
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
@@ -2124,6 +2230,9 @@ int GfxRenderer::getFontAscenderSize(const int fontId) const {
 }
 
 int GfxRenderer::getLineHeight(const int fontId) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return nativeMetric(fontId, false);
+#endif
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
@@ -2138,6 +2247,9 @@ int GfxRenderer::getLineHeight(const int fontId, const float compression) const 
 }
 
 int GfxRenderer::getTextHeight(const int fontId) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) return nativeMetric(fontId, true);
+#endif
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
@@ -2148,6 +2260,12 @@ int GfxRenderer::getTextHeight(const int fontId) const {
 
 void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y, const char* text, const bool black,
                                       const EpdFontFamily::Style style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (nativeTextEngine_) {
+    drawNativeText(fontId, x, y, text, black, style, -1, true);
+    return;
+  }
+#endif
   // Cannot draw a NULL / empty string
   if (text == nullptr || *text == '\0') {
     return;

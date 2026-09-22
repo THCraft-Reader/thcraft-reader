@@ -14,6 +14,10 @@ class LanguageHyphenator {
     return liangBreakIndexes(cps, patterns_, config_);
   }
 
+  size_t breakIndexes(const CodepointInfo* cps, size_t count, size_t* indexes, size_t capacity) const {
+    return liangBreakIndexes(cps, count, patterns_, config_, indexes, capacity);
+  }
+
   size_t minPrefix() const { return config_.minPrefix; }
   size_t minSuffix() const { return config_.minSuffix; }
 

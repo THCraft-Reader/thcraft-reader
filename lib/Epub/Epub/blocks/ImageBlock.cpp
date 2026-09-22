@@ -1,6 +1,5 @@
 #include "ImageBlock.h"
 
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -321,8 +320,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // suppression, so it would otherwise do a full (discarded) cache render every
   // page view. Skip it here. The image still draws in the real BW/grayscale
   // passes; on first view this just moves the one-time decode to the BW pass.
-  FontCacheManager* fcm = renderer.getFontCacheManager();
-  if (fcm && fcm->isScanning()) return;
+  if (renderer.isFontCacheScanning()) return;
 
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
@@ -422,20 +420,33 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 }
 
 bool ImageBlock::serialize(HalFile& file) {
-  serialization::writeString(file, imagePath);
-  serialization::writeString(file, srcPath);
-  serialization::writePod(file, width);
-  serialization::writePod(file, height);
-  return true;
+  const auto write = [&file](const auto& value) { return file.write(&value, sizeof(value)) == sizeof(value); };
+  const auto writePath = [&file, &write](const std::string& path) {
+    return path.size() <= 4096 && write(static_cast<uint32_t>(path.size())) &&
+           (path.empty() || file.write(path.data(), path.size()) == path.size());
+  };
+  return !imagePath.empty() && width > 0 && height > 0 && writePath(imagePath) && writePath(srcPath) && write(width) &&
+         write(height);
 }
 
-std::unique_ptr<ImageBlock> ImageBlock::deserialize(HalFile& file) {
-  std::string path;
-  std::string src;
-  serialization::readString(file, path);
-  serialization::readString(file, src);
-  int16_t w, h;
-  serialization::readPod(file, w);
-  serialization::readPod(file, h);
-  return std::unique_ptr<ImageBlock>(new (std::nothrow) ImageBlock(path, src, w, h));
+std::unique_ptr<ImageBlock> ImageBlock::deserialize(serialization::BoundedFileReader& file) {
+  const auto read = [&file](auto& value) { return file.read(&value, sizeof(value)) == sizeof(value); };
+  const auto readPath = [&file, &read](std::string& path) {
+    uint32_t bytes = 0;
+    if (!read(bytes) || bytes > 4096) return false;
+    const size_t position = file.position(), size = file.size();
+    if (position > size || bytes > size - position) return false;
+    path.resize(bytes);
+    return bytes == 0 || (file.read(path.data(), bytes) == bytes && !memchr(path.data(), '\0', bytes));
+  };
+  std::string path, src;
+  int16_t width = 0, height = 0;
+  if (!readPath(path) || !readPath(src) || !read(width) || !read(height) || path.empty() || width <= 0 || height <= 0)
+    return nullptr;
+  auto block = makeUniqueNoThrow<ImageBlock>(path, src, width, height);
+  if (!block) {
+    file.outOfMemory();
+    LOG_ERR("PGE", "Deserialization failed: could not allocate ImageBlock");
+  }
+  return block;
 }

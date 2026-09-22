@@ -6,16 +6,140 @@
 #include <algorithm>
 #include <cstring>
 
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+#include <ArduinoJson.h>
+
+#include <cmath>
+#include <string_view>
+
+namespace {
+constexpr const char* NATIVE_STYLES[] = {"Regular", "Bold", "Italic", "BoldItalic"};
+constexpr const char* JSON_STYLES[] = {"regular", "bold", "italic", "boldItalic"};
+
+bool nativeSize(uint8_t size) {
+  return size == 8 || size == 10 || size == 12 || size == 14 || size == 16 || size == 18;
+}
+
+bool nativeFilename(std::string_view filename, std::string_view family, uint8_t& style) {
+  if (filename.size() < 5 || filename[filename.size() - 4] != '.') return false;
+  const auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? char(c + ('a' - 'A')) : c; };
+  const auto extension = filename.substr(filename.size() - 3);
+  if (!((lower(extension[0]) == 't' || lower(extension[0]) == 'o') && lower(extension[1]) == 't' &&
+        lower(extension[2]) == 'f'))
+    return false;
+  const auto stem = filename.substr(0, filename.size() - 4);
+  if (stem.size() <= family.size() || stem.substr(0, family.size()) != family || stem[family.size()] != '-')
+    return false;
+  for (uint8_t i = 0; i < 4; ++i) {
+    if (stem.substr(family.size() + 1) == NATIVE_STYLES[i]) {
+      style = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+class NativeJsonAllocator final : public ArduinoJson::Allocator {
+ public:
+  void* allocate(size_t bytes) override { return native_text_malloc(bytes); }
+  void* reallocate(void* data, size_t bytes) override { return native_text_realloc(data, bytes); }
+  void deallocate(void* data) override { native_text_free(data); }
+};
+
+struct NativeJsonReader {
+  const char* data;
+  size_t size, position = 0;
+  int read() { return position < size ? static_cast<uint8_t>(data[position++]) : -1; }
+  size_t readBytes(char* output, size_t count) {
+    count = std::min(count, size - position);
+    memcpy(output, data + position, count);
+    position += count;
+    return count;
+  }
+};
+
+TextStatus readNativeSidecar(const char* dirPath, SdCardFontFamilyInfo& family) {
+  const size_t pathBytes = strlen(dirPath) + sizeof("/native-font.json");
+  if (pathBytes > 1024) return TextStatus::CapacityExceeded;
+  NativeBuffer<char> path;
+  if (!path.resize(pathBytes)) return TextStatus::OutOfMemory;
+  snprintf(path.data(), pathBytes, "%s/native-font.json", dirPath);
+  if (!Storage.exists(path.data())) return TextStatus::Ok;
+  HalFile file;
+  if (!Storage.openFileForRead("SDREG", path.data(), file)) return TextStatus::StorageError;
+  const uint64_t bytes = file.fileSize64();
+  if (!bytes || bytes > 8192) return TextStatus::InvalidFont;
+  NativeBuffer<char> json;
+  if (!json.resize(static_cast<size_t>(bytes) + 1)) return TextStatus::OutOfMemory;
+  if (file.read(json.data(), static_cast<size_t>(bytes)) != static_cast<int>(bytes)) return TextStatus::StorageError;
+  json[bytes] = '\0';
+  NativeJsonAllocator allocator;
+  JsonDocument doc(&allocator);
+  NativeJsonReader reader{json.data(), static_cast<size_t>(bytes)};
+  const auto error = deserializeJson(doc, reader, DeserializationOption::NestingLimit(5));
+  if (error) return error == DeserializationError::NoMemory ? TextStatus::OutOfMemory : TextStatus::InvalidFont;
+  for (size_t i = reader.position; i < reader.size; ++i)
+    if (reader.data[i] != ' ' && reader.data[i] != '\t' && reader.data[i] != '\r' && reader.data[i] != '\n')
+      return TextStatus::InvalidFont;
+  if (!doc["version"].is<int>() || doc["version"].as<int>() != 1 || !doc["styles"].is<JsonObject>())
+    return TextStatus::InvalidFont;
+  for (JsonPairConst pair : doc["styles"].as<JsonObjectConst>()) {
+    uint8_t style = 4;
+    for (uint8_t i = 0; i < 4; ++i)
+      if (!strcmp(pair.key().c_str(), JSON_STYLES[i])) style = i;
+    if (style == 4 || !pair.value().is<JsonObjectConst>()) return TextStatus::InvalidFont;
+    auto description = pair.value().as<JsonObjectConst>();
+    if (!description["file"].is<const char*>()) return TextStatus::InvalidFont;
+    const char* filename = description["file"].as<const char*>();
+    uint8_t filenameStyle = 4;
+    if (!nativeFilename(filename, family.name, filenameStyle) || filenameStyle != style) return TextStatus::InvalidFont;
+    SdCardFontFileInfo* target = nullptr;
+    for (auto& candidate : family.files) {
+      if (candidate.style == style &&
+          std::string_view(candidate.path).substr(candidate.path.find_last_of('/') + 1) == filename)
+        target = &candidate;
+    }
+    if (!target) return TextStatus::InvalidFont;
+    if (!description["axes"].isNull() && !description["axes"].is<JsonObjectConst>()) return TextStatus::InvalidFont;
+    for (JsonPairConst axis : description["axes"].as<JsonObjectConst>()) {
+      const char* tag = axis.key().c_str();
+      if (strlen(tag) != 4 || target->axisCount == 8 || !axis.value().is<double>()) return TextStatus::InvalidFont;
+      uint32_t packed = 0;
+      for (unsigned i = 0; i < 4; ++i) {
+        if (tag[i] < 0x20 || tag[i] > 0x7e) return TextStatus::InvalidFont;
+        packed = (packed << 8) | static_cast<uint8_t>(tag[i]);
+      }
+      const float value = axis.value().as<float>();
+      if (!std::isfinite(value)) return TextStatus::InvalidFont;
+      target->axes[target->axisCount++] = {packed, value};
+    }
+  }
+  return TextStatus::Ok;
+}
+}  // namespace
+#endif
+
 // --- SdCardFontFamilyInfo helpers ---
 
 const SdCardFontFileInfo* SdCardFontFamilyInfo::findFile(uint8_t size, uint8_t style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  if (nativeStatus != TextStatus::Ok || !nativeSize(size)) return nullptr;
+  for (const auto& file : files)
+    if (file.style == style) return &file;
+  return nullptr;
+#else
   for (const auto& f : files) {
     if (f.pointSize == size && f.style == style) return &f;
   }
   return nullptr;
+#endif
 }
 
 const SdCardFontFileInfo* SdCardFontFamilyInfo::findNearestSize(const uint8_t pointSize, const uint8_t style) const {
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  (void)pointSize;
+  return findFile(12, style);
+#else
   // The reader stores an actual point size, so an exact match is the norm and
   // falls out of the delta search below (delta 0). The search only matters when
   // the size was carried over from a family that ships different sizes; the
@@ -32,16 +156,24 @@ const SdCardFontFileInfo* SdCardFontFamilyInfo::findNearestSize(const uint8_t po
     }
   }
   return best;
+#endif
 }
 
 bool SdCardFontFamilyInfo::hasSize(uint8_t size) const {
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  return findFile(size) != nullptr;
+#else
   for (const auto& f : files) {
     if (f.pointSize == size) return true;
   }
   return false;
+#endif
 }
 
 std::vector<uint8_t> SdCardFontFamilyInfo::availableSizes() const {
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  return findFile(12) ? std::vector<uint8_t>{12, 14, 16, 18} : std::vector<uint8_t>{};
+#else
   std::vector<uint8_t> sizes;
   for (const auto& f : files) {
     bool found = false;
@@ -55,10 +187,12 @@ std::vector<uint8_t> SdCardFontFamilyInfo::availableSizes() const {
   }
   std::sort(sizes.begin(), sizes.end());
   return sizes;
+#endif
 }
 
 // --- SdCardFontRegistry ---
 
+#if !defined(CROSSPOINT_NATIVE_TEXT) || !CROSSPOINT_NATIVE_TEXT
 bool SdCardFontRegistry::parseFilename(const char* filename, uint8_t& size, uint8_t& style) {
   // V4 naming: <name>_<size>.cpfont (e.g. Bookerly-SD_14.cpfont)
   // Use an ends-with check rather than strstr() so that in-progress downloads
@@ -94,11 +228,15 @@ bool SdCardFontRegistry::parseFilename(const char* filename, uint8_t& size, uint
   style = 0;
   return true;
 }
+#endif
 
 void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family) {
   HalFile dir = Storage.open(dirPath);
   if (!dir || !dir.isDirectory()) return;
 
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  family.files.reserve(4);
+#endif
   char nameBuffer[128];
   while (true) {
     HalFile entry = dir.openNextFile();
@@ -111,11 +249,18 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
     entry.getName(nameBuffer, sizeof(nameBuffer));
     entry.close();
 
-    // Skip macOS resource fork files (._*) and other hidden files
-    if (nameBuffer[0] == '.' || nameBuffer[0] == '_') continue;
+    // Ignore dot-prefixed metadata files, including macOS resource forks.
+    if (nameBuffer[0] == '.') continue;
+#if !defined(CROSSPOINT_NATIVE_TEXT) || !CROSSPOINT_NATIVE_TEXT
+    if (nameBuffer[0] == '_') continue;
+#endif
 
-    uint8_t size, style;
+    uint8_t size = 0, style = 0;
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+    if (!nativeFilename(nameBuffer, family.name, style)) continue;
+#else
     if (!parseFilename(nameBuffer, size, style)) continue;
+#endif
 
     // Reject duplicate (pointSize, style) entries in the same family. With
     // v4's bundle-everything design parseFilename always returns style=0, so
@@ -130,6 +275,9 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
     }
     if (duplicate) {
       LOG_ERR("SDREG", "Duplicate font %s in %s — skipping", nameBuffer, dirPath);
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+      family.nativeStatus = TextStatus::InvalidFont;
+#endif
       continue;
     }
 
@@ -139,6 +287,15 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
     info.style = style;
     family.files.push_back(std::move(info));
   }
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  bool hasRegular = false;
+  for (const auto& file : family.files)
+    if (file.style == 0) hasRegular = true;
+  if (!hasRegular) family.nativeStatus = TextStatus::InvalidFont;
+  if (family.nativeStatus == TextStatus::Ok) family.nativeStatus = readNativeSidecar(dirPath, family);
+  if (family.nativeStatus != TextStatus::Ok && !family.files.empty())
+    LOG_ERR("SDREG", "Rejected native family metadata: %s", family.name.c_str());
+#endif
 }
 
 // Scan a single root (e.g. "/.fonts") and append its families to `out`.
@@ -164,7 +321,10 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
       entry.close();
 
       // Skip hidden/system directories inside the root (macOS ._*, .Trashes, etc.)
-      if (nameBuffer[0] == '.' || nameBuffer[0] == '_') continue;
+      if (nameBuffer[0] == '.') continue;
+#if !defined(CROSSPOINT_NATIVE_TEXT) || !CROSSPOINT_NATIVE_TEXT
+      if (nameBuffer[0] == '_') continue;
+#endif
 
       // De-dup by family name across roots.
       bool exists = false;
@@ -182,6 +342,15 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
       SdCardFontRegistry::scanDirectory(subDirPath.c_str(), family);
 
       if (!family.files.empty()) {
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+        // Keep the same alphabetic 128-family policy without unbounded discovery growth.
+        if (out.size() == MAX_SD_FAMILIES) {
+          auto last =
+              std::max_element(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.name < b.name; });
+          if (family.name < last->name) *last = std::move(family);
+          continue;
+        }
+#endif
         out.push_back(std::move(family));
         LOG_DBG("SDREG", "Found family: %s (%d files) in %s", out.back().name.c_str(),
                 static_cast<int>(out.back().files.size()), rootPath);

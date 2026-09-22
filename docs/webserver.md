@@ -12,7 +12,7 @@ The web server is available while the device is in **File Transfer** or
 - Create folders
 - Edit many device settings from a browser
 - Manage saved Wi-Fi networks and OPDS servers
-- Upload and delete `.cpfont` SD-card font families
+- Upload and delete SD-card font families: native TTF/OTF on X4 Pro, `.cpfont` on other devices
 - Accept WebDAV clients and Calibre wireless uploads
 
 The server does not require authentication. Use it only on trusted private
@@ -113,10 +113,43 @@ not returned by the API.
 
 ### Fonts
 
-The Fonts page lists installed SD-card font families and lets you upload
-`.cpfont` files. Upload files from one font family at a time. The server validates
-the font family name, filename, and `.cpfont` magic bytes before accepting the
-upload.
+The Fonts page reads the device's supported format and limits before enabling
+the upload picker:
+
+- **X4 Pro:** select TTF/OTF **files** from one family, named
+  `Family-Regular.ttf` (or `.otf`), with optional `Family-Bold`,
+  `Family-Italic`, and `Family-BoldItalic` files using either extension.
+  A new family requires Regular. Select at most four files, one per style.
+  Family names contain 1–31 ASCII letters, digits, hyphens, or underscores.
+  Style suffixes are case-sensitive; extensions are case-insensitive.
+  The server validates real scalable SFNT TrueType/CFF fonts, not just their
+  extensions. Collections (TTC), WOFF, bitmap-only fonts, and `.cpfont` are
+  not accepted on Pro.
+- **Other devices:** select a **folder** containing one family's `.cpfont`
+  files, such as `Literata_12.cpfont` and `Literata_14.cpfont`. Browsers without
+  folder selection can select the files instead. Unrelated file types in the
+  selected folder are ignored. At most 32 font files can be uploaded together;
+  each must have a distinct point-size suffix. The server checks `.cpfont`
+  magic bytes.
+
+Click **Upload** to send the complete selection in one request. Mixed-family
+selections are rejected. Files are staged and checked before the selection is
+published; an invalid or incomplete selection does not replace installed fonts.
+On Pro, uploading styles replaces only those styles and preserves untouched
+styles; it does not replace the whole family as an on-device font download does.
+You do not need separate native font files for each reading size.
+
+**Cancel** aborts an in-progress upload and reloads the installed-font list.
+Cancellation before commit discards that request's staged files; it cannot undo
+an upload that has already committed. If a connection fails, reload the list to
+check the result before retrying.
+
+**Delete** asks for confirmation. On Pro it removes only recognized native
+files and their `native-font.json` sidecar, preserving co-located `.cpfont`,
+unrelated files, and subfolders. The saved family name is retained so a native
+reinstall can restore the selection; until then the reader uses its bundled
+fallback. On non-Pro devices, deletion removes the family folder and clears
+the saved selection if it was active.
 
 Installed fonts appear in **Settings > Reader > Font Family** after the font
 registry refreshes.

@@ -1,7 +1,11 @@
 #include "OpdsBookBrowserActivity.h"
 
 #include <Arduino.h>
+#if defined(CROSSPOINT_NATIVE_TEXT)
+#include <NativeTextEngine.h>
+#else
 #include <FontCacheManager.h>
+#endif
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -45,6 +49,9 @@ OpdsBookBrowserActivity::OpdsBookBrowserActivity(GfxRenderer& renderer, MappedIn
 
 void OpdsBookBrowserActivity::onEnter() {
   Activity::onEnter();
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#endif
 
   state = BrowserState::CHECK_WIFI;
   entries.clear();
@@ -507,9 +514,13 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   // a multi-MB book; release them up front (they repopulate on demand) and
   // refuse to start below the floor — a doomed transfer otherwise dies
   // mid-stream with MEMORY_E, or abort()s on an interior allocation.
+#if defined(CROSSPOINT_NATIVE_TEXT)
+  if (auto* engine = renderer.nativeTextEngine()) engine->clearCaches();
+#else
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->releaseSdFontCaches();
   }
+#endif
   LOG_DBG("OPDS", "Download heap: %u free, %u max block", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   if (ESP.getFreeHeap() < HttpDownloader::MIN_TLS_FREE_HEAP ||
       ESP.getMaxAllocHeap() < HttpDownloader::MIN_TLS_MAX_ALLOC) {

@@ -30,9 +30,12 @@ class DictionaryWordSelectActivity final : public Activity {
   // Screen box of one selectable word. `text` points into the owned Page's
   // TextBlock arena (NUL-terminated), valid for this activity's lifetime.
   struct WordBox {
-    int16_t x;
-    int16_t y;
-    int16_t width;
+    int x;
+    int y;
+    int width;
+    int height;
+    const TextBlock* block = nullptr;
+    int lineX = 0, lineY = 0;
     uint16_t row;
     const char* text;
     EpdFontFamily::Style style;

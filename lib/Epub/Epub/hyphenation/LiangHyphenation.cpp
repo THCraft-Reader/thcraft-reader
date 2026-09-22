@@ -126,11 +126,11 @@ size_t encodeUtf8(uint32_t cp, AugmentedWord& word) {
 
 // Build the dotted, lowercase UTF-8 representation plus lookup tables into `word`.
 // Returns false if the word should be skipped (empty, non-letter, or too long).
-bool buildAugmentedWord(AugmentedWord& word, const std::vector<CodepointInfo>& cps, const LiangWordConfig& config) {
+bool buildAugmentedWord(AugmentedWord& word, const CodepointInfo* cps, size_t count, const LiangWordConfig& config) {
   word.byteLen = 0;
   word.charCount_ = 0;
 
-  if (cps.empty()) {
+  if (!count) {
     return false;
   }
 
@@ -138,7 +138,8 @@ bool buildAugmentedWord(AugmentedWord& word, const std::vector<CodepointInfo>& c
   word.charByteOffsets[word.charCount_++] = 0;
   word.bytes[word.byteLen++] = '.';
 
-  for (const auto& info : cps) {
+  for (size_t i = 0; i < count; ++i) {
+    const auto& info = cps[i];
     if (!config.isLetter(info.value)) {
       word.byteLen = 0;
       word.charCount_ = 0;
@@ -312,12 +313,11 @@ bool transition(const EmbeddedAutomaton& automaton, const AutomatonState& state,
 // Converts odd score positions back into codepoint indexes, honoring min prefix/suffix constraints.
 // Each break corresponds to scores[breakIndex + 1] because of the leading '.' sentinel.
 // Convert odd score entries into hyphen positions while honoring prefix/suffix limits.
-std::vector<size_t> collectBreakIndexes(const std::vector<CodepointInfo>& cps, const uint8_t* scores,
-                                        const size_t scoresSize, const size_t minPrefix, const size_t minSuffix) {
-  std::vector<size_t> indexes;
-  const size_t cpCount = cps.size();
+size_t collectBreakIndexes(const size_t cpCount, const uint8_t* scores, const size_t scoresSize, const size_t minPrefix,
+                           const size_t minSuffix, size_t* indexes, size_t capacity) {
+  size_t count = 0;
   if (cpCount < 2) {
-    return indexes;
+    return 0;
   }
 
   for (size_t breakIndex = 1; breakIndex < cpCount; ++breakIndex) {
@@ -337,29 +337,29 @@ std::vector<size_t> collectBreakIndexes(const std::vector<CodepointInfo>& cps, c
     if ((scores[scoreIdx] & 1u) == 0) {
       continue;
     }
-    indexes.push_back(breakIndex);
+    if (count < capacity) indexes[count++] = breakIndex;
   }
 
-  return indexes;
+  return count;
 }
 
 }  // namespace
 
 // Entry point that runs the full Liang pipeline for a single word.
-std::vector<size_t> liangBreakIndexes(const std::vector<CodepointInfo>& cps,
-                                      const SerializedHyphenationPatterns& patterns, const LiangWordConfig& config) {
+size_t liangBreakIndexes(const CodepointInfo* cps, size_t count, const SerializedHyphenationPatterns& patterns,
+                         const LiangWordConfig& config, size_t* indexes, size_t capacity) {
   // AugmentedWord uses fixed-size C arrays (no heap allocation) to avoid
   // fragmenting the heap across hundreds of words during page layout.
   AugmentedWord augmented;
-  if (!buildAugmentedWord(augmented, cps, config)) {
-    return {};
+  if (!buildAugmentedWord(augmented, cps, count, config)) {
+    return 0;
   }
 
   const EmbeddedAutomaton& automaton = patterns;
 
   const AutomatonState root = decodeState(automaton, automaton.rootOffset);
   if (!root.valid()) {
-    return {};
+    return 0;
   }
 
   // Liang scores: one entry per augmented char (leading/trailing dots included).
@@ -413,5 +413,13 @@ std::vector<size_t> liangBreakIndexes(const std::vector<CodepointInfo>& cps,
     }
   }
 
-  return collectBreakIndexes(cps, scores, augmented.charCount_, config.minPrefix, config.minSuffix);
+  return collectBreakIndexes(count, scores, augmented.charCount_, config.minPrefix, config.minSuffix, indexes,
+                             capacity);
+}
+
+std::vector<size_t> liangBreakIndexes(const std::vector<CodepointInfo>& cps,
+                                      const SerializedHyphenationPatterns& patterns, const LiangWordConfig& config) {
+  size_t indexes[MAX_WORD_CHARS];
+  const size_t count = liangBreakIndexes(cps.data(), cps.size(), patterns, config, indexes, MAX_WORD_CHARS);
+  return {indexes, indexes + count};
 }

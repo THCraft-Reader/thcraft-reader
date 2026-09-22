@@ -1,0 +1,10 @@
+{
+  "name": "NativeText",
+  "version": "1.0.0",
+  "description": "X4 Pro native OpenType shaping, rasterization and Thai segmentation",
+  "build": {
+    "srcDir": ".",
+    "includeDir": ".",
+    "extraScript": "platformio_build.py"
+  }
+}

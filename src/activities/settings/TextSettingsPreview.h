@@ -20,6 +20,7 @@ struct PreviewKey {
   bool extraParagraphSpacing = false;
   bool focusReading = false;
   bool hyphenation = false;
+  uint64_t textLayoutFingerprint = 0;
   bool operator==(const PreviewKey&) const = default;
 };
 

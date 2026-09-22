@@ -2,6 +2,9 @@
 
 #include <EpdFontFamily.h>
 
+#ifdef CROSSPOINT_NATIVE_TEXT
+#include <NativeParagraphLayout.h>
+#endif
 #include <deque>
 #include <functional>
 #include <memory>
@@ -14,6 +17,7 @@
 class GfxRenderer;
 
 class ParsedText {
+#ifndef CROSSPOINT_NATIVE_TEXT
   // words/rubyTexts are std::deque, not std::vector: a paragraph can hold thousands
   // of tokens (CJK splits every character), and a vector grows by reallocating its
   // whole element array into one contiguous block (32 B/std::string -> 64-128 KB at
@@ -53,10 +57,45 @@ class ParsedText {
   uint32_t visibleOffsetBase = 0;
   std::vector<VisibleOffsetRebase> visibleOffsetRebases;
   std::deque<std::string> rubyTexts;
+#endif
   BlockStyle blockStyle;
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool focusReadingEnabled;
+#ifdef CROSSPOINT_NATIVE_TEXT
+  // Fragment handles remain stable until a layout consumes a prefix. They are
+  // parser ingestion boundaries, not dictionary words or shaping clusters.
+  struct NativeFragment {
+    uint32_t startByte = 0, endByte = 0;
+    uint8_t style = 0, linkId = 0;
+  };
+  struct NativeRubyRecord {
+    uint32_t startByte = 0, endByte = 0, textOffset = 0, textBytes = 0;
+    uint8_t style = 0;
+  };
+  struct NativeLinkTarget {
+    char href[FOOTNOTE_HREF_LEN];
+  };
+  NativeBuffer<char> nativeText;
+  NativeBuffer<NativeFragment> nativeFragments;
+  NativeBuffer<NativeSourceAnchor> nativeAnchors;
+  NativeBuffer<NativeRubyRecord> nativeRuby;
+  NativeBuffer<char> nativeRubyText;
+  NativeBuffer<NativeLinkTarget> nativeLinkTargets;
+  size_t nativeScalars = 0;
+  TextStatus nativeStatus = TextStatus::Ok;
+  int8_t nativeParagraphLevel = -1;
+  bool nativeFirstLine = true;
+  uint8_t nativeLastLinkId = 0;
+  void appendNative(std::string_view text, EpdFontFamily::Style style, bool underline, bool attachToPrevious,
+                    uint32_t sourceOffset, uint8_t linkId, bool synthetic);
+  void failNative(TextStatus status);
+  void discardNativeInput();
+  void consumeNativePrefix(size_t bytes);
+  bool layoutNative(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
+                    const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine, bool includeLastLine,
+                    bool semanticBoundary);
+#else
   bool isNaturalAlign;
   bool hasRtlWord;
   std::vector<std::string> reorderedWordsScratch;
@@ -84,12 +123,13 @@ class ParsedText {
                                                   std::vector<bool>& noSpaceBeforeVec);
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks);
-  void extractLine(size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
+  bool extractLine(size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
                    const std::vector<bool>& continuesVec, const std::vector<bool>& noSpaceBeforeVec,
                    const std::vector<size_t>& lineBreakIndices,
                    const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                    const GfxRenderer& renderer, int fontId);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
+#endif
 
  public:
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
@@ -97,27 +137,57 @@ class ParsedText {
       : blockStyle(blockStyle),
         extraParagraphSpacing(extraParagraphSpacing),
         hyphenationEnabled(hyphenationEnabled),
-        focusReadingEnabled(focusReadingEnabled),
+        focusReadingEnabled(focusReadingEnabled)
+#ifndef CROSSPOINT_NATIVE_TEXT
+        ,
         isNaturalAlign(false),
-        hasRtlWord(false) {}
+        hasRtlWord(false)
+#endif
+  {
+  }
   ~ParsedText() = default;
 
+#ifdef CROSSPOINT_NATIVE_TEXT
+  void addWord(std::string_view word, EpdFontFamily::Style fontStyle, bool underline = false,
+               bool attachToPrevious = false, uint32_t visibleTextOffset = 0, uint8_t linkId = 0);
+  void addSyntheticText(std::string_view text, EpdFontFamily::Style style, uint32_t anchorOffset,
+                        bool attachToPrevious = false, uint8_t linkId = 0);
+#else
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint32_t visibleTextOffset = 0, uint8_t linkId = 0);
+#endif
   uint8_t addLinkTarget(const char* href);
   bool linkTargetMatches(uint8_t linkId, const char* href) const;
+#ifdef CROSSPOINT_NATIVE_TEXT
+  void setRubyForWordAt(size_t index, std::string_view ruby);
+  void setRubyGroupAt(size_t startIndex, size_t count, std::string_view ruby);
+  EpdFontFamily::Style getWordStyleAt(size_t index) const;
+  std::string_view getRubyTextAt(size_t index) const;
+  bool nativeNeedsLayout() const { return nativeScalars >= 4096 || nativeText.size() >= 16384; }
+  size_t nativePendingScalars() const { return nativeScalars; }
+  TextStatus lastTextStatus() const { return nativeStatus; }
+  bool layoutBeforeRuby(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
+                        const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine);
+#else
   void setRubyForWordAt(size_t index, const std::string& ruby);
   void setRubyGroupAt(size_t startIndex, size_t count, const std::string& ruby);
   EpdFontFamily::Style getWordStyleAt(size_t index) const {
     return index < wordStyles.size() ? wordStyles[index] : EpdFontFamily::REGULAR;
   }
   std::string getRubyTextAt(size_t index) const { return index < rubyTexts.size() ? rubyTexts[index] : std::string(); }
+#endif
   void ensureRubyCapacity();
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   BlockStyle& getBlockStyle() { return blockStyle; }
+#ifdef CROSSPOINT_NATIVE_TEXT
+  size_t size() const { return nativeFragments.size(); }
+  bool isEmpty() const { return nativeText.empty(); }
+#else
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }
-  void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
+#endif
+  // On false, discard this consumed input and any partial output; do not retry it.
+  bool layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              bool includeLastLine = true);
 };

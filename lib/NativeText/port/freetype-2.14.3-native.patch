@@ -1,0 +1,12 @@
+--- a/freetype-2.14.3/src/base/ftsystem.c
++++ b/freetype-2.14.3/src/base/ftsystem.c
+@@ -145,7 +145,8 @@
+    *
+    */
+ 
+-#ifndef FT_CONFIG_OPTION_DISABLE_STREAM_SUPPORT
++#if !defined( FT_CONFIG_OPTION_DISABLE_STREAM_SUPPORT ) && \
++    !defined( NATIVE_TEXT_NO_PATHNAME_STREAM )
+ 
+   /**************************************************************************
+    *

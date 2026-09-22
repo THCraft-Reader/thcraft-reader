@@ -1,4 +1,5 @@
 #pragma once
+#include <BoundedFileReader.h>
 #include <HalStorage.h>
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "FootnoteEntry.h"
+#include "NativePageElements.h"
 #include "PageLink.h"
 #include "blocks/ImageBlock.h"
 #include "blocks/TextBlock.h"
@@ -42,7 +44,7 @@ class PageLine final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(HalFile& file) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
-  static std::unique_ptr<PageLine> deserialize(HalFile& file);
+  static std::unique_ptr<PageLine> deserialize(serialization::BoundedFileReader& file);
 };
 
 // New PageImage class
@@ -56,7 +58,7 @@ class PageImage final : public PageElement {
   void renderPlaceholder(GfxRenderer& renderer, int xOffset, int yOffset) const;
   bool serialize(HalFile& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
-  static std::unique_ptr<PageImage> deserialize(HalFile& file);
+  static std::unique_ptr<PageImage> deserialize(serialization::BoundedFileReader& file);
   const ImageBlock& getImageBlock() const { return *imageBlock; }
 };
 
@@ -71,17 +73,27 @@ class PageHorizontalRule final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(HalFile& file) override;
   PageElementTag getTag() const override { return TAG_PageHorizontalRule; }
-  static std::unique_ptr<PageHorizontalRule> deserialize(HalFile& file);
+  static std::unique_ptr<PageHorizontalRule> deserialize(serialization::BoundedFileReader& file);
 };
 
 class Page {
+  static std::unique_ptr<Page> decode(serialization::BoundedFileReader& file);
+
  public:
   // the list of block index and line numbers on this page
-  std::vector<std::unique_ptr<PageElement>> elements;
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  using ElementList = NativePageElements;
+#else
+  using ElementList = std::vector<std::unique_ptr<PageElement> >;
+#endif
+  ElementList elements;
   std::vector<FootnoteEntry> footnotes;
   static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 16;
   std::vector<PageLink> links;
   static constexpr uint16_t MAX_LINKS_PER_PAGE = 32;
+  static constexpr uint16_t MAX_ELEMENTS_PER_PAGE = 1024;
+  bool reserveElements(size_t count);
+  bool addElement(std::unique_ptr<PageElement> element);
 
   // Zero-based visible-codepoint offset where this page starts. Not part of the serialized page
   // body (it lives in the section's visible-offset LUT); Section::loadPage* fills it in from the
@@ -118,10 +130,15 @@ class Page {
   }
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
+  // Warm only native text; never scan by painting into a framebuffer.
+  bool warmNativeText(GfxRenderer& renderer, int fontId) const;
   void renderImages(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
   void renderWithImagePlaceholders(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
   bool serialize(HalFile& file) const;
   static std::unique_ptr<Page> deserialize(HalFile& file);
+#if defined(CROSSPOINT_NATIVE_TEXT) && CROSSPOINT_NATIVE_TEXT
+  static std::unique_ptr<Page> deserialize(HalFile& file, uint32_t bytes, TextStatus& status);
+#endif
 
   // Check if page contains any images (used to force full refresh)
   bool hasImages() const {

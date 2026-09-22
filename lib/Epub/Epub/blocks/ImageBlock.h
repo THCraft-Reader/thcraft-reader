@@ -1,4 +1,5 @@
 #pragma once
+#include <BoundedFileReader.h>
 #include <HalStorage.h>
 
 #include <memory>
@@ -41,7 +42,7 @@ class ImageBlock final : public Block {
 
   void render(GfxRenderer& renderer, const int x, const int y);
   bool serialize(HalFile& file);
-  static std::unique_ptr<ImageBlock> deserialize(HalFile& file);
+  static std::unique_ptr<ImageBlock> deserialize(serialization::BoundedFileReader& file);
 
  private:
   std::string imagePath;
