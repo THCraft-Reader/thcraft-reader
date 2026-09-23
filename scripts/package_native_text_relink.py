@@ -183,11 +183,23 @@ def package(manifest_path, output, archive_cache=None):
     elf = Path(capture["elf"]["path"])
     if not elf.is_file() or digest(elf) != capture["elf"]["sha256"]:
         raise ValueError("ELF is missing or changed since link capture")
-    if set(capture["vendor_cflags"]) != expected_vendor_sources(root):
+    if set(capture["vendor_recipes"]) != expected_vendor_sources(root):
         raise ValueError("Missing vendor compiler recipes: cannot provide a complete LGPL rebuild path")
-    native_archives = [item for item in capture["files"] if Path(item["path"]).name == "libNativeText.a"]
-    if len(native_archives) != 1:
-        raise ValueError("Expected exactly one actual libNativeText.a link input")
+    captured_inputs = {item["path"]: item for item in capture["files"]}
+    for recipe in capture["vendor_recipes"].values():
+        replacement = recipe["replacement"]
+        input_file = captured_inputs.get(replacement["input"])
+        expected_kind = "archive" if "member" in replacement else "object"
+        if input_file is None or input_file["kind"] != expected_kind:
+            raise ValueError("Vendor compiler recipe does not identify an actual linked input")
+        if not recipe["argv"] or "{object}" not in recipe["argv"]:
+            raise ValueError("Vendor compiler recipe has no object output")
+        dependencies = recipe.get("dependencies", {})
+        if dependencies.get("method") != "gcc-M-v1" or not dependencies.get("headers"):
+            raise ValueError("Incomplete compiler header closure; refresh the capture with native_text_relink.py --refresh-capture")
+        dependency_paths = [*dependencies["headers"], dependencies.get("dependency_file"), dependencies.get("response_file")]
+        if any(path not in captured_inputs for path in dependency_paths):
+            raise ValueError("Compiler header closure references an uncaptured input")
     binary = elf.with_suffix(".bin")
     if not binary.is_file():
         raise FileNotFoundError("Build firmware.bin before creating its corresponding relink kit")
@@ -227,7 +239,7 @@ def package(manifest_path, output, archive_cache=None):
                     "argv": capture["relocated_argv"], "directories": capture["directories"],
                     "compiler": capture["compiler"], "toolchain": capture["toolchain"],
                     "platform": capture["platform"], "packages": capture["packages"],
-                    "vendor_cflags": capture["vendor_cflags"], "native_archive": native_archives[0]["path"],
+                    "vendor_recipes": capture["vendor_recipes"],
                     "source_pins": pins, "vendor_modifications": modifications,
                     "original_firmware": {"elf_sha256": capture["elf"]["sha256"], "bin_sha256": digest(binary)},
                     "source_revision": run_output(["git", "rev-parse", "HEAD"], root),

@@ -11,6 +11,9 @@ available while CrossPoint Reader is in File Transfer or Calibre Wireless mode.
 Examples use `crosspoint.local`. If mDNS does not resolve on your network, use
 the IP address shown on the device screen.
 
+The server has **no authentication**. Use these endpoints only on a trusted
+private network or a hotspot whose connected clients you control.
+
 ## HTTP Pages
 
 | Method | Path | Purpose |
@@ -257,44 +260,151 @@ Applied 2 setting(s)
 
 ### `GET /api/fonts`
 
-Lists installed SD-card font families.
+Lists discovered SD-card font families in the format supported by this device.
+X4 Pro uses native TTF/OTF; all other devices use `.cpfont`.
 
 ```bash
 curl http://crosspoint.local/api/fonts
 ```
 
-Response:
+Example X4 Pro response (file sizes are illustrative):
 
 ```json
 {
+  "format": "opentype",
+  "extensions": ["ttf", "otf"],
   "maxFamilies": 128,
+  "maxFamilyLength": 31,
+  "maxFiles": 4,
   "families": [
     {
       "name": "Literata",
       "sizes": [12, 14, 16, 18],
       "files": [
-        {"name": "Literata_12.cpfont", "size": 123456}
+        {"name": "Literata-Regular.ttf", "size": 123456, "style": 0}
       ]
     }
   ]
 }
 ```
 
+| Field | Meaning |
+|-------|---------|
+| `format` | `"opentype"` on X4 Pro, `"cpfont"` on other devices |
+| `extensions` | `["ttf","otf"]` on Pro, `["cpfont"]` otherwise; no leading dots |
+| `maxFamilies` | 128 discovered families |
+| `maxFamilyLength` | 31 characters for HTTP upload/delete family names |
+| `maxFiles` | Maximum files in one upload: 4 on Pro, 32 otherwise |
+| `families[].name` | Family directory name |
+| `families[].sizes` | Pro reading sizes `[12,14,16,18]` when Regular is available, otherwise empty; installed point sizes on non-Pro devices |
+| `families[].files[].name` | Font file basename, not a path |
+| `families[].files[].size` | File length in bytes |
+| `families[].files[].style` | Pro only: 0 Regular, 1 Bold, 2 Italic, 3 BoldItalic |
+
+For example, a non-Pro file entry is
+`{"name":"Literata_12.cpfont","size":123456}`; it has no `style` field.
+Native files are point-size independent, not one file per entry in `sizes`.
+The response does not expose variation axes or the sidecar as file entries.
+`/.fonts` and `/fonts` are scanned; `/.fonts` wins a family-name collision.
+
 ### `POST /api/fonts/upload`
 
-Uploads one `.cpfont` file into a family folder.
+Uploads a complete selection from **one family in one multipart request**.
+Declare every file in a single URL-query parameter named `manifest`, containing
+URL-encoded JSON:
+
+```json
+{"family":"Literata","files":[{"name":"Literata-Regular.ttf","size":123456},{"name":"Literata-Bold.ttf","size":234567}]}
+```
+
+The manifest must be available before the first multipart file starts. Do not
+send the old `-F "family=..."` contract or put the manifest in a multipart field.
+Append each file as a `file` part, with its multipart filename matching the
+manifest's `name` **exactly**, including case. Every declared file must arrive
+once; undeclared, duplicate, missing, or incorrectly sized files reject the
+selection. Multipart order need not match manifest order.
+
+X4 Pro example using curl 7.87.0 or newer (`--url-query` URL-encodes the value):
 
 ```bash
-curl -X POST \
-  -F "family=Literata" \
+curl --url-query 'manifest={"family":"Literata","files":[{"name":"Literata-Regular.ttf","size":123456},{"name":"Literata-Bold.ttf","size":234567}]}' \
+  -F "file=@Literata-Regular.ttf" \
+  -F "file=@Literata-Bold.ttf" \
+  http://crosspoint.local/api/fonts/upload
+```
+
+**Replace `123456` and `234567` with the exact byte lengths of your local
+Regular and Bold files before running this example.** These numbers are
+placeholders, not expected font sizes; `size` must be a JSON integer, not a
+quoted string, and must describe the font bytes rather than multipart overhead.
+Change both the manifest and multipart names if using another family or `.otf`.
+For a single-file installation, omit Bold from both places.
+
+Non-Pro example (replace `123456` with the actual `.cpfont` byte length):
+
+```bash
+curl --url-query 'manifest={"family":"Literata","files":[{"name":"Literata_12.cpfont","size":123456}]}' \
   -F "file=@Literata_12.cpfont" \
   http://crosspoint.local/api/fonts/upload
 ```
 
-The handler validates the family name, `.cpfont` filename, and `CPFONT` magic
-bytes before accepting the file.
+#### Names, validation, and limits
 
-Successful response:
+- `family`: 1–31 ASCII letters, digits, hyphens, or underscores. Every file's
+  parsed family must match it exactly. Paths, traversal, and embedded NULs are
+  rejected.
+- Pro filenames: `Family-Regular.ttf`/`.otf`, optionally `-Bold`, `-Italic`,
+  and `-BoldItalic`. Style suffixes are case-sensitive. A new family requires
+  Regular; an existing valid Regular can be retained during a style-only update.
+  At most four files, one per style, are accepted.
+- Non-Pro filenames: `Family_12.cpfont` (a hyphen before the size is also
+  accepted). The suffix is 1–3 decimal digits representing a point size 1–255.
+  At most 32 files, one per numeric point size, are accepted.
+- Extensions are case-insensitive and normalized to lowercase on installation.
+  Manifest filenames must fit within 63 bytes; the format-specific naming
+  rules above also apply.
+- The decoded manifest is at most 8192 bytes. It must contain a nonempty
+  `files` array with string `name` and unsigned 32-bit integer `size` fields.
+  Each file must be at least 8 bytes. The sum of declared file sizes must not
+  exceed 4,294,967,295 bytes. These are protocol bounds, not guarantees of
+  available SD space or upload capacity.
+- A new family is rejected when the 128-family limit is reached; an existing
+  family can still be updated.
+- Pro checks the SFNT header across upload chunks, then validates the closed
+  staged files with FreeType, including scalable TrueType/CFF outlines and a
+  Unicode charmap. TTC, WOFF, bitmap-only fonts, malformed fonts, and `.cpfont`
+  are rejected. A `.ttf`/`.otf` suffix alone is insufficient.
+- Non-Pro checks `CPFONT\0\0` magic bytes and exact received/written lengths.
+  This is not native SFNT validation.
+
+#### Commit and cancellation
+
+Files are written to `.part` staging paths. No style is published when an
+individual multipart file ends: the complete selection must finish and validate.
+On Pro, the commit replaces only submitted styles, preserving untouched styles
+and their variation settings. Manually uploaded styles use font-default axes;
+this HTTP manifest has no axis-setting contract. The installer updates/removes
+`native-font.json` as needed and retains backups through the commit so a failed
+publication can roll back. This differs from an on-device catalogue download,
+which replaces the whole native family.
+
+Legacy uploads also stage the whole selection and keep backups until all
+selected files are published; unselected files are left alone. Installation
+reuses the family's existing root. New families use the sole existing font
+root, or prefer `/.fonts` if both/neither roots exist.
+
+Invalid or incomplete requests and cancellations before commit discard only
+that request's staging files, leaving the prior installation intact. A
+pre-existing `.part` file is not overwritten: it causes HTTP 409. SD failures
+during rollback can leave preserved backups; this transaction is not a
+power-loss-proof filesystem guarantee.
+
+There is no separate cancellation endpoint. Abort the HTTP upload; the browser
+**Cancel** button does this and then reloads the font list. Cancellation after
+commit cannot undo it, and a disconnected client may receive no JSON response.
+Reload `GET /api/fonts` after a connection failure to establish the result.
+
+Successful response (HTTP 200, `application/json`):
 
 ```json
 {"ok":true}
@@ -302,7 +412,19 @@ Successful response:
 
 ### `POST /api/fonts/delete`
 
-Deletes an installed font family.
+Deletes a family from both font roots if present. The JSON body must be at most
+256 bytes and contain a string `family` using the same 1–31-character alphabet
+as uploads.
+
+On Pro, deletion removes only matching native style files and
+`native-font.json`. It is nonrecursive: co-located `.cpfont`, unrelated files,
+and subfolders survive. The saved family name is retained for a future native
+reinstall. Deletion is not an atomic upload transaction; a storage error can
+leave some native files undeleted.
+
+On non-Pro devices, deletion removes the family directory recursively and
+clears the saved family selection if that family was active. A nonexistent
+family succeeds. Deletion during an active upload returns HTTP 409.
 
 ```bash
 curl -X POST \
@@ -311,11 +433,31 @@ curl -X POST \
   http://crosspoint.local/api/fonts/delete
 ```
 
-Successful response:
+Successful response (HTTP 200, `application/json`):
 
 ```json
 {"ok":true}
 ```
+
+### Font API errors
+
+All three font endpoints return `application/json`. Errors have this shape
+(the `error` message describes the failure):
+
+```json
+{"ok":false,"error":"Invalid font family name."}
+```
+
+| HTTP status | Conditions and example exact `error` messages |
+|-------------|----------------------------------------------|
+| 400 | Bad request/manifest, invalid names or metadata, mixed/duplicate files, incorrect sizes, unsupported/invalid fonts, incomplete or cancelled upload. Examples: `"Missing or oversized upload manifest."`, `"Invalid upload manifest."`, `"Select files from one font family only."`, `"The upload contains an undeclared or duplicate file."`, `"The font is larger than its declared size."`, `"The font selection is incomplete."`, `"This font cannot be used. Check its format and include a Regular style."`, `"The font upload was cancelled."` |
+| 409 | `"The font family limit has been reached. Delete a family first."`, `"A staged file already exists. Remove that .part file before retrying."`, or `"Finish or cancel the current font upload first."` |
+| 500 | SD read/write/commit/delete failure. Examples: `"Unable to read fonts from the SD card."`, `"The SD card could not save the complete font."`, `"Unable to publish the font selection on the SD card."` (legacy commit), or `"Unable to update fonts on the SD card."` (installer failure) |
+| 503 | `"Not enough memory to list fonts."` or `"Not enough memory to install this font."` |
+
+Treat any non-200 response as failure; do not assume every failure means
+the SD card is unchanged (for example, a delete can fail partway through).
+Use `error` for display rather than expecting an additional error-code field.
 
 ## OPDS Server API
 

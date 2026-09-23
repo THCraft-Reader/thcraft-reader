@@ -190,7 +190,7 @@ struct NativeParagraphLayout::State {
       if (group.first < origin || group.last > end) continue;
       const Box box = rangeBox(run, group.first - origin, group.last - origin);
       if (!box.found) return TextStatus::InvalidText;
-      const int32_t excess = std::max(0, group.width - (box.right - box.left));
+      const int32_t excess = std::max<int32_t>(0, group.width - (box.right - box.left));
       if (!excess) continue;
       const NativeCluster* before = nullptr;
       const NativeCluster* after = nullptr;
@@ -211,8 +211,8 @@ struct NativeParagraphLayout::State {
         const size_t index = atByte(byte);
         return index < points.size() && !ideograph(points[index].cp) ? cluster->advance26 / 2 : 0;
       };
-      const int32_t left = std::max(0, excess / 2 - allowance(before));
-      const int32_t rightExtra = std::max(0, excess - excess / 2 - allowance(after));
+      const int32_t left = std::max<int32_t>(0, excess / 2 - allowance(before));
+      const int32_t rightExtra = std::max<int32_t>(0, excess - excess / 2 - allowance(after));
       if (before)
         status = addGap(before->endByte, left);
       else
@@ -510,7 +510,7 @@ struct NativeParagraphLayout::State {
     if (status != TextStatus::Ok) return status;
     const uint32_t origin = points[first].byte, end = points[last].byte;
     const int32_t indent = first == 0 && options->firstLine ? options->firstLineIndent * 64 : 0;
-    int32_t remaining = std::max(0, available(first) - width);
+    int32_t remaining = std::max<int32_t>(0, available(first) - width);
     if (options->alignment == NativeAlignment::Justify && !lastLine && remaining) {
       size_t count = 0;
       for (const auto& cluster : run.clusters.span()) {
@@ -557,8 +557,8 @@ struct NativeParagraphLayout::State {
     const auto clipHitBox = [&](int32_t& x26, int32_t& width26) {
       if (!line.overflowClipWidth) return;
       const int32_t right = line.overflowClipWidth * 64;
-      const int32_t clippedLeft = std::clamp(x26, 0, right);
-      const int32_t clippedRight = std::clamp(x26 + width26, 0, right);
+      const int32_t clippedLeft = std::clamp<int32_t>(x26, 0, right);
+      const int32_t clippedRight = std::clamp<int32_t>(x26 + width26, 0, right);
       x26 = clippedLeft;
       width26 = clippedRight - clippedLeft;
     };
@@ -594,7 +594,7 @@ struct NativeParagraphLayout::State {
       return TextStatus::CapacityExceeded;
     line.baseline = static_cast<int16_t>(baseline);
     line.lineHeight = static_cast<int16_t>(height);
-    line.rubyLift = static_cast<int16_t>(std::max(0, baseline + floor26(baseTop)));
+    line.rubyLift = static_cast<int16_t>(std::max<int32_t>(0, baseline + floor26(baseTop)));
     for (auto& value : line.ruby.span()) value.y26 += baseline * 64;
     size_t selectionBytes = 0, selectionCount = 0;
     for (const auto& word : words.span()) {
@@ -620,9 +620,9 @@ struct NativeParagraphLayout::State {
       value.width26 = box.right - box.left;
       clipHitBox(value.x26, value.width26);
       value.x26 -= line.alignmentX26;
-      value.top = static_cast<int16_t>(std::max(0, baseline + floor26(box.top)));
+      value.top = static_cast<int16_t>(std::max<int32_t>(0, baseline + floor26(box.top)));
       const int32_t wordBottom = std::min(height, baseline + ceil26(box.bottom));
-      value.height = static_cast<int16_t>(std::max(0, wordBottom - value.top));
+      value.height = static_cast<int16_t>(std::max<int32_t>(0, wordBottom - value.top));
       value.style = points[begin].style;
       if (!append(line.words, value) || !line.selectionText.resize(line.selectionText.size() + endByte - startByte + 1))
         return TextStatus::OutOfMemory;
@@ -638,8 +638,9 @@ struct NativeParagraphLayout::State {
       int32_t linkTop = 0, linkBottom = 0;
       auto flush = [&]() -> bool {
         if (!active) return true;
-        box.top = static_cast<int16_t>(std::max(0, baseline + floor26(linkTop)));
-        box.height = static_cast<int16_t>(std::max(0, std::min(height, baseline + ceil26(linkBottom)) - box.top));
+        box.top = static_cast<int16_t>(std::max<int32_t>(0, baseline + floor26(linkTop)));
+        box.height =
+            static_cast<int16_t>(std::max<int32_t>(0, std::min(height, baseline + ceil26(linkBottom)) - box.top));
         active = false;
         clipHitBox(box.x26, box.width26);
         if (line.overflowClipWidth && !box.width26) return true;

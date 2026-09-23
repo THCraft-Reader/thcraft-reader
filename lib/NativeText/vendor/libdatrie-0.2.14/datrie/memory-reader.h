@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "typedefs.h"
 
 typedef struct {
     const uint8_t *data;
@@ -36,12 +37,12 @@ trie_memory_u32 (TrieMemoryReader *r, uint32_t *value)
 }
 
 static int
-trie_memory_i32 (TrieMemoryReader *r, int32_t *value)
+trie_memory_i32 (TrieMemoryReader *r, int32 *value)
 {
     uint32_t u;
     if (!trie_memory_u32 (r, &u))
         return 0;
-    *value = u <= INT32_MAX ? (int32_t)u : -1 - (int32_t)(UINT32_MAX - u);
+    *value = u <= INT32_MAX ? (int32)u : -1 - (int32)(UINT32_MAX - u);
     return 1;
 }
 

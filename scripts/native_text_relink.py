@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 PRO_ENVIRONMENTS = {"x4pro", "x4pro-gh_release", "x4pro-gh_release_rc"}
-SCHEMA = 1
+SCHEMA = 2
 
 
 def digest(path):
@@ -32,6 +32,11 @@ def json_write(path, value):
 def unquote(value):
     value = str(value)
     return value[1:-1] if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'" else value
+
+
+def driver_name(path):
+    name = Path(path).name
+    return name[:-4] if name.lower().endswith(".exe") else name
 
 
 class ExpandWithoutTempfile:
@@ -53,7 +58,7 @@ def expanded_command(env, command, target, source):
     return [unquote(token) for token in lines[0]]
 
 
-def expand_responses(arguments, cwd, seen=None):
+def expand_responses(arguments, cwd, seen=None, files=None):
     seen = set() if seen is None else seen
     result = []
     for argument in arguments:
@@ -61,9 +66,11 @@ def expand_responses(arguments, cwd, seen=None):
             path = (Path(cwd) / unquote(argument[1:])).resolve()
             if path in seen:
                 raise ValueError("Recursive linker response file: " + str(path))
+            if files is not None:
+                files.add(path)
             # GCC response syntax, not shell execution. The wrapper itself never runs.
             result.extend(expand_responses(shlex.split(path.read_text(encoding="utf-8"), posix=True),
-                                           cwd, seen | {path}))
+                                           cwd, seen | {path}, files))
         else:
             result.append(argument)
     return result
@@ -224,39 +231,189 @@ class LinkInputs:
         return result
 
 
-def native_compile_flags(elf):
-    """Read code-generation flags from the actual vendor object executors."""
+def collect_native_commands(elf, project):
+    """Read per-object private commands while the SCons build graph is intact."""
+    native = project / "lib/NativeText"
     found = {}
     visited = set()
 
-    def visit(node):
-        identity = str(node)
-        if identity in visited:
+    def visit(node, archives=()):
+        identity = node.get_abspath()
+        key = (identity, archives)
+        if key in visited:
             return
-        visited.add(identity)
-        executor = node.get_executor(create=0)
-        if executor is None:
+        visited.add(key)
+        if identity.endswith(".a"):
+            archives = archives + (identity,)
+        sources = list(getattr(node, "sources", ()))
+        if identity.endswith((".o", ".obj")):
+            native_sources = []
+            for source in sources:
+                path = Path(source.srcnode().get_abspath()).resolve()
+                try:
+                    relative = path.relative_to(native).as_posix()
+                except ValueError:
+                    continue
+                if relative.startswith(("vendor/libthai-", "vendor/libdatrie-")) and path.suffix == ".c":
+                    native_sources.append((source, relative))
+            if native_sources:
+                if len(native_sources) != 1:
+                    raise ValueError("Expected one LGPL C source per object: " + identity)
+                source, relative = native_sources[0]
+                build_env = node.get_build_env()
+                clone = build_env.Clone()
+                clone.Replace(TEMPFILE=ExpandWithoutTempfile)
+                lines = clone.subst_list("$CCCOM", target=[node], source=[source])
+                if len(lines) != 1 or not lines[0]:
+                    raise ValueError("Expected one native C compiler command")
+                # Match the platform's real GCC response-file escaping, including
+                # quoted -D string values and Windows path separators.
+                from SCons.Subst import quote_spaces
+                escape = build_env.get("TEMPFILEARGESCFUNC", quote_spaces)
+                tokens = [str(lines[0][0])] + shlex.split(
+                    " ".join(escape(token) for token in lines[0][1:]), posix=True)
+                compiler = build_env.WhereIs(unquote(tokens[0]))
+                if not compiler:
+                    raise FileNotFoundError("Cannot locate native C compiler: " + tokens[0])
+                tokens[0] = str(Path(compiler).resolve())
+                response_files = set()
+                command = expand_responses(tokens, project, files=response_files)
+                recipe = {"command": command, "object": identity, "archives": list(archives),
+                          "responses": [str(path) for path in sorted(response_files)]}
+                if relative in found and found[relative] != recipe:
+                    raise ValueError("Ambiguous build recipe for native source: " + relative)
+                found[relative] = recipe
             return
-        sources = executor.get_all_sources()
-        if identity.endswith((".o", ".obj")) and len(sources) == 1:
-            source = str(sources[0]).replace("\\", "/")
-            marker = "/NativeText/"
-            if marker in source and ("/vendor/libthai-" in source or "/vendor/libdatrie-" in source):
-                relative = source.split(marker, 1)[1]
-                build_env = executor.get_build_env()
-                flags = expanded_command(build_env, "$CCFLAGS $CFLAGS", [node], sources)
-                # No project definitions or include paths are needed by these C
-                # slices. Retain actual target/ABI/optimization flags; their only
-                # port definition and headers are specified in rebuild_lgpl.
-                found[relative] = [flag for flag in flags if flag.startswith(("-m", "-f", "-O", "-g", "-std="))]
         for child in node.children():
-            visit(child)
+            visit(child, archives)
 
     visit(elf)
     return found
 
 
-def capture_link(env, target, source):
+def capture_compile_dependencies(command, inputs, toolchain, directory, relative):
+    """Ask the real compiler for all headers, including system-header descendants."""
+    dependency_file = directory / (relative + ".d")
+    dependency_file.parent.mkdir(parents=True, exist_ok=True)
+    response_file = dependency_file.with_suffix(".rsp")
+    arguments = []
+    i = 1
+    while i < len(command):
+        token = command[i]
+        if token in ("-o", "-MF", "-MT", "-MQ"):
+            i += 1
+            if i >= len(command):
+                raise ValueError("Missing compiler output argument after " + token)
+        elif token not in ("-c", "-S", "-E", "-M", "-MM", "-MD", "-MMD", "-MP", "-MG") and not (
+                token.startswith(("-MF", "-MT", "-MQ")) and len(token) > 3):
+            arguments.append(token)
+        i += 1
+    # Override only output/dependency mode. Definitions, include order, forced
+    # includes, target and language switches are the original private recipe.
+    arguments.extend(["-M", "-MF", dependency_file.as_posix(), "-MT", "native-text-dependencies"])
+    response_file.write_text(response_text(arguments), encoding="utf-8")
+    subprocess.run([command[0], "@" + str(response_file)], cwd=inputs.cwd, check=True)
+    text = dependency_file.read_text(encoding="utf-8").replace("\\\n", " ")
+    rule = re.split(r":\s+", text, maxsplit=1)
+    if len(rule) != 2:
+        raise ValueError("Malformed full compiler dependency output: " + str(dependency_file))
+    headers = set()
+    for dependency in shlex.split(rule[1].split("\n", 1)[0], posix=True):
+        path = inputs.absolute(dependency)
+        if not path.is_file():
+            raise FileNotFoundError("Missing compiler dependency: " + str(path))
+        # Standard headers are supplied by the matching public compiler package;
+        # SDK headers remain required even when reached through #include_next
+        # or a header marked as a system header.
+        if not path.is_relative_to(toolchain):
+            headers.add(inputs.file(path, "compile-header"))
+    if not headers:
+        raise ValueError("Compiler did not report the native source dependency")
+    return {"method": "gcc-M-v1", "headers": sorted(headers),
+            "dependency_file": inputs.file(dependency_file, "compile-dependencies"),
+            "response_file": inputs.file(response_file, "compile-response")}
+
+
+def capture_native_recipes(commands, inputs, project, build_directory, toolchain):
+    """Relocate exact compiler argv and retain its complete SDK/header closure."""
+    native = project / "lib/NativeText"
+    vendor_include = build_directory / "native-vendor-include"
+    recipes = {}
+
+    def compile_path(value, directory=False):
+        path = inputs.absolute(value)
+        for root, marker in ((native, "{sources}/lib/NativeText"), (vendor_include, "{vendor_include}"),
+                             (toolchain, "{toolchain}")):
+            try:
+                suffix = path.relative_to(root).as_posix()
+                return marker if suffix == "." else marker + "/" + suffix
+            except ValueError:
+                pass
+        if directory:
+            return inputs.directory(path)
+        return inputs.file(path, "compile-input")
+
+    for relative, original in sorted(commands.items()):
+        object_path = Path(original["object"]).resolve()
+        object_input = inputs.relocated(object_path)
+        if object_input in inputs.files and inputs.files[object_input]["kind"] == "object":
+            replacement = {"input": object_input}
+        else:
+            archives = [inputs.relocated(path) for path in original["archives"]
+                        if inputs.relocated(path) in inputs.files]
+            if len(archives) != 1 or inputs.files[archives[0]]["kind"] != "archive":
+                raise ValueError("Native object has no unique actual linked input: " + str(object_path))
+            replacement = {"input": archives[0], "member": object_path.name}
+        command = original["command"]
+        arguments = []
+        directories = ("-isystem", "-iquote", "-idirafter", "-iprefix", "-isysroot", "--sysroot=", "-I")
+        files = ("-include", "-imacros", "--specs=", "-specs=")
+        i = 1
+        while i < len(command):
+            token = command[i]
+            if token in ("-o", "-MF", "-MT", "-MQ"):
+                i += 1
+                if i >= len(command):
+                    raise ValueError("Missing compiler output after " + token)
+                arguments.extend([token, "{depfile}" if token == "-MF" else "{object}"])
+            elif token.startswith(("-MF", "-MT", "-MQ")) and len(token) > 3:
+                arguments.append(token[:3] + ("{depfile}" if token.startswith("-MF") else "{object}"))
+            else:
+                matched = False
+                for prefix in directories + files:
+                    if token == prefix or token.startswith(prefix):
+                        separate = token == prefix
+                        if separate:
+                            i += 1
+                            if i >= len(command):
+                                raise ValueError("Missing compiler path after " + token)
+                            value = command[i]
+                        else:
+                            value = token[len(prefix):]
+                        path = compile_path(value, prefix in directories)
+                        arguments.extend([token, path] if separate else [prefix + path])
+                        matched = True
+                        break
+                if not matched:
+                    if token in ("-iwithprefix", "-iwithprefixbefore"):
+                        i += 1
+                        arguments.extend([token, command[i]])
+                    elif not token.startswith("-") and inputs.absolute(token) == native / relative:
+                        arguments.append("{sources}/lib/NativeText/" + relative)
+                    elif re.search(r"(?:[A-Za-z]:[\\/]|^/|=[/\\])", token):
+                        raise ValueError("Unrecognized path-bearing compiler argument: " + token)
+                    else:
+                        arguments.append(token)
+            i += 1
+        dependencies = capture_compile_dependencies(command, inputs, toolchain,
+                                                    build_directory / "native-text-dependencies", relative)
+        response_inputs = [inputs.file(path, "compile-response") for path in original["responses"]]
+        recipes[relative] = {"driver": driver_name(command[0]), "argv": arguments,
+                             "replacement": replacement, "responses": response_inputs, "dependencies": dependencies}
+    return recipes
+
+
+def capture_link(env, target, source, commands):
     elf = target[0]
     executor = elf.get_executor()
     build_env = executor.get_build_env()
@@ -286,15 +443,18 @@ def capture_link(env, target, source):
     inputs = LinkInputs(argv, root, roots)
     relocated = inputs.translate()
     toolchain = Path(platform.get_package_dir("toolchain-xtensa-esp-elf"))
+    recipes = capture_native_recipes(commands, inputs, root,
+                                     Path(env.subst("$BUILD_DIR")).resolve(), toolchain.resolve())
     manifest = {"schema": SCHEMA, "environment": env.subst("$PIOENV"), "project": str(root),
                 "argv": inputs.argv, "relocated_argv": relocated, "directories": sorted(inputs.directories),
+                "roots": roots,
                 "files": sorted(inputs.files.values(), key=lambda item: item["path"]),
                 "elf": {"path": str(inputs.output), "sha256": digest(inputs.output)},
-                "compiler": {"driver": Path(compiler).name.removesuffix(".exe"),
+                "compiler": {"driver": driver_name(compiler),
                              **compiler_identity(compiler)},
                 "toolchain": packages["toolchain-xtensa-esp-elf"], "packages": packages,
                 "platform": env.GetProjectOption("platform"),
-                "vendor_cflags": native_compile_flags(elf)}
+                "vendor_recipes": recipes}
     # The executable comes from this exact public package, not a PATH substitute.
     Path(compiler).resolve().relative_to(toolchain.resolve())
     json_write(Path(env.subst("$BUILD_DIR")) / "native-text-link.json", manifest)
@@ -332,7 +492,7 @@ def find_input(manifest, name):
 
 
 def tool_path(toolchain, name):
-    path = toolchain / "bin" / (name + (".exe" if os.name == "nt" else ""))
+    path = toolchain / "bin" / (driver_name(name) + (".exe" if os.name == "nt" else ""))
     if not path.is_file():
         raise FileNotFoundError("Missing matching toolchain executable: " + str(path))
     return path
@@ -361,27 +521,40 @@ def replace_members(bundle, manifest, replacements, work, ar):
     return result
 
 
-def rebuild_lgpl(bundle, manifest, sources, work, compiler):
+def rebuild_lgpl(bundle, manifest, sources, work, toolchain):
     native = sources / "lib/NativeText"
     include = work / "include/datrie"
     include.mkdir(parents=True, exist_ok=True)
     for header in (native / "vendor/libdatrie-0.2.14/datrie").glob("*.h"):
         shutil.copyfile(header, include / header.name)
-    replacements = []
-    for relative, flags in manifest["vendor_cflags"].items():
+    replacements = {}
+    members = []
+    for relative, recipe in manifest["vendor_recipes"].items():
+        if recipe.get("dependencies", {}).get("method") != "gcc-M-v1":
+            raise ValueError("LGPL rebuild requires a kit packaged from a full compiler -M dependency capture")
         source = contained(native, relative)
-        output = work / "lgpl" / (source.name + ".o")
+        if not source.is_file():
+            raise FileNotFoundError("Missing modified library source: " + str(source))
+        output = work / "lgpl" / (relative + ".o")
         output.parent.mkdir(parents=True, exist_ok=True)
-        command = [str(compiler), *flags, "-I" + str(native), "-I" + str(include.parent),
-                   "-I" + str(native / "vendor/libthai-0.1.30/include"),
-                   "-I" + str(native / "vendor/libthai-0.1.30/src"),
-                   "-include", str(native / "port/NativeThaiAllocator.h")]
-        if relative.startswith("vendor/libthai-"):
-            command.append("-DNATIVE_TEXT_THAI_NO_DEFAULT_DICTIONARY=1")
-        command.extend(["-c", str(source), "-o", str(output)])
-        subprocess.run(command, check=True)
-        replacements.append((manifest["native_archive"] + ":" + output.name, output))
-    return replacements
+        substitutions = {"{sources}": sources, "{toolchain}": toolchain, "{vendor_include}": include.parent,
+                         "{object}": output, "{depfile}": output.with_suffix(".d")}
+        arguments = []
+        for argument in recipe["argv"]:
+            for marker, value in substitutions.items():
+                argument = argument.replace(marker, value.as_posix())
+            # Other include/header paths point into the original, verified kit.
+            argument = argument.replace("inputs/", bundle.as_posix() + "/inputs/")
+            arguments.append(argument)
+        response = output.with_suffix(".rsp")
+        response.write_text(response_text(arguments), encoding="utf-8")
+        subprocess.run([str(tool_path(toolchain, recipe["driver"])), "@" + str(response)], cwd=work, check=True)
+        replacement = recipe["replacement"]
+        if "member" in replacement:
+            members.append((replacement["input"] + ":" + replacement["member"], output))
+        else:
+            replacements[replacement["input"]] = str(output)
+    return replacements, members
 
 
 def relink(args):
@@ -404,17 +577,22 @@ def relink(args):
         if key in replacements:
             raise ValueError("Duplicate replacement: " + name)
         replacements[key] = str(path)
+    for directory in manifest["directories"]:
+        contained(bundle, directory).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="native-relink-", dir=output.parent) as temporary:
         work = Path(temporary)
         members = []
         for item in args.replace_member:
             selector, value = item.split("=", 1)
             members.append((selector, Path(value).resolve(strict=True)))
-        prefix = manifest["compiler"]["driver"].removesuffix("g++").removesuffix("gcc")
+        prefix = driver_name(manifest["compiler"]["driver"]).removesuffix("g++").removesuffix("gcc")
         if args.rebuild_lgpl:
-            members.extend(rebuild_lgpl(bundle, manifest, args.rebuild_lgpl.resolve(), work,
-                                        tool_path(toolchain, prefix + "gcc")))
-        patched = replace_members(bundle, manifest, members, work, tool_path(toolchain, prefix + "ar"))
+            rebuilt, rebuilt_members = rebuild_lgpl(bundle, manifest, args.rebuild_lgpl.resolve(), work, toolchain)
+            if replacements.keys() & rebuilt.keys():
+                raise ValueError("Cannot both rebuild and explicitly replace the same LGPL object")
+            replacements.update(rebuilt)
+            members.extend(rebuilt_members)
+        patched = replace_members(bundle, manifest, members, work, tool_path(toolchain, prefix + "gcc-ar"))
         if replacements.keys() & patched.keys():
             raise ValueError("Cannot replace an archive and its members in the same invocation")
         replacements.update(patched)
@@ -435,8 +613,6 @@ def relink(args):
                 if value.startswith("inputs/"):
                     argument = prefix_arg + replacements.get(value, str(contained(bundle, value)))
             arguments.append(argument.replace("\\", "/"))
-        for directory in manifest["directories"]:
-            contained(bundle, directory).mkdir(parents=True, exist_ok=True)
         response = work / "link.rsp"
         response.write_text(response_text(arguments), encoding="utf-8")
         subprocess.run([str(driver), "@" + str(response)], cwd=bundle, check=True)
@@ -445,30 +621,129 @@ def relink(args):
     print("Relinked " + str(output))
 
 
+def refresh_capture(manifest_path, toolchain):
+    """Refresh full header closure from recorded recipes without compiling/linking."""
+    capture = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if capture.get("schema") != SCHEMA or capture.get("environment") not in PRO_ENVIRONMENTS:
+        raise ValueError("Expected an existing X4 Pro link capture")
+    project = Path(capture["project"]).resolve()
+    toolchain = toolchain.resolve()
+    metadata = json.loads((toolchain / "package.json").read_text(encoding="utf-8"))
+    if any(metadata.get(key) != capture["toolchain"][key] for key in ("name", "version")):
+        raise ValueError("Toolchain package does not match the captured firmware")
+    compiler = tool_path(toolchain, capture["compiler"]["driver"])
+    if compiler_identity(compiler) != {key: capture["compiler"][key] for key in ("machine", "version")}:
+        raise ValueError("Compiler target/version does not match the captured firmware")
+    elf = Path(capture["elf"]["path"])
+    if not elf.is_file() or digest(elf) != capture["elf"]["sha256"]:
+        raise ValueError("Captured ELF is missing or changed")
+    for item in capture["files"]:
+        path = Path(item["source"])
+        if not path.is_file() or path.stat().st_size != item["size"] or digest(path) != item["sha256"]:
+            raise ValueError("Captured input is missing or changed: " + str(path))
+    roots = capture.get("roots", {"project": str(project)})
+    # Older schema-2 captures did not record roots. Recover package roots from
+    # their actual input paths, not the caller's current PlatformIO installation.
+    for item in capture["files"]:
+        parts = item["path"].split("/")
+        if len(parts) > 3 and parts[:2] == ["inputs", "packages"]:
+            root = Path(item["source"])
+            for _ in parts[3:]:
+                root = root.parent
+            roots["packages/" + parts[2]] = str(root)
+    roots["packages/toolchain-xtensa-esp-elf"] = str(toolchain)
+    # An unused -I directory may have had no files in the old partial closure.
+    # Resolve such roots by recorded package identity/version among installed
+    # siblings rather than assuming a package-directory naming convention.
+    required_packages = {name for recipe in capture["vendor_recipes"].values() for argument in recipe["argv"]
+                         for name in re.findall(r"inputs/packages/([^/]+)/", argument)}
+    missing_packages = {name for name in required_packages if "packages/" + name not in roots}
+    matches = {name: [] for name in missing_packages}
+    if missing_packages:
+        for directory in toolchain.parent.iterdir():
+            package_file = directory / "package.json"
+            if not package_file.is_file():
+                continue
+            package = json.loads(package_file.read_text(encoding="utf-8"))
+            name = package.get("name")
+            if name in matches and package.get("version") == capture["packages"][name]["version"]:
+                matches[name].append(directory.resolve())
+        for name, directories in matches.items():
+            if len(directories) != 1:
+                raise ValueError("Cannot uniquely recover original compiler include package: " + name)
+            roots["packages/" + name] = str(directories[0])
+    inputs = LinkInputs(capture["argv"], project, roots)
+    inputs.files = {item["path"]: item for item in capture["files"]}
+    inputs.directories = set(capture["directories"])
+    build_directory = elf.parent.resolve()
+    substitutions = {"{sources}": project, "{toolchain}": toolchain,
+                     "{vendor_include}": build_directory / "native-vendor-include",
+                     "{object}": build_directory / "native-text-dependencies/unused.o",
+                     "{depfile}": build_directory / "native-text-dependencies/unused.d"}
+    path_prefixes = sorted(("inputs/" + name + "/", Path(path).resolve().as_posix() + "/")
+                           for name, path in roots.items())
+    for relative, recipe in capture["vendor_recipes"].items():
+        arguments = []
+        for argument in recipe["argv"]:
+            for marker, path in substitutions.items():
+                argument = argument.replace(marker, path.as_posix())
+            for marker, path in path_prefixes:
+                argument = argument.replace(marker, path)
+            if "inputs/" in argument or any(marker in argument for marker in substitutions):
+                raise ValueError("Cannot restore recorded compiler path: " + argument)
+            arguments.append(argument)
+        command = [str(tool_path(toolchain, recipe["driver"])), *arguments]
+        recipe["dependencies"] = capture_compile_dependencies(
+            command, inputs, toolchain, build_directory / "native-text-dependencies", relative)
+    capture["roots"] = roots
+    capture["files"] = sorted(inputs.files.values(), key=lambda item: item["path"])
+    json_write(manifest_path, capture)
+    print("Refreshed compiler dependency closure: " + str(manifest_path))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, default=Path(__file__).resolve().parent)
     parser.add_argument("--toolchain", type=Path, required=True, help="Matching PlatformIO toolchain package directory")
-    parser.add_argument("--output", type=Path, required=True, help="Output firmware ELF; does not flash")
+    operation = parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument("--output", type=Path, help="Output firmware ELF; does not flash")
+    operation.add_argument("--refresh-capture", type=Path, metavar="MANIFEST",
+                           help="Refresh an existing local capture with full compiler -M header closure; no firmware build")
     parser.add_argument("--replace", action="append", default=[], metavar="INPUT=FILE",
                         help="Replace one linked archive/object (relative manifest path or unique basename)")
     parser.add_argument("--replace-member", action="append", default=[], metavar="ARCHIVE:MEMBER=OBJECT",
                         help="Replace one archive member while retaining all other firmware objects")
     parser.add_argument("--rebuild-lgpl", type=Path, metavar="SOURCE_ROOT",
-                        help="Compile modified LibThai/libdatrie sources and replace their native archive members")
-    relink(parser.parse_args())
+                        help="Compile modified LibThai/libdatrie sources and replace their actual linked inputs")
+    args = parser.parse_args()
+    if args.refresh_capture:
+        if args.replace or args.replace_member or args.rebuild_lgpl:
+            parser.error("--refresh-capture cannot be combined with replacement options")
+        refresh_capture(args.refresh_capture, args.toolchain)
+    else:
+        relink(args)
 
 
 def register_scons(env):
     if env.subst("$PIOENV") not in PRO_ENVIRONMENTS:
         raise RuntimeError("Native relink hook must only be attached to X4 Pro environments")
-    env.AddPostAction("$BUILD_DIR/${PROGNAME}.elf", capture_link)
+    # SCons drops completed object executors before the ELF action. Capture the
+    # private environments now, after PlatformIO constructed every library node.
+    elf = env.File(env.subst("$BUILD_DIR/${PROGNAME}.elf"))
+    link_env = elf.get_build_env()
+    link_env.Replace(LINKFLAGS=[flag for flag in link_env.get("LINKFLAGS", []) if str(flag) != "-fno-lto"] + ["-flto"])
+    commands = collect_native_commands(elf, Path(env.subst("$PROJECT_DIR")).resolve())
+
+    def capture(target, source, env):
+        capture_link(env, target, source, commands)
+
+    env.AddPostAction("$BUILD_DIR/${PROGNAME}.elf", capture)
 
     def package(target, source, env):
         # An up-to-date ELF does not run post-actions, so refresh the manifest
         # explicitly for the package target using the ELF's original executor.
         elf = env.File(env.subst("$BUILD_DIR/${PROGNAME}.elf"))
-        capture_link(env, [elf], [])
+        capture_link(env, [elf], [], commands)
         subprocess.run([sys.executable, str(Path(env.subst("$PROJECT_DIR")) / "scripts/package_native_text_relink.py"),
                         "--manifest", env.subst("$BUILD_DIR/native-text-link.json"),
                         "--output", env.subst("$BUILD_DIR/native-text-relink.zip")], check=True)

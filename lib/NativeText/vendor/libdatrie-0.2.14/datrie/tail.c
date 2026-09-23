@@ -189,7 +189,7 @@ tail_read_memory (TrieMemoryReader *r, unsigned max_symbol)
 {
     TrieMemoryReader scan = *r;
     uint32_t sig, count, first, i;
-    int32_t next, data;
+    int32 next, data;
     size_t length, j;
     const uint8_t *bytes;
     Tail *t;

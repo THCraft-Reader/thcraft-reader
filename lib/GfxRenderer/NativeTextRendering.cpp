@@ -183,10 +183,10 @@ TextStatus GfxRenderer::stageNativeRun(const NativeGlyphRun& run, int32_t x26, i
   if (!warm) {
     // Cull the complete run before looking up any glyph bitmap for a remote strip.
     // Expand for rounded bearings and the one-pixel underline below actual ink.
-    const int left = floorPixel(std::min(0, run.ink.left26)) - 1;
-    const int top = floorPixel(std::min(-64, run.ink.top26)) - 1;
+    const int left = floorPixel(std::min<int32_t>(0, run.ink.left26)) - 1;
+    const int top = floorPixel(std::min<int32_t>(-64, run.ink.top26)) - 1;
     const int width = ceilPixel(std::max(run.advance26, run.ink.right26)) - left + 2;
-    const int height = ceilPixel(std::max(128, run.ink.bottom26 + 128)) - top + 2;
+    const int height = ceilPixel(std::max<int32_t>(128, run.ink.bottom26 + 128)) - top + 2;
     if (!visible(pixel(x26) + (rotated ? top : left), pixel(y26) + (rotated ? -left : top), width, height))
       return TextStatus::Ok;
   }

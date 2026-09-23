@@ -30,6 +30,7 @@ from pathlib import Path
 
 import fontTools
 from fontTools import subset
+from fontTools.otlLib.optimize.gpos import compact
 from fontTools.ttLib import TTFont
 
 from font_ranges import BUILTIN_INTERVALS, NATIVE_SCRIPT_INTERVALS, UI_INTERVALS
@@ -203,6 +204,7 @@ def subset_font(source, entry, requested):
     options.recommended_glyphs = True
     options.recalc_timestamp = False
     with TTFont(io.BytesIO(source), recalcTimestamp=False) as font:
+        font.cfg["fontTools.ttLib.tables.otBase:USE_HARFBUZZ_REPACKER"] = False
         cmap = font.getBestCmap()
         if not cmap or not ("glyf" in font or "CFF " in font or "CFF2" in font):
             raise ValueError(f"Source has no Unicode outline face: {entry['name']}")
@@ -218,6 +220,10 @@ def subset_font(source, entry, requested):
             raise ValueError(f"Subsetting changed requested cmap coverage: {entry['name']}")
         if not layout_tables.issubset(font.keys()):
             raise ValueError(f"Subsetting removed a shaping table: {entry['name']}")
+        compact(font, 9)
+        # VDMX is a Windows device-extent cache; FreeType does not consume it.
+        if "VDMX" in font:
+            del font["VDMX"]
         rename_subset(font, entry)
         # Fixed OpenType timestamps (1970-01-01) and canonical table ordering
         # remove wall-clock time from the output on every supported host.

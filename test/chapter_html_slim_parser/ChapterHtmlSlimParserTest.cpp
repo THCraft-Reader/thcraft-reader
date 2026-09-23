@@ -179,7 +179,8 @@ TEST_F(ChapterHtmlSlimParserTest, PageImageDeserializeRejectsMissingImageBlock) 
   }
   HalFile input;
   ASSERT_TRUE(input.open(path.string().c_str(), "rb"));
-  EXPECT_EQ(PageImage::deserialize(input), nullptr);
+  serialization::BoundedFileReader bounded(input);
+  EXPECT_EQ(PageImage::deserialize(bounded), nullptr);
 }
 
 TEST_P(ChapterHtmlSlimParserTest, KeepsCssVerticalAlignAndInternalLinkMetadata) {

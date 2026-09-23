@@ -59,9 +59,10 @@ compiler target/version, actual argument order, and SHA-256/size of **every**
 packaged input. `inputs/` contains the actual linked firmware objects/static
 archives (including the non-LGPL application objects), linker scripts and
 explicit GCC specs/data inputs. Nothing is reconstructed from a guessed list
-of libraries. The native archive contains both the native integration and the
-LGPL vendor members; the relinker can replace members without discarding the
-remaining firmware objects.
+of libraries. The current pioarduino build links native sources as individual
+objects. Other toolchains may use static archives; the recipe records the
+actual object or archive/member for each LGPL source, never a fabricated
+`libNativeText.a`. Replacements retain all other firmware inputs.
 
 The post-ELF SCons hook expands the original program executor's `LINKCOM` with
 its actual sources, `LIBS`, and `LIBPATH`. On Windows it bypasses only SCons'
@@ -73,6 +74,17 @@ place. Linker-script includes are retained; unsupported file-bearing script
 constructs or unrecognized absolute-path arguments fail rather than silently
 producing an incomplete bundle. Compiler-internal runtime/startup files remain
 provided by the exact matching public toolchain package.
+
+Native C compiler recipes are captured from their private object environments
+at graph setup, before SCons releases completed object executors. The complete
+expanded compiler argv is retained, including target flags, defines, forced
+allocator includes, optimization and LTO settings. A compiler `-M` preprocessor
+pass, using that same private recipe through a response file, captures the full
+header closure, including SDK headers reached through system headers.
+`-MMD`/`-MM` output is insufficient for this purpose. Only headers inside the
+matching external toolchain package are excluded from copying. Dependency
+outputs and response files are retained. Rebuilds relocate paths but do not
+replace these recipes with an approximate list of compiler switches.
 
 `link.rsp` is a relocatable baseline response file for use from the extracted
 kit directory. `native_text_relink.py` verifies the kit and toolchain, constructs
@@ -115,6 +127,21 @@ After a successful normal Pro build, packaging can also be invoked explicitly:
 ```sh
 python scripts/package_native_text_relink.py --manifest .pio/build/x4pro/native-text-link.json --output build/x4pro-native-text-relink.zip
 ```
+To refresh an older local capture's complete header closure without rebuilding
+or relinking the already-produced firmware, run the following before packaging:
+
+```sh
+python scripts/native_text_relink.py --toolchain /path/to/toolchain-xtensa-esp-elf --refresh-capture .pio/build/x4pro/native-text-link.json
+```
+
+This verifies the recorded ELF, existing inputs and matching compiler, restores
+the recorded private compile recipes, and runs only preprocessor dependency
+passes. The original installed SDK/header files must still be available.
+It does not change the firmware ELF/bin or compile application/vendor objects.
+The package target also refreshes the closure when invoked on an up-to-date
+build. Packaging rejects captures that only contain the older partial `-MMD`
+closure instead of silently distributing another incomplete rebuild kit.
+
 
 The packager requires the matching ELF, bin, all captured input files, source
 recipes, source/license files, and generated assets. Missing/changed inputs
@@ -173,12 +200,11 @@ python native_text_relink.py --bundle . --toolchain /path/to/toolchain-xtensa-es
 
 The script validates all original hashes, preserves link order and emits the
 new ELF plus its map. The source checkout, original absolute build paths and
-original PlatformIO package paths are not needed. For example, replace the
-entire native library, or one rebuilt vendor member, respectively:
+original PlatformIO package paths are not needed. For example, replace one of
+the individually linked LGPL objects:
 
 ```sh
-python native_text_relink.py --bundle . --toolchain /path/to/toolchain-xtensa-esp-elf --output ../modified.elf --replace libNativeText.a=/path/to/rebuilt/libNativeText.a
-python native_text_relink.py --bundle . --toolchain /path/to/toolchain-xtensa-esp-elf --output ../modified.elf --replace-member libNativeText.a:trie.c.o=/path/to/rebuilt/trie.c.o
+python native_text_relink.py --bundle . --toolchain /path/to/toolchain-xtensa-esp-elf --output ../modified.elf --replace trie.c.o=/path/to/rebuilt/trie.c.o
 ```
 
 Selectors accept exact `inputs/...` manifest paths or unique basenames. An
@@ -188,6 +214,13 @@ are supported. Other members are preserved in a temporary archive, never
 modified in place. Rebuild objects with the matching compiler and compatible
 ABI; changing a public ABI may also require rebuilding dependent application
 objects from the firmware source.
+
+Only when the manifest actually contains a native archive, that archive can
+instead be replaced with `--replace libNativeText.a=/path/to/libNativeText.a`,
+or a member with
+`--replace-member libNativeText.a:trie.c.o=/path/to/trie.c.o`. An absent archive
+is an error, not a synthetic replacement for flat objects. The GCC archiver
+wrapper preserves LTO symbol indexing when replacing archive members.
 
 ### Rebuild LibThai/libdatrie directly from the supplied sources
 
@@ -199,14 +232,15 @@ edit the LibThai/libdatrie sources there. Then:
 python native_text_relink.py --bundle . --toolchain /path/to/toolchain-xtensa-esp-elf --output ../modified.elf --rebuild-lgpl ../modified-sources
 ```
 
-This compiles every C source in the shipped Thai/datrie slices with the actual
-vendor objects' captured CPU/ABI/optimization flags, applies the same private
-allocator header and no-default-dictionary definition, replaces those members
-of the original native archive, and relinks the retained firmware objects.
-It intentionally uses only the vendor/port include closure, not unrelated
-firmware headers or private settings. New compilation units or changed public
-interfaces require rebuilding a full replacement library with the firmware
-build; this convenience path replaces the existing supported slice.
+This compiles every C source in the shipped Thai/datrie slices using its exact
+captured private compiler command, including LTO when enabled. Native sources
+and headers resolve to the modified source copy; generated datrie headers are
+refreshed from that copy. Other required headers resolve to the verified sparse
+dependency closure in the kit, while standard compiler headers come from the
+matching public toolchain. Each result replaces its actual linked object or
+archive member. New compilation units, new external dependencies or changed
+public interfaces may require rebuilding dependent firmware objects with the
+full firmware build; this convenience path replaces the existing source slice.
 
 The dictionary source and its generator are also available. To regenerate the
 complete dictionary/font assets in the copied source tree with a host compiler:
