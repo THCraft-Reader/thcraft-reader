@@ -55,8 +55,9 @@ namespace {
 // v45: Internal EPUB links preserve CSS superscript/subscript positioning.
 // v46: Ordered lists number their items, list-style-type: none suppresses markers,
 //      and <ul>/<ol> containers contribute their own margins/padding to child insets.
-// v47: native/legacy text representation tag and backend/font layout fingerprint.
-constexpr uint8_t SECTION_FILE_VERSION = 47;
+// v48: combines native/legacy representation and layout fingerprint with character/word
+//      spacing in the header, BlockStyle tracking, and native-line spacing.
+constexpr uint8_t SECTION_FILE_VERSION = 48;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
@@ -76,8 +77,9 @@ constexpr uint8_t SECTION_FILE_INCOMPLETE_VERSION = 0;
 constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFE - (SECTION_FILE_VERSION - 28);
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
-                                 sizeof(uint8_t) + sizeof(bool) + sizeof(uint64_t) + sizeof(uint32_t) +
-                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
+                                 sizeof(uint8_t) + sizeof(bool) + sizeof(uint64_t) + sizeof(int8_t) + sizeof(uint8_t) +
+                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                 sizeof(uint32_t);
 }  // namespace
 
 // Out-of-line so the unique_ptr<ChapterHtmlSlimParser> in BuildContext can be
@@ -135,8 +137,8 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
                                    sizeof(spec.viewportWidth) + sizeof(spec.viewportHeight) + sizeof(pageCount) +
                                    sizeof(spec.hyphenationEnabled) + sizeof(spec.embeddedStyle) +
                                    sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) + sizeof(uint64_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(uint32_t),
+                                   sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent) + sizeof(uint32_t) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
                 "Header size mismatch");
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.
@@ -156,6 +158,8 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
 #else
   serialization::writePod(file, uint64_t{0});
 #endif
+  serialization::writePod(file, spec.characterSpacing);
+  serialization::writePod(file, spec.wordSpacingPercent);
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -182,6 +186,8 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
   const auto read = [this](auto& value) { return file.read(&value, sizeof(value)) == sizeof(value); };
   if (file.size() < HEADER_SIZE) return invalid();
   uint8_t version = 0, spacing = 0, alignment = 0, hyphenation = 0, embedded = 0, imageRendering = 0, focus = 0;
+  int8_t characterSpacing = 0;
+  uint8_t wordSpacingPercent = 0;
   int fontId = 0;
   float compression = 0;
   uint16_t width = 0, height = 0, count = 0;
@@ -189,12 +195,13 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
   uint32_t pageLut = 0, anchorMap = 0, paragraphLut = 0, liLut = 0, visibleLut = 0;
   if (!read(version) || (version != SECTION_FILE_VERSION && version != SECTION_FILE_PARTIAL_VERSION) || !read(fontId) ||
       !read(compression) || !read(spacing) || !read(alignment) || !read(width) || !read(height) || !read(hyphenation) ||
-      !read(embedded) || !read(imageRendering) || !read(focus) || !read(fingerprint) || !read(count) ||
-      !read(pageLut) || !read(anchorMap) || !read(paragraphLut) || !read(liLut) || !read(visibleLut) ||
-      fontId != spec.fontId || compression != spec.lineCompression || spacing != spec.extraParagraphSpacing ||
-      alignment != spec.paragraphAlignment || width != spec.viewportWidth || height != spec.viewportHeight ||
-      hyphenation != spec.hyphenationEnabled || embedded != spec.embeddedStyle ||
-      imageRendering != spec.imageRendering || focus != spec.focusReadingEnabled)
+      !read(embedded) || !read(imageRendering) || !read(focus) || !read(fingerprint) || !read(characterSpacing) ||
+      !read(wordSpacingPercent) || !read(count) || !read(pageLut) || !read(anchorMap) || !read(paragraphLut) ||
+      !read(liLut) || !read(visibleLut) || fontId != spec.fontId || compression != spec.lineCompression ||
+      spacing != spec.extraParagraphSpacing || alignment != spec.paragraphAlignment || width != spec.viewportWidth ||
+      height != spec.viewportHeight || hyphenation != spec.hyphenationEnabled || embedded != spec.embeddedStyle ||
+      imageRendering != spec.imageRendering || focus != spec.focusReadingEnabled ||
+      characterSpacing != spec.characterSpacing || wordSpacingPercent != spec.wordSpacingPercent)
     return invalid();
   if (fingerprint != renderer.textLayoutFingerprint(spec.fontId)) {
     // Retain the prior complete/partial cache until a replacement is committed.
@@ -454,6 +461,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
     return false;
   }
 
+  ctx->parser->setTextSpacing(spec.characterSpacing, spec.wordSpacingPercent);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
   build_ = std::move(ctx);
 

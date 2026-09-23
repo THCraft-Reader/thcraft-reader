@@ -120,6 +120,81 @@ TEST_F(NativeTextParagraphTest, RealSpacesJustifyButZeroWidthThaiBoundariesDoNot
   expectFits(lines);
 }
 
+TEST_F(NativeTextParagraphTest, SpacingChangesFittingAndPersistsTheSameRenderedGeometry) {
+  NativeParagraphView view;
+  view.text = "AB CD";
+  options.width = static_cast<uint16_t>((width(view.text) + 63) / 64);
+  Lines lines;
+  size_t consumed = 0;
+  ASSERT_EQ(fit(view, lines, consumed), TextStatus::Ok);
+  ASSERT_EQ(lines.size(), 1u);
+  lines.clear();
+  options.characterSpacing = 2;
+  options.wordSpacingPercent = 200;
+  ASSERT_EQ(fit(view, lines, consumed), TextStatus::Ok);
+  ASSERT_EQ(lines.size(), 2u);
+  EXPECT_EQ(lines[0].line.logicalText(), "AB ");
+  EXPECT_EQ(lines[1].line.logicalText(), "CD");
+  EXPECT_EQ(consumed, view.text.size());
+  EXPECT_EQ(joined(lines), view.text);
+  expectFits(lines);
+  for (const auto& value : lines) {
+    NativeLineInput expected;
+    expected.text = value.line.logicalText();
+    expected.fontId = options.fontId;
+    expected.characterSpacing = options.characterSpacing;
+    expected.wordSpacingPercent = options.wordSpacingPercent;
+    NativeGlyphRun measured, rendered;
+    ASSERT_EQ(engine.shapeLine(expected, measured), TextStatus::Ok);
+    ASSERT_EQ(engine.shapeLine(value.line.input(options.fontId), rendered), TextStatus::Ok);
+    EXPECT_EQ(rendered.advance26, measured.advance26);
+    ASSERT_EQ(rendered.glyphs.size(), measured.glyphs.size());
+    for (size_t i = 0; i < measured.glyphs.size(); ++i) EXPECT_EQ(rendered.glyphs[i].x26, measured.glyphs[i].x26);
+  }
+  lines.clear();
+  options.characterSpacing = -2;
+  options.wordSpacingPercent = 50;
+  ASSERT_EQ(fit(view, lines, consumed), TextStatus::Ok);
+  ASSERT_EQ(lines.size(), 1u);
+  expectFits(lines);
+  NativeGlyphRun compact;
+  ASSERT_EQ(engine.shapeLine(lines[0].line.input(options.fontId), compact), TextStatus::Ok);
+  EXPECT_LT(compact.advance26, width(view.text));
+}
+
+TEST_F(NativeTextParagraphTest, SpacedThaiCellsAndRtlWordsRetainSelectionAndJustificationGeometry) {
+  NativeParagraphView view;
+  view.text = "กี่กู้ אב AB กี่กู้ אב AB กี่กู้ אב AB";
+  options.characterSpacing = -2;
+  options.wordSpacingPercent = 50;
+  options.alignment = NativeAlignment::Justify;
+  options.width = 170;
+  Lines lines;
+  size_t consumed = 0;
+  ASSERT_EQ(fit(view, lines, consumed), TextStatus::Ok);
+  ASSERT_GT(lines.size(), 1u);
+  EXPECT_EQ(joined(lines), view.text);
+  EXPECT_EQ(consumed, view.text.size());
+  expectFits(lines);
+  for (const auto& value : lines) {
+    NativeGlyphRun run;
+    ASSERT_EQ(engine.shapeLine(value.line.input(options.fontId), run), TextStatus::Ok);
+    for (const auto& gap : value.line.gaps.span()) EXPECT_GE(gap.extraAdvance26, 0);
+    for (const auto& word : value.line.words.span()) {
+      int32_t left = INT32_MAX, right = INT32_MIN;
+      for (const auto& cluster : run.clusters.span()) {
+        if (cluster.startByte >= word.endByte || cluster.endByte <= word.startByte) continue;
+        left = std::min(left, cluster.x26);
+        right = std::max(right, cluster.x26 + cluster.advance26);
+      }
+      EXPECT_EQ(word.x26, left);
+      EXPECT_EQ(word.width26, right - left);
+      EXPECT_EQ(std::string_view(value.line.selectionText.data() + word.selectionTextOffset),
+                value.line.logicalText().substr(word.startByte, word.endByte - word.startByte));
+    }
+  }
+}
+
 TEST_F(NativeTextParagraphTest, NbspStaysJoinedAndZwspIsPreservedButBreakable) {
   const std::string glued = "one\xc2\xa0two";
   const std::string text = "a " + glued + " three";
@@ -208,12 +283,14 @@ TEST_F(NativeTextParagraphTest, MarkMarkupAndFocusCannotSplitBaseOwnedCluster) {
 
 TEST_F(NativeTextParagraphTest, RubyIsUnbreakableAndInkFitsReservedExtent) {
   const std::string text = "กี่ ไทย ภาษา";
-  const std::string annotation = "ภาษาไทยกี่กู้";
+  const std::string annotation = "ภาษาไทย กี่กู้";
   const std::array<NativeRubyInput, 1> ruby{{{0, 6, annotation, 0}}};
   NativeParagraphView view;
   view.text = text;
   view.ruby = ruby;
   options.width = 220;
+  options.characterSpacing = 2;
+  options.wordSpacingPercent = 150;
   Lines lines;
   size_t consumed = 0;
   ASSERT_EQ(fit(view, lines, consumed), TextStatus::Ok);
@@ -226,6 +303,8 @@ TEST_F(NativeTextParagraphTest, RubyIsUnbreakableAndInkFitsReservedExtent) {
   input.text = annotation;
   input.fontId = options.fontId;
   input.spans = {&style, 1};
+  input.characterSpacing = options.characterSpacing;
+  input.wordSpacingPercent = options.wordSpacingPercent;
   NativeGlyphRun run;
   ASSERT_EQ(engine.shapeLine(input, run), TextStatus::Ok);
   EXPECT_GE(value.x26, 0);

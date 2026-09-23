@@ -24,3 +24,11 @@ void* HalMemory::reallocateExternal(void* pointer, size_t bytes) {
 }
 
 void HalMemory::freeExternal(void* pointer) { heap_caps_free(pointer); }
+
+void HalMemory::PsramDeleter::operator()(uint8_t* buffer) const { heap_caps_free(buffer); }
+
+HalMemory::PsramBuffer HalMemory::allocatePsram(size_t bytes) {
+  // Capability allocation is required to keep image caches out of internal RAM;
+  // the owning handle releases this block through the matching heap API.
+  return PsramBuffer(static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)));
+}

@@ -275,7 +275,7 @@ TEST_F(NativeTextTxtCacheTest, CorruptHeadersLutRangesAndTruncationAreRebuildabl
   const auto complete = read(indexPath()), progress = read(progressPath());
   const size_t lut = static_cast<size_t>(get(complete, 38, 4));
   ASSERT_GT(get(complete, 34, 4), 1u);
-  for (int corruption = 0; corruption < 8; ++corruption) {
+  for (int corruption = 0; corruption < 9; ++corruption) {
     SCOPED_TRACE(corruption);
     auto bytes = complete;
     switch (corruption) {
@@ -302,6 +302,9 @@ TEST_F(NativeTextTxtCacheTest, CorruptHeadersLutRangesAndTruncationAreRebuildabl
         break;
       case 7:
         bytes.pop_back();
+        break;
+      case 8:
+        bytes[4] = 1;  // Old native TextBlock payload lacks spacing fields.
         break;
     }
     write(indexPath(), bytes);

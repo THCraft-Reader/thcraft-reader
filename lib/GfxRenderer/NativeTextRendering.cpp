@@ -122,14 +122,15 @@ bool GfxRenderer::reportNativeStatus(TextStatus status) const {
   return false;
 }
 
-int GfxRenderer::nativeMeasure(int fontId, const char* text, EpdFontFamily::Style style, int8_t level,
-                               bool advance) const {
+int GfxRenderer::nativeMeasure(int fontId, const char* text, EpdFontFamily::Style style, int8_t level, bool advance,
+                               int8_t tracking) const {
   if (!text || !*text) return 0;
   EngineLock lock(*nativeTextEngine_);
   auto* state = nativeState();
   if (!state) return 0;
   NativeStyleSpan span;
-  const auto input = uiInput(fontId, text, style, level, span);
+  auto input = uiInput(fontId, text, style, level, span);
+  input.characterSpacing = tracking;
   if (!reportNativeStatus(nativeTextEngine_->shapeLine(input, state->run))) return 0;
   return advance ? pixel(state->run.advance26) : inkWidth(state->run);
 }
@@ -140,7 +141,7 @@ int GfxRenderer::nativeMetric(int fontId, bool ascender) const {
   return ceilPixel(ascender ? ascender26 : height26);
 }
 int GfxRenderer::nativePairAdvance(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style,
-                                   bool space) const {
+                                   bool space, int8_t tracking) const {
   EngineLock lock(*nativeTextEngine_);
   auto* state = nativeState();
   if (!state) return 0;
@@ -155,6 +156,7 @@ int GfxRenderer::nativePairAdvance(int fontId, uint32_t leftCp, uint32_t rightCp
   }
   NativeStyleSpan span;
   auto input = uiInput(fontId, {text, rightOffset + rightBytes}, style, -1, span);
+  input.characterSpacing = tracking;
   if (!reportNativeStatus(nativeTextEngine_->shapeLine(input, state->run))) return 0;
   int32_t result = state->run.advance26;
   for (const auto single : {std::string_view(text, leftBytes), std::string_view(text + rightOffset, rightBytes)}) {
@@ -281,6 +283,8 @@ TextStatus GfxRenderer::stageNativeLine(int fontId, const NativeLineData& line, 
     NativeStyleSpan span;
     auto input = uiInput(fontId, {line.rubyText.data() + ruby.textOffset, ruby.textBytes}, style, -1, span);
     input.readerFeatures = true;
+    input.characterSpacing = line.characterSpacing;
+    input.wordSpacingPercent = line.wordSpacingPercent;
     status = nativeTextEngine_->shapeLine(input, state.run);
     if (status != TextStatus::Ok) return status;
     status = stageNativeRun(state.run, x * 64 + ruby.x26, y * 64 + ruby.y26, false, warm);
@@ -334,7 +338,7 @@ bool GfxRenderer::warmNativeText(int fontId, const char* text, EpdFontFamily::St
   return reportNativeStatus(stageNativeRun(state->run, 0, 0, false, true));
 }
 void GfxRenderer::drawNativeText(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
-                                 int8_t level, bool rotated, bool centered) const {
+                                 int8_t level, bool rotated, bool centered, int8_t tracking) const {
   if (!text || !*text) return;
   EngineLock lock(*nativeTextEngine_);
   auto* state = nativeState();
@@ -344,6 +348,7 @@ void GfxRenderer::drawNativeText(int fontId, int x, int y, const char* text, boo
   }
   NativeStyleSpan span;
   auto input = uiInput(fontId, text, style, level, span);
+  input.characterSpacing = tracking;
   TextStatus status = TextStatus::Ok;
   for (unsigned attempt = 0; attempt < 2; ++attempt) {
     state->clearPaint();

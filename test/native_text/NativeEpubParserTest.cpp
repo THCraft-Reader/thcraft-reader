@@ -51,6 +51,8 @@ struct ParseOptions {
   float compression = 1.0f;
   bool focus = false;
   CssTextAlign alignment = CssTextAlign::Left;
+  int8_t characterSpacing = 0;
+  uint8_t wordSpacingPercent = 100;
 };
 
 uint32_t scalars(std::string_view text) {
@@ -137,7 +139,7 @@ class NativeTextEpubParserTest : public testing::Test {
     ASSERT_TRUE(file.close());
   }
   std::unique_ptr<ChapterHtmlSlimParser> parser(Document& output, const ParseOptions& options) {
-    return std::make_unique<ChapterHtmlSlimParser>(
+    auto result = std::make_unique<ChapterHtmlSlimParser>(
         nullptr, chapterPath, renderer, FONT, options.compression, false, static_cast<uint8_t>(options.alignment),
         options.width, options.height, false, options.focus,
         [&output](std::unique_ptr<Page> page, uint16_t, uint16_t, uint32_t sourceOffset) {
@@ -149,6 +151,8 @@ class NativeTextEpubParserTest : public testing::Test {
           output.pages.push_back(std::move(page));
         },
         true, "", "");
+    result->setTextSpacing(options.characterSpacing, options.wordSpacingPercent);
+    return result;
   }
   ParseStatus drain(ChapterHtmlSlimParser& parser, size_t maxSteps) {
     for (size_t step = 0; step < maxSteps; ++step) {
@@ -257,6 +261,33 @@ class NativeTextEpubParserTest : public testing::Test {
   }
 };
 
+TEST_F(NativeTextEpubParserTest, CharacterAndWordSpacingEachChangeTheParagraphWrapBoundary) {
+  ParseOptions options;
+  NativeGlyphRun run;
+  ASSERT_EQ(engine.shapeLine({.text = "ab cd", .fontId = FONT}, run), TextStatus::Ok);
+  const auto reference = parse(paragraph("ab cd"), UNLIMITED, options);
+  ASSERT_EQ(reference.status, ParseStatus::Done);
+  ASSERT_EQ(reference.pages.size(), 1u);
+  const auto referenceLines = lines(*reference.pages[0]);
+  ASSERT_EQ(referenceLines.size(), 1u);
+  const int32_t indent26 = referenceLines[0]->getBlock()->nativeLine()->alignmentX26;
+  options.width = static_cast<uint16_t>((run.advance26 + indent26 + 63) / 64);
+  options.height = 700;
+  const auto normal = parse(paragraph("ab cd"), UNLIMITED, options);
+  ASSERT_EQ(normal.status, ParseStatus::Done);
+  ASSERT_EQ(normal.pages.size(), 1u);
+  ASSERT_EQ(lines(*normal.pages[0]).size(), 1u);
+  for (bool character : {false, true}) {
+    options.characterSpacing = character ? 2 : 0;
+    options.wordSpacingPercent = character ? 100 : 200;
+    const auto spaced = parse(paragraph("ab cd"), 1, options);
+    ASSERT_EQ(spaced.status, ParseStatus::Done);
+    ASSERT_EQ(spaced.pages.size(), 1u);
+    EXPECT_EQ(lines(*spaced.pages[0]).size(), 2u);
+    EXPECT_EQ(joined(spaced), "ab cd");
+  }
+}
+
 TEST_F(NativeTextEpubParserTest, InlineMarkTagsAndForcedWordBufferCutsPreserveSourceAndFocus) {
   const std::string rest = " กิ กึ กุ กู้ น้ำ กำ ปี่ ญู ฐู เก่ง " + repeat("ภาษาไทยประเทศไทย", 24);
   const std::string logical = "e\xcc\x81 กี่" + rest;
@@ -344,6 +375,8 @@ TEST_F(NativeTextEpubParserTest, ModerateRubyAtWindowEdgeFlushesOnlyAtItsSemanti
   ParseOptions options;
   options.width = 560;
   options.height = 220;
+  options.characterSpacing = 1;
+  options.wordSpacingPercent = 150;
   const auto whole = parse(paragraph(body), UNLIMITED, options);
   const auto bytes = parse(paragraph(body), 1, options);
   expectSame(whole, bytes);
@@ -369,6 +402,8 @@ TEST_F(NativeTextEpubParserTest, LongParagraphSourceWindowsIgnoreReadAndInlineFr
   ParseOptions options;
   options.width = 400;
   options.height = 220;
+  options.characterSpacing = -1;
+  options.wordSpacingPercent = 150;
   const auto reference = parse(paragraph(logical), UNLIMITED, options);
   ASSERT_EQ(reference.status, ParseStatus::Done);
   ASSERT_TRUE(reference.finished);

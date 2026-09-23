@@ -88,7 +88,8 @@ bool relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
 
   if (!parsed.layoutAndExtractLines(
           renderer, fontId, static_cast<uint16_t>(textWidth),
-          [&layout](std::unique_ptr<TextBlock> line, uint32_t) { layout.lines.push_back(std::move(line)); })) {
+          [&layout](std::unique_ptr<TextBlock> line, uint32_t) { layout.lines.push_back(std::move(line)); }, true,
+          SETTINGS.getCharacterSpacing(), SETTINGS.wordSpacing)) {
     layout.lines.clear();
     layout.key = {};
     return false;
@@ -143,6 +144,8 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
                        .lineCompression = compression,
                        .alignment = SETTINGS.paragraphAlignment,
                        .extraParagraphSpacing = SETTINGS.extraParagraphSpacing != 0,
+                       .characterSpacing = SETTINGS.getCharacterSpacing(),
+                       .wordSpacingPercent = SETTINGS.wordSpacing,
                        .focusReading = SETTINGS.focusReadingEnabled != 0,
                        .hyphenation = SETTINGS.hyphenationEnabled != 0,
                        .textLayoutFingerprint = renderer.textLayoutFingerprint(fontId)};

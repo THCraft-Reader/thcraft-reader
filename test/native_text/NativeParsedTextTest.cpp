@@ -54,14 +54,15 @@ class NativeTextParsedTextTest : public testing::Test {
     engine.shutdown();
     EXPECT_LE(native_text::allocationStats().peak, native_text::MEMORY_LIMIT);
   }
-  bool layout(ParsedText& input, Blocks& output, uint16_t width = 240, bool final = true) {
+  bool layout(ParsedText& input, Blocks& output, uint16_t width = 240, bool final = true, int8_t characterSpacing = 0,
+              uint8_t wordSpacingPercent = 100) {
     return input.layoutAndExtractLines(
         renderer, NOTOSANS_14_FONT_ID, width,
         [&](std::unique_ptr<TextBlock> block, uint32_t source) {
           EXPECT_EQ(source, block->sourceStartOffset());
           output.push_back(std::move(block));
         },
-        final);
+        final, characterSpacing, wordSpacingPercent);
   }
   std::vector<uint8_t> pixels(const TextBlock& block) {
     renderer.clearScreen(0xff);
@@ -85,8 +86,8 @@ TEST_F(NativeTextParsedTextTest, AttachedMarkupPreservesLogicalNfdThaiAndRendere
   }
   ASSERT_EQ(fragments.size(), scalarCount(text));
   Blocks a, b;
-  ASSERT_TRUE(layout(whole, a, 170));
-  ASSERT_TRUE(layout(fragments, b, 170));
+  ASSERT_TRUE(layout(whole, a, 170, true, -1, 150));
+  ASSERT_TRUE(layout(fragments, b, 170, true, -1, 150));
   ASSERT_EQ(a.size(), b.size());
   EXPECT_EQ(joined(a), text);
   EXPECT_EQ(joined(b), text);

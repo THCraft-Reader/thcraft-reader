@@ -157,6 +157,8 @@ struct NativeParagraphLayout::State {
     value.paragraphLevel = level;
     value.resolvedLevels = true;
     value.readerFeatures = options->readerFeatures;
+    value.characterSpacing = options->characterSpacing;
+    value.wordSpacingPercent = options->wordSpacingPercent;
     value.syntheticSuffixCp = (points[last].flags & HYPHEN) ? '-' : 0;
     if (useGaps) value.gaps = gaps.span();
     return value;
@@ -381,6 +383,8 @@ struct NativeParagraphLayout::State {
       rubyInput.fontId = options->fontId;
       if (!value.text.empty()) rubyInput.spans = {&annotation, 1};
       rubyInput.readerFeatures = options->readerFeatures;
+      rubyInput.characterSpacing = options->characterSpacing;
+      rubyInput.wordSpacingPercent = options->wordSpacingPercent;
       status = engine.shapeLine(rubyInput, run);
       if (status != TextStatus::Ok) return status;
       if (!append(ruby,
@@ -541,6 +545,8 @@ struct NativeParagraphLayout::State {
         !line.gaps.assign(gaps.span()))
       return TextStatus::OutOfMemory;
     line.paragraphLevel = level;
+    line.characterSpacing = options->characterSpacing;
+    line.wordSpacingPercent = options->wordSpacingPercent;
     line.syntheticSuffixCp = (points[last].flags & HYPHEN) ? '-' : 0;
     // The final-context backtracking above leaves an oversized candidate only
     // when its first legal cluster/group boundary is itself too wide.

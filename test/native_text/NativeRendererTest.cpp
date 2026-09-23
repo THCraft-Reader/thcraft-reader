@@ -145,6 +145,40 @@ TEST_F(NativeTextRendererTest, MeasuresInkAndAdvanceAndCentersActualInk) {
   EXPECT_EQ(pixels(), centered);
 }
 
+TEST_F(NativeTextRendererTest, TrackingAndExplicitDirectionMeasureAndPaintTheSameClusterPositions) {
+  constexpr const char* text = "เก่งกี่ AV אב";
+  HalDisplay expectedDisplay;
+  expectedDisplay.begin();
+  GfxRenderer expected(expectedDisplay);
+  expected.begin();
+  for (const auto direction : {BidiUtils::BidiBaseDir::LTR, BidiUtils::BidiBaseDir::RTL}) {
+    for (const int8_t tracking : {int8_t{-2}, int8_t{2}}) {
+      auto source = input(text);
+      source.paragraphLevel = static_cast<int8_t>(direction);
+      source.characterSpacing = tracking;
+      NativeGlyphRun run;
+      ASSERT_EQ(engine.shapeLine(source, run), TextStatus::Ok);
+      EXPECT_EQ(renderer.getTextAdvanceX(NOTOSANS_14_FONT_ID, text, EpdFontFamily::REGULAR, tracking, direction,
+                                         GfxRenderer::TextMeasureMode::Layout),
+                pixel(run.advance26));
+      EXPECT_EQ(renderer.getTextAdvanceX(NOTOSANS_14_FONT_ID, text, EpdFontFamily::REGULAR, tracking, direction,
+                                         GfxRenderer::TextMeasureMode::Rendered),
+                pixel(run.advance26));
+      renderer.clearScreen();
+      expected.clearScreen();
+      renderer.drawText(NOTOSANS_14_FONT_ID, 40, 70, text, true, EpdFontFamily::REGULAR, direction, tracking);
+      referenceRun(expected, run, 40, 70, true, false);
+      ASSERT_EQ(renderer.lastTextStatus(), TextStatus::Ok);
+      EXPECT_EQ(pixels(),
+                std::vector<uint8_t>(expected.getFrameBuffer(), expected.getFrameBuffer() + expected.getBufferSize()));
+    }
+  }
+  const int plainPair = renderer.getKerning(NOTOSANS_14_FONT_ID, 'A', 'V', EpdFontFamily::REGULAR);
+  EXPECT_EQ(renderer.getKerning(NOTOSANS_14_FONT_ID, 'A', 'V', EpdFontFamily::REGULAR, 2), plainPair + 2);
+  EXPECT_EQ(renderer.getKerning(NOTOSANS_14_FONT_ID, 0x0e01, 0x0e35, EpdFontFamily::REGULAR, 2),
+            renderer.getKerning(NOTOSANS_14_FONT_ID, 0x0e01, 0x0e35, EpdFontFamily::REGULAR));
+}
+
 TEST_F(NativeTextRendererTest, TruncationRetainsOnlySafeSourceClustersAndRemeasuresEllipsis) {
   constexpr const char* text = "เก่งกี่น้ำภาษาไทยประเทศไทย";
   NativeGlyphRun run;
@@ -255,6 +289,62 @@ TEST_F(NativeTextRendererTest, NativeLineRubyAndDecorationsStayWithinReservedHei
   renderer.clearScreen();
   ASSERT_TRUE(renderer.drawNativeLine(options.fontId, line, 20, 60));
   EXPECT_EQ(pixels(), first);
+}
+
+TEST_F(NativeTextRendererTest, PersistedLineAndRubySpacingMatchIndependentRasterPlacement) {
+  NativeParagraphView paragraph;
+  paragraph.text = "กี่ น้ำ AB";
+  NativeRubyInput annotation{0, 9, "กู้ AV", EpdFontFamily::REGULAR};
+  paragraph.ruby = {&annotation, 1};
+  NativeLayoutOptions options;
+  options.fontId = NOTOSANS_14_FONT_ID;
+  options.width = 400;
+  options.characterSpacing = 2;
+  options.wordSpacingPercent = 150;
+  NativeLineData line;
+  NativeParagraphLayout fitter(engine);
+  size_t consumed = 0;
+  int8_t level = -1;
+  const auto emit = [](void* context, NativeLayoutEmission&& emission) {
+    *static_cast<NativeLineData*>(context) = std::move(emission.line);
+    return TextStatus::Ok;
+  };
+  ASSERT_EQ(fitter.layout(paragraph, options, emit, &line, consumed, level), TextStatus::Ok);
+  ASSERT_EQ(consumed, paragraph.text.size());
+  ASSERT_EQ(line.logicalText(), paragraph.text);
+  ASSERT_EQ(line.ruby.size(), 1u);
+  HalDisplay expectedDisplay;
+  expectedDisplay.begin();
+  GfxRenderer expected(expectedDisplay);
+  expected.begin();
+  expected.clearScreen();
+  const auto paint = [&](NativeGlyphRun& run, int32_t x26, int32_t baseline26) {
+    const int referenceBaseline = (std::max(run.ascender26, -run.ink.top26) + 63) / 64;
+    for (auto& glyph : run.glyphs.span()) {
+      glyph.x26 += x26;
+      glyph.y26 += baseline26;
+    }
+    referenceRun(expected, run, 40, 60 - referenceBaseline, true, false);
+  };
+  NativeLineInput source;
+  source.text = paragraph.text;
+  source.fontId = options.fontId;
+  source.characterSpacing = options.characterSpacing;
+  source.wordSpacingPercent = options.wordSpacingPercent;
+  source.gaps = line.gaps.span();
+  NativeGlyphRun run;
+  ASSERT_EQ(engine.shapeLine(source, run), TextStatus::Ok);
+  paint(run, line.alignmentX26, line.baseline * 64);
+  NativeStyleSpan rubyStyle{0, static_cast<uint32_t>(annotation.text.size()), EpdFontFamily::SUP, 0};
+  source.text = annotation.text;
+  source.spans = {&rubyStyle, 1};
+  source.gaps = {};
+  ASSERT_EQ(engine.shapeLine(source, run), TextStatus::Ok);
+  paint(run, line.ruby[0].x26, line.ruby[0].y26);
+  renderer.clearScreen();
+  ASSERT_TRUE(renderer.drawNativeLine(options.fontId, line, 40, 60));
+  EXPECT_EQ(pixels(),
+            std::vector<uint8_t>(expected.getFrameBuffer(), expected.getFrameBuffer() + expected.getBufferSize()));
 }
 
 TEST_F(NativeTextRendererTest, ForcedOversizeConsumesClusterOnceAndClipsPaintAndHitBoxes) {

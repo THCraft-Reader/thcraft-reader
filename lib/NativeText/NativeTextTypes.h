@@ -92,6 +92,8 @@ struct NativeLineInput {
   std::span<const NativeGap> gaps;
   bool readerFeatures = true;
   bool resolvedLevels = false;
+  int8_t characterSpacing = 0;       // Pixels between visible non-space shaping clusters, never within marks.
+  uint8_t wordSpacingPercent = 100;  // Scales Unicode space advances before justification/ruby gaps.
 };
 struct NativeGlyph {
   uint64_t faceIdentity = 0;
@@ -152,10 +154,13 @@ struct NativeLineData {
   int32_t alignmentX26 = 0;
   uint32_t syntheticSuffixCp = 0;
   uint16_t overflowClipWidth = 0;  // Nonzero only for a forced oversized cluster/group.
+  int8_t characterSpacing = 0;
+  uint8_t wordSpacingPercent = 100;
   std::string_view logicalText() const { return {text.data(), text.size()}; }
   bool empty() const { return text.empty() && ruby.empty(); }
   NativeLineInput input(int fontId) const {
-    return {logicalText(), fontId, spans.span(), paragraphLevel, syntheticSuffixCp, gaps.span(), true, true};
+    return {logicalText(), fontId, spans.span(), paragraphLevel,   syntheticSuffixCp,
+            gaps.span(),   true,   true,         characterSpacing, wordSpacingPercent};
   }
 };
 struct NativeVariation {

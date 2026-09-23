@@ -185,11 +185,16 @@ For the Pro release:
 Other environments use `.pio/build/<environment>/`.
 
 The Pro OTA slot is **`0x640000` / 6,553,600 bytes**. Check both PlatformIO's
-size result and the actual `firmware.bin` length. The native-text integration's
-verified development image had only 3,664 bytes of spare space; release had
-39,488 bytes. Those are historical measurements, not a guarantee for later
-commits. Do not bypass the size check, disable required font/dictionary data, or
-change partitions simply to make an oversized build succeed.
+size result and the actual `firmware.bin` length. After merging upstream
+`038d615f`, the verified release binary is **6,539,328 bytes**, leaving
+**14,272 bytes**. These are measured sizes, not a guarantee for later commits.
+
+**Known development-build limit:** `x4pro` retains debug-level logging and
+currently fails PlatformIO's size check at **6,570,110 bytes**, 16,510 bytes
+over the slot limit. Use `x4pro-gh_release` for the verified Pro firmware.
+The four-target command above therefore does not currently pass in full.
+Do not bypass the size check, disable required font/dictionary data, or change
+partitions simply to make an oversized build succeed.
 
 ## 5. Routine workflow after `git pull`
 

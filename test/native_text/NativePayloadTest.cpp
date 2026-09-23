@@ -48,7 +48,8 @@ class NativeTextPayloadTest : public testing::Test {
   std::vector<uint8_t> pixels() const {
     return {renderer.getFrameBuffer(), renderer.getFrameBuffer() + renderer.getBufferSize()};
   }
-  std::unique_ptr<Page> paragraph(std::string_view text, bool ruby = false, int fontId = FONT) {
+  std::unique_ptr<Page> paragraph(std::string_view text, bool ruby = false, int fontId = FONT,
+                                  int8_t characterSpacing = 0, uint8_t wordSpacingPercent = 100) {
     auto page = std::make_unique<Page>();
     NativeParagraphLayout layout(engine);
     NativeParagraphView view;
@@ -60,11 +61,15 @@ class NativeTextPayloadTest : public testing::Test {
     options.width = 420;
     options.focus = true;
     options.alignment = NativeAlignment::Center;
+    options.characterSpacing = characterSpacing;
+    options.wordSpacingPercent = wordSpacingPercent;
     size_t consumed = 0;
     int8_t level = 0;
     const auto emit = [](void* context, NativeLayoutEmission&& emission) {
       auto* page = static_cast<Page*>(context);
-      auto block = makeUniqueNoThrow<TextBlock>(std::move(emission.line), BlockStyle{});
+      BlockStyle style;
+      style.characterSpacing = emission.line.characterSpacing;
+      auto block = makeUniqueNoThrow<TextBlock>(std::move(emission.line), style);
       if (!block) return TextStatus::OutOfMemory;
       if (!block->valid()) return TextStatus::InvalidText;
       int y = 0;
@@ -126,6 +131,8 @@ class NativeTextPayloadTest : public testing::Test {
     put(file, spec.imageRendering);
     put(file, static_cast<uint8_t>(spec.focusReadingEnabled));
     put(file, fingerprint);
+    put(file, spec.characterSpacing);
+    put(file, spec.wordSpacingPercent);
     put(file, uint16_t{1});
     for (int i = 0; i < 5; ++i) put(file, uint32_t{0});
     const uint32_t pageStart = static_cast<uint32_t>(file.position());
@@ -141,11 +148,11 @@ class NativeTextPayloadTest : public testing::Test {
     put(file, uint16_t{0});
     const uint32_t visible = static_cast<uint32_t>(file.position());
     put(file, uint32_t{37});
-    if (version == 0xeb) {
+    if (version == 0xea) {
       put(file, uint32_t{200});
       put(file, uint32_t{1000});
     }
-    ASSERT_TRUE(file.seek(29));
+    ASSERT_TRUE(file.seek(31));
     for (const uint32_t offset : {lut, anchors, paragraphs, items, visible}) put(file, offset);
     file.flush();
   }
@@ -157,7 +164,7 @@ class NativeTextPayloadTest : public testing::Test {
 
 TEST_F(NativeTextPayloadTest, PageReloadPreservesOriginalThaiSelectionRubyAndPixels) {
   constexpr std::string_view text = "ภาษาไทย น้ำ ABC";
-  auto page = paragraph(text, true);
+  auto page = paragraph(text, true, FONT, 2, 150);
   ASSERT_TRUE(page);
   ASSERT_EQ(page->elements.size(), 1u);
   const auto& original = *static_cast<const PageLine&>(*page->elements[0]).getBlock();
@@ -361,7 +368,7 @@ TEST_F(NativeTextPayloadTest, ForcedOverflowReloadKeepsPixelsSelectionsAndPageLi
   patch(bad, 26, uint16_t{32768});
   EXPECT_FALSE(decode(bad));
   bad = encode(first);
-  const size_t wordStart = 28 + first.nativeLine()->text.size() + first.nativeLine()->spans.size() * 6;
+  const size_t wordStart = 30 + first.nativeLine()->text.size() + first.nativeLine()->spans.size() * 6;
   patch(bad, wordStart + 8, int32_t{9 * 64});
   EXPECT_FALSE(decode(bad));
 }
@@ -378,14 +385,14 @@ TEST_F(NativeTextPayloadTest, RejectsTruncationUnsafeRangesAndGeometryWithoutLea
     SCOPED_TRACE(length);
     EXPECT_FALSE(decode({valid.begin(), valid.begin() + length}));
   }
-  const size_t spanStart = 28 + line.text.size();
+  const size_t spanStart = 30 + line.text.size();
   const size_t wordStart = spanStart + line.spans.size() * 6;
   const size_t rubyStart = wordStart + line.words.size() * 16 + line.gaps.size() * 6;
   auto bad = valid;
   patch(bad, 3, uint16_t{4097});
   EXPECT_FALSE(decode(bad));
   bad = valid;
-  bad[28] = 0xff;
+  bad[30] = 0xff;
   EXPECT_FALSE(decode(bad));
   bad = valid;
   patch(bad, wordStart, uint16_t{1});  // Inside the first three-byte Thai scalar.
@@ -398,6 +405,12 @@ TEST_F(NativeTextPayloadTest, RejectsTruncationUnsafeRangesAndGeometryWithoutLea
   EXPECT_FALSE(decode(bad));
   bad = valid;
   patch(bad, rubyStart + 4, uint16_t{65535});
+  EXPECT_FALSE(decode(bad));
+  bad = valid;
+  patch(bad, 28, int8_t{-3});
+  EXPECT_FALSE(decode(bad));
+  bad = valid;
+  patch(bad, 29, uint8_t{201});
   EXPECT_FALSE(decode(bad));
   EXPECT_EQ(native_text::allocationStats().used, baseline);
   native_text::failAllocationsAfter(0);
@@ -497,12 +510,12 @@ TEST_F(NativeTextPayloadTest, FinalAndPartialSectionsRejectStaleFingerprintButKe
   spec.viewportWidth = 420;
   spec.viewportHeight = 700;
   const uint64_t fingerprint = renderer.textLayoutFingerprint(FONT);
-  for (uint8_t version : {uint8_t{47}, uint8_t{0xeb}}) {
+  for (uint8_t version : {uint8_t{48}, uint8_t{0xea}}) {
     writeSection(path, *page, spec, version, fingerprint);
     {
       Section section(epub, 0, renderer);
       ASSERT_TRUE(section.loadSectionFile(spec));
-      EXPECT_EQ(section.isPartial(), version == 0xeb);
+      EXPECT_EQ(section.isPartial(), version == 0xea);
       ASSERT_TRUE(section.loadPage(0));
       EXPECT_EQ(section.getTextFromSectionFile(), "ภาษาไทย");
       EXPECT_EQ(section.getVisibleTextOffsetForPage(0), 37u);
@@ -519,6 +532,46 @@ TEST_F(NativeTextPayloadTest, FinalAndPartialSectionsRejectStaleFingerprintButKe
   }
 }
 
+TEST_F(NativeTextPayloadTest, SectionsRejectChangedSpacingAndPreviousCompleteOrPartialFormats) {
+  auto page = paragraph("ภาษาไทย");
+  ASSERT_TRUE(page);
+  auto epub = std::make_shared<Epub>("fixture.epub", root.string());
+  const auto directory = std::filesystem::path(epub->getCachePath());
+  std::filesystem::create_directories(directory / "sections");
+  const std::string path = (directory / "sections/0.bin").string();
+  ReaderRenderSpec spec;
+  spec.fontId = FONT;
+  spec.viewportWidth = 420;
+  spec.viewportHeight = 700;
+  spec.characterSpacing = -2;
+  spec.wordSpacingPercent = 150;
+  const uint64_t fingerprint = renderer.textLayoutFingerprint(FONT);
+  for (uint8_t version : {uint8_t{48}, uint8_t{0xea}}) {
+    writeSection(path, *page, spec, version, fingerprint);
+    {
+      Section matching(epub, 0, renderer);
+      ASSERT_TRUE(matching.loadSectionFile(spec));
+      ASSERT_TRUE(matching.loadPage(0));
+    }
+    for (bool character : {false, true}) {
+      writeSection(path, *page, spec, version, fingerprint);
+      auto changed = spec;
+      if (character)
+        changed.characterSpacing = 0;
+      else
+        changed.wordSpacingPercent = 100;
+      Section stale(epub, 0, renderer);
+      EXPECT_FALSE(stale.loadSectionFile(changed));
+      EXPECT_FALSE(stale.loadPage(0));
+    }
+  }
+  for (uint8_t version : {uint8_t{47}, uint8_t{0xeb}}) {
+    writeSection(path, *page, spec, version, fingerprint);
+    Section old(epub, 0, renderer);
+    EXPECT_FALSE(old.loadSectionFile(spec));
+    EXPECT_FALSE(old.loadPage(0));
+  }
+}
 TEST_F(NativeTextPayloadTest, ResidentFinalAndPartialSectionsRejectLiveFontIdentityChanges) {
   constexpr int CUSTOM = 71237, ALIAS = 71238, OTHER = 71239;
   auto epub = std::make_shared<Epub>("fixture.epub", root.string());
@@ -537,7 +590,7 @@ TEST_F(NativeTextPayloadTest, ResidentFinalAndPartialSectionsRejectLiveFontIdent
   const NativeFontFile variableLight{NATIVE_VARIABLE_FONT_PATH, 0, {&light, 1}};
   const NativeFontFile variableHeavy{NATIVE_VARIABLE_FONT_PATH, 0, {&heavy, 1}};
 
-  for (uint8_t version : {uint8_t{47}, uint8_t{0xeb}}) {
+  for (uint8_t version : {uint8_t{48}, uint8_t{0xea}}) {
     for (int change = 0; change < 4; ++change) {
       SCOPED_TRACE(testing::Message() << "version=" << unsigned(version) << " change=" << change);
       engine.clearCustomFonts();
@@ -616,7 +669,7 @@ TEST_F(NativeTextPayloadTest, LiveIdentityChangeAbandonsBuildWithoutReplacingPri
   spec.viewportHeight = 130;
   spec.embeddedStyle = false;
 
-  for (uint8_t version : {uint8_t{47}, uint8_t{0xeb}}) {
+  for (uint8_t version : {uint8_t{48}, uint8_t{0xea}}) {
     for (int stop = 0; stop < 3; ++stop) {
       SCOPED_TRACE(testing::Message() << "version=" << unsigned(version) << " stop=" << stop);
       ASSERT_EQ(engine.registerCustomFont(CUSTOM, 14, {&originalFont, 1}, false), TextStatus::Ok);

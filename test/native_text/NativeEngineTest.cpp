@@ -137,6 +137,108 @@ TEST_F(NativeTextEngineTest, InlineMarkStylesDoNotSplitTheirBaseOrLeadingVowelCe
   equalGeometry(regular, marked);
 }
 
+TEST_F(NativeTextEngineTest, TrackingMovesWholeThaiAndBidiClustersAcrossFacesAndLigatures) {
+  const std::string text = "เก่งกี่אבoffice";
+  auto line = input(text);
+  NativeGlyphRun plain, tracked, cached;
+  ASSERT_EQ(engine.shapeLine(line, plain), TextStatus::Ok);
+  ASSERT_GT(plain.clusters.size(), 1u);
+  for (const int8_t tracking : {int8_t{-2}, int8_t{2}}) {
+    line.characterSpacing = tracking;
+    ASSERT_EQ(engine.shapeLine(line, tracked), TextStatus::Ok);
+    ASSERT_EQ(tracked.clusters.size(), plain.clusters.size());
+    ASSERT_EQ(tracked.glyphs.size(), plain.glyphs.size());
+    EXPECT_EQ(tracked.advance26, plain.advance26 + static_cast<int32_t>(plain.clusters.size() - 1) * tracking * 64);
+    for (size_t i = 0; i < plain.clusters.size(); ++i) {
+      const auto& cluster = plain.clusters[i];
+      ASSERT_GT(cluster.advance26, 2 * 64);
+      EXPECT_EQ(tracked.clusters[i].startByte, cluster.startByte);
+      EXPECT_EQ(tracked.clusters[i].endByte, cluster.endByte);
+      EXPECT_EQ(tracked.clusters[i].x26, cluster.x26 + static_cast<int32_t>(i) * tracking * 64);
+      for (size_t g = 0; g < plain.glyphs.size(); ++g) {
+        if (plain.glyphs[g].startByte != cluster.startByte) continue;
+        EXPECT_EQ(tracked.glyphs[g].glyphId, plain.glyphs[g].glyphId);
+        EXPECT_EQ(tracked.glyphs[g].x26, plain.glyphs[g].x26 + static_cast<int32_t>(i) * tracking * 64);
+        EXPECT_EQ(tracked.glyphs[g].y26, plain.glyphs[g].y26);
+        EXPECT_EQ(tracked.glyphs[g].advanceX26, plain.glyphs[g].advanceX26);
+      }
+    }
+    ASSERT_EQ(engine.shapeLine(line, cached), TextStatus::Ok);
+    equalGeometry(tracked, cached);
+  }
+  line.characterSpacing = 0;
+  ASSERT_EQ(engine.shapeLine(line, cached), TextStatus::Ok);
+  equalGeometry(plain, cached);
+}
+
+TEST_F(NativeTextEngineTest, InvisibleClustersNeitherReceiveNorSwallowTracking) {
+  auto line = input(
+      "A\xc2\xad\xe2\x80\x8e"
+      "B");  // Soft hyphen and LRM are invisible.
+  NativeGlyphRun plain, tracked;
+  ASSERT_EQ(engine.shapeLine(line, plain), TextStatus::Ok);
+  for (const int8_t tracking : {int8_t{-2}, int8_t{2}}) {
+    line.characterSpacing = tracking;
+    ASSERT_EQ(engine.shapeLine(line, tracked), TextStatus::Ok);
+    EXPECT_EQ(tracked.advance26, plain.advance26 + tracking * 64);
+    ASSERT_EQ(tracked.glyphs.size(), plain.glyphs.size());
+    const auto& last = tracked.glyphs[tracked.glyphs.size() - 1];
+    EXPECT_EQ(last.x26, plain.glyphs[plain.glyphs.size() - 1].x26 + tracking * 64);
+  }
+  line = input("A\xc2\xad");
+  ASSERT_EQ(engine.shapeLine(line, plain), TextStatus::Ok);
+  line.characterSpacing = 2;
+  ASSERT_EQ(engine.shapeLine(line, tracked), TextStatus::Ok);
+  equalGeometry(plain, tracked);  // No tracking after the last visible cell.
+}
+
+TEST_F(NativeTextEngineTest, WordSpacingScalesRealSpacesWithoutTrackingTheirEdgesOrThaiWordBreaks) {
+  auto line = input(
+      "กี่กู้ A\xc2\xa0"
+      "B");
+  NativeGlyphRun plain, spaced, cached;
+  ASSERT_EQ(engine.shapeLine(line, plain), TextStatus::Ok);
+  ASSERT_EQ(plain.clusters.size(), 6u);
+  for (const uint8_t percent : {uint8_t{50}, uint8_t{200}}) {
+    line.wordSpacingPercent = percent;
+    line.characterSpacing = 2;
+    ASSERT_EQ(engine.shapeLine(line, spaced), TextStatus::Ok);
+    ASSERT_EQ(spaced.clusters.size(), plain.clusters.size());
+    int32_t shift = 0;
+    for (size_t i = 0; i < plain.clusters.size(); ++i) {
+      EXPECT_EQ(spaced.clusters[i].x26, plain.clusters[i].x26 + shift);
+      if (i == 0) shift += 2 * 64;  // Only the two adjacent Thai cells receive tracking.
+      if (i == 2 || i == 4) {
+        const int32_t scaled = (plain.clusters[i].advance26 * percent + 50) / 100;
+        EXPECT_EQ(spaced.clusters[i].advance26, scaled);
+        shift += scaled - plain.clusters[i].advance26;
+      }
+    }
+    EXPECT_EQ(spaced.advance26, plain.advance26 + shift);
+    ASSERT_EQ(engine.shapeLine(line, cached), TextStatus::Ok);
+    equalGeometry(spaced, cached);
+  }
+  line = input("ภาษาไทยประเทศไทย");
+  ASSERT_EQ(engine.shapeLine(line, plain), TextStatus::Ok);
+  line.wordSpacingPercent = 200;
+  ASSERT_EQ(engine.shapeLine(line, spaced), TextStatus::Ok);
+  equalGeometry(plain, spaced);
+}
+
+TEST_F(NativeTextEngineTest, TrackingIncludesSyntheticHyphenButNeverATrailingGap) {
+  auto line = input("AB");
+  line.syntheticSuffixCp = '-';
+  NativeGlyphRun plain, tracked;
+  ASSERT_EQ(engine.shapeLine(line, plain), TextStatus::Ok);
+  line.characterSpacing = 2;
+  ASSERT_EQ(engine.shapeLine(line, tracked), TextStatus::Ok);
+  EXPECT_EQ(tracked.advance26, plain.advance26 + 4 * 64);
+  const auto& suffix = tracked.clusters[tracked.clusters.size() - 1];
+  EXPECT_EQ(suffix.startByte, 2u);
+  EXPECT_EQ(suffix.endByte, 2u);
+  EXPECT_EQ(suffix.x26, plain.clusters[plain.clusters.size() - 1].x26 + 4 * 64);
+}
+
 TEST_F(NativeTextEngineTest, OriginalNfdByteCoordinatesSurviveShapingAndFallback) {
   const std::string text = "e\xcc\x81กี่";
   NativeGlyphRun run;
@@ -217,6 +319,18 @@ TEST_F(NativeTextEngineTest, GapsAreAppliedOnceAndPartOfTheRunCacheKey) {
   EXPECT_EQ(expanded.glyphs[0].x26, plain.glyphs[0].x26);
   EXPECT_EQ(expanded.glyphs[2].x26, plain.glyphs[2].x26 + 5 * 64);
   equalGeometry(expanded, cached);
+}
+
+TEST_F(NativeTextEngineTest, NegativeTrackingDoesNotPermitNegativeJustificationGaps) {
+  auto line = input("AB");
+  line.characterSpacing = -2;
+  NativeGlyphRun run;
+  ASSERT_EQ(engine.shapeLine(line, run), TextStatus::Ok);
+  const NativeGap gap{1, -64};
+  line.gaps = {&gap, 1};
+  EXPECT_EQ(engine.shapeLine(line, run), TextStatus::InvalidText);
+  EXPECT_TRUE(run.glyphs.empty());
+  EXPECT_EQ(run.advance26, 0);
 }
 
 TEST_F(NativeTextEngineTest, SyntheticStylesMatchRasterBoundsAndLeaveMarkAdvancesZero) {

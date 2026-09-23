@@ -41,6 +41,8 @@ struct NativeLayoutOptions {
   bool readerFeatures = true;  // False fits UI strings only; persisted NativeLineData uses reader pnum.
   bool firstLine = true;
   bool emergencyHyphenation = false;  // EPUB oversized-word policy; never enabled for UI/TXT.
+  int8_t characterSpacing = 0;
+  uint8_t wordSpacingPercent = 100;
 };
 struct NativeLinkBox {
   uint32_t id = 0;

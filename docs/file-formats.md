@@ -91,25 +91,30 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 47
+### Version 48
 
-Version 47 adds a `u8 representation` before every TextBlock (`0 = legacy`,
-`1 = native`) and a little-endian `u64 textLayoutFingerprint` immediately after
-the Section header's Focus Reading flag. The header is now **49 bytes**.
-Finalized sections use version 47; suspended partial sections use
-`0xFE - (47 - 28) = 0xEB`, with the same header and Page representation.
+Version 48 combines the two version-47 layouts: a `u8 representation` before
+every TextBlock (`0 = legacy`, `1 = native`), a little-endian
+`u64 textLayoutFingerprint` after the Section header's Focus Reading flag,
+then `s8 characterSpacing` and `u8 wordSpacingPercent`. The header is **51 bytes**.
+Finalized sections use version 48; suspended partial sections use
+`0xFE - (48 - 28) = 0xEA`, with the same header and Page representation.
 Version 0 remains an incomplete, unreadable build. All trailing header offsets
 and page-count seeks are relative to the revised header size.
+Both version-47 formats and all older complete/partial caches are rejected.
+The fingerprint starts at byte 19, spacing at bytes 27 and 28, pageCount at
+byte 29, and the five `u32` offsets at bytes 31, 35, 39, 43 and 47.
 
 The fingerprint is zero for the legacy backend. Native fingerprints use stable
 FNV-1a-64 over canonical engine/resource identity: `native-text-v1`, pinned
 FreeType/HarfBuzz and dictionary revisions/digests, selected font-source content,
 all fallback faces, variation/synthetic-style configuration, DPI/load/metric
-policy, segmentation revision, and native record policy (`record=overflow-clip-v2`).
+policy, segmentation revision, and native record policy (`record=overflow-clip-spacing-v3`;
+`tracking=visual-clusters`; `word-spacing=unicode-space-advance`).
 It is calculated from resource identities
 at load/change, not by rereading fonts for every page. Both finalized and partial
-loads compare it before exposing pages. A mismatch removes only the section
-layout cache; EPUBs, book metadata, progress and bookmarks remain unchanged.
+loads compare it before exposing pages. A mismatch retains the prior cache until
+a replacement is committed; EPUBs, book metadata, progress and bookmarks are unchanged.
 
 Native TextBlocks store the original logical UTF-8, not glyph IDs or visual-order
 strings. There are no inserted Thai dictionary spaces. A deserialized line is
@@ -124,12 +129,14 @@ record, immediately after representation 1, is:
 | alignmentX26 | `s32`, horizontal alignment in signed 26.6 pixels |
 | syntheticSuffixCp | `u32`, 0 or U+002D; no source span |
 | overflowClipWidth | `u16`, 0 for normal lines, otherwise content-box width in pixels (1–32767) |
+| characterSpacing | `s8`, cluster-safe tracking in pixels, -2 through 2 |
+| wordSpacingPercent | `u8`, real-space advance percentage, 50 through 200 |
 | logical text | exactly textBytes UTF-8 bytes, no terminator |
 | style/bidi spans | spanCount × (`u16 startByte,endByte`, `u8 style,bidiLevel`) |
 | selectable words | wordCount × (`u16 startByte,endByte`, `s32 x26,width26`, `s16 top,height`) |
 | expanded real-space/CJK gaps | gapCount × (`u16 byteOffset`, `s32 extraAdvance26`) |
 | ruby annotations | rubyCount × (`u16 baseStartByte,baseEndByte,textBytes`, `s32 x26,y26`, `u8 style`, textBytes UTF-8 bytes) |
-| BlockStyle | unchanged field order shown below |
+| BlockStyle | 24 bytes in the field order shown below, including characterSpacing |
 
 Ranges are half-open byte ranges in the original logical text. Words are in
 logical source order; their x positions are final visual positions relative to
@@ -147,20 +154,22 @@ overflowClipWidth. Painting intersects the caller's clip with
 afterward, including on failure. Words and links are clipped to that same box
 after alignment; source bytes and shaped advances are unchanged. Ordinary lines
 retain italic overhang and negative first-line indentation. The fixed native
-header is 27 bytes after the representation byte, including this two-byte field.
-Version 47 remains the first native format; the updated fingerprint rejects
-earlier unreleased native records.
+header is 29 bytes after the representation byte, including overflow width and
+both spacing fields. Native rendering reapplies spacing while reshaping the
+logical text; gaps remain nonnegative justification deltas, never tracking.
 
 Decoding caps logical text at 16 KiB / 4096 Unicode scalars, each metadata count
 at 4096, and combined ruby text at 16 KiB. It checks UTF-8 boundaries, nonoverlapping
-source-ordered spans/words/ruby, valid bidi levels, nonnegative dimensions, bounded
-coordinate sums, overflow width/word containment and ruby lengths before
+source-ordered spans/words/ruby, valid bidi levels, supported spacing ranges,
+nonnegative dimensions, bounded coordinate sums, overflow width/word containment and ruby lengths before
 allocating the metadata arrays. Native buffers and Pro TextBlock control objects
 count against the shared 4 MiB engine budget. Truncated or malformed
 records return an invalid page, never partially initialized geometry. Page
 element counts are capped at 1024; footnotes at 16 and links at 32. Legacy arena
 bytes are unchanged after the representation 0 prefix, with checked lengths,
-offsets, strings and scalar reads.
+offsets, strings and scalar reads. Both representations append `characterSpacing`
+after BlockStyle's `directionDefined`; for legacy blocks word spacing is already
+resolved into cached word positions, while native lines persist both values.
 
 ### Version 46
 
@@ -255,7 +264,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 47
+#define EXPECTED_VERSION 48
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -312,6 +321,7 @@ struct BlockStyle {
     bool textIndentDefined;
     bool isRtl;
     bool directionDefined;
+    s8 characterSpacing;
 };
 
 struct LegacyTextData {
@@ -379,6 +389,8 @@ struct NativeTextData {
     s32 alignmentX26;
     u32 syntheticSuffixCp;
     u16 overflowClipWidth;
+    s8 characterSpacing;
+    u8 wordSpacingPercent;
     char text[textBytes];
     NativeStyleSpan spans[spanCount];
     NativeWord words[wordCount];
@@ -477,7 +489,7 @@ struct ParagraphLut {
 
 struct SectionBin {
     u8 version;
-    if (version != EXPECTED_VERSION && version != 0xEB) {
+    if (version != EXPECTED_VERSION && version != 0xEA) {
         std::error(std::format("Unsupported version: {}", version));
     }
 
@@ -492,6 +504,8 @@ struct SectionBin {
     u8 imageRendering;
     bool focusReadingEnabled;
     u64 textLayoutFingerprint;
+    s8 characterSpacing;
+    u8 wordSpacingPercent;
 
     u16 pageCount;
     u32 pageLutOffset;
@@ -546,7 +560,7 @@ This directory is separate from the root legacy TXT `index.bin` (version 3)
 and four-byte `progress.bin`; native firmware neither overwrites nor deletes
 those legacy files. Other devices continue using the legacy formats.
 
-### `native/index.bin` — version 1
+### `native/index.bin` — version 2
 
 Fields are serialized explicitly in little-endian order, with no struct
 padding. The file contains a **42-byte header**, serialized `Page` bodies,
@@ -555,7 +569,7 @@ then `pageCount` **16-byte lookup records** at `lutOffset`.
 | Header offset | Field | Encoding |
 |---|---|---|
 | 0 | magic | `u32`, `0x4E545854` (bytes `TXTN`) |
-| 4 | version | `u8`, 1 complete; 0 incomplete and unreadable |
+| 4 | version | `u8`, 2 complete; 0 incomplete and unreadable |
 | 5 | sourceSize | `u32`, original file size in bytes |
 | 9 | sourceHash | `u64`, FNV-1a-64 of every original file byte |
 | 17 | textLayoutFingerprint | `u64`, native engine/resource and TXT adapter/serializer identity |
@@ -590,6 +604,8 @@ including resolved bidi context across pages. Loading a backward or skipped
 page therefore does not restart dictionary segmentation at an arbitrary
 source byte. Font handles, FT/HB pointers and process-local glyph IDs are
 never persisted.
+Version 2 uses the spacing-aware native TextBlock and 24-byte BlockStyle from
+section version 48. Version-1 indexes are rebuilt, preserving native progress.
 
 Opening validates source size **and content hash**, font/fallback/resource
 fingerprint, viewport and alignment. A same-length edit invalidates cached
@@ -598,7 +614,7 @@ as the shared native engine policy. Oriented safe margins, user margins and
 status-bar reservation determine the stored content viewport. Changed layout
 settings reflow the book without changing its source-byte progress.
 
-Readers reject truncated headers, version 0, overflow/out-of-file ranges,
+Readers reject truncated headers, versions other than 2, overflow/out-of-file ranges,
 nonmonotone or overlapping page/source ranges, and malformed or incorrectly
 bounded `Page` bodies. Cache corruption is rebuildable; source read errors,
 malformed UTF-8, native allocation failure and text-rendering failure are
@@ -606,7 +622,7 @@ reader errors, not an empty book.
 
 Indexing holds one pending layout window and one page. It writes Page bodies
 to `index.bin.tmp` and lookup records to `index.lut.tmp`, streams the lookup
-file into the completed index, patches counts/offsets, and writes version 1
+file into the completed index, patches counts/offsets, and writes version 2
 last. Handles close before publication by rename or temporary-file cleanup.
 An interrupted or failed build must not expose a partial page count as a
 completed book, or replace usable progress with a failed position. The source

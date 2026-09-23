@@ -59,6 +59,7 @@ class ParsedText {
   std::deque<std::string> rubyTexts;
 #endif
   BlockStyle blockStyle;
+  uint8_t wordSpacingPercent = 100;
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool focusReadingEnabled;
@@ -167,7 +168,8 @@ class ParsedText {
   size_t nativePendingScalars() const { return nativeScalars; }
   TextStatus lastTextStatus() const { return nativeStatus; }
   bool layoutBeforeRuby(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
-                        const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine);
+                        const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
+                        int8_t characterSpacing = 0, uint8_t wordSpacingPercent = 100);
 #else
   void setRubyForWordAt(size_t index, const std::string& ruby);
   void setRubyGroupAt(size_t startIndex, size_t count, const std::string& ruby);
@@ -189,5 +191,6 @@ class ParsedText {
   // On false, discard this consumed input and any partial output; do not retry it.
   bool layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
-                             bool includeLastLine = true);
+                             bool includeLastLine = true, int8_t characterSpacing = 0,
+                             uint8_t wordSpacingPercent = 100);
 };

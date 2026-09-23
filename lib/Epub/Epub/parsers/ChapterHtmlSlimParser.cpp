@@ -362,8 +362,10 @@ void ChapterHtmlSlimParser::collectNativeTableLines(const bool includeLastLine, 
     nativeStackedTableLines[count] = line.release();
   };
   const bool success =
-      beforeRuby ? currentTextBlock->layoutBeforeRuby(renderer, fontId, width, collectLine)
-                 : currentTextBlock->layoutAndExtractLines(renderer, fontId, width, collectLine, includeLastLine);
+      beforeRuby ? currentTextBlock->layoutBeforeRuby(renderer, fontId, width, collectLine, characterSpacing,
+                                                      wordSpacingPercent)
+                 : currentTextBlock->layoutAndExtractLines(renderer, fontId, width, collectLine, includeLastLine,
+                                                           characterSpacing, wordSpacingPercent);
   if (!success) {
     checkNativeTextStatus(currentTextBlock.get());
     failLayout();
@@ -390,8 +392,10 @@ void ChapterHtmlSlimParser::flushNativeWindow(const bool beforeRuby) {
   const auto addLine = [this](std::unique_ptr<TextBlock> line, uint32_t offset) {
     addLineToPage(std::move(line), offset);
   };
-  const bool success = beforeRuby ? currentTextBlock->layoutBeforeRuby(renderer, fontId, width, addLine)
-                                  : currentTextBlock->layoutAndExtractLines(renderer, fontId, width, addLine, false);
+  const bool success = beforeRuby ? currentTextBlock->layoutBeforeRuby(renderer, fontId, width, addLine,
+                                                                       characterSpacing, wordSpacingPercent)
+                                  : currentTextBlock->layoutAndExtractLines(renderer, fontId, width, addLine, false,
+                                                                            characterSpacing, wordSpacingPercent);
   if (!success) {
     checkNativeTextStatus(currentTextBlock.get());
     failLayout();
@@ -769,7 +773,8 @@ void ChapterHtmlSlimParser::finishTableRow() {
       lines.reserve(MAX_GRID_TABLE_CELL_WORDS * 2);
     }
     if (!tableRowCells[column]->layoutAndExtractLines(
-            renderer, fontId, textWidth, [this, &lines](std::unique_ptr<TextBlock> line, const uint32_t offset) {
+            renderer, fontId, textWidth,
+            [this, &lines](std::unique_ptr<TextBlock> line, const uint32_t offset) {
               if (layoutFailed) return;
               if (lines.size() == lines.capacity()) lines.reserve(lines.size() + 64);
               const size_t lineIndex = lines.size();
@@ -778,7 +783,8 @@ void ChapterHtmlSlimParser::finishTableRow() {
                 tableLineVisibleOffsets.resize(lineIndex + 1, UINT32_MAX);
               }
               tableLineVisibleOffsets[lineIndex] = std::min(tableLineVisibleOffsets[lineIndex], offset);
-            })) {
+            },
+            true, characterSpacing, wordSpacingPercent)) {
 #ifdef CROSSPOINT_NATIVE_TEXT
       checkNativeTextStatus(tableRowCells[column].get());
 #endif
@@ -2091,7 +2097,7 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
             [self](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
               self->addLineToPage(std::move(textBlock), offset);
             },
-            false)) {
+            false, self->characterSpacing, self->wordSpacingPercent)) {
       self->failLayout();
     }
   }
@@ -2739,10 +2745,12 @@ void ChapterHtmlSlimParser::makePages() {
   const uint16_t effectiveWidth =
       (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
 
-  if (!currentTextBlock->layoutAndExtractLines(renderer, fontId, effectiveWidth,
-                                               [this](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
-                                                 addLineToPage(std::move(textBlock), offset);
-                                               })) {
+  if (!currentTextBlock->layoutAndExtractLines(
+          renderer, fontId, effectiveWidth,
+          [this](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
+            addLineToPage(std::move(textBlock), offset);
+          },
+          true, characterSpacing, wordSpacingPercent)) {
     failLayout();
   }
   if (layoutFailed) return;

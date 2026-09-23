@@ -15,6 +15,7 @@
 
 namespace {
 constexpr uint32_t INDEX_MAGIC = 0x4e545854;
+constexpr uint8_t INDEX_VERSION = 2;
 constexpr uint32_t PROGRESS_MAGIC = 0x52505854;
 constexpr uint32_t LEGACY_MAGIC = 0x54585449;
 constexpr uint32_t HEADER_BYTES = 42, RECORD_BYTES = 16, PROGRESS_BYTES = 21, LEGACY_HEADER_BYTES = 30;
@@ -42,7 +43,7 @@ TextStatus readExact(HalFile& file, void* output, size_t bytes) {
 }
 uint64_t layoutIdentity(GfxRenderer& renderer, int font) {
   // Change this revision whenever TXT byte consumption or its Page codec changes.
-  constexpr char revision[] = "native-txt-v1/page-v1";
+  constexpr char revision[] = "native-txt-v1/page-v2";
   uint64_t hash = FNV_OFFSET;
   for (size_t i = 0; i < sizeof(revision) - 1; ++i) hash = (hash ^ uint8_t(revision[i])) * FNV_PRIME;
   const uint64_t engine = renderer.textLayoutFingerprint(font);
@@ -143,7 +144,7 @@ NativeTxtCache::Result NativeTxtCache::readHeaderAndLut(HalFile& file) {
   uint8_t header[HEADER_BYTES];
   const auto status = readExact(file, header, sizeof(header));
   if (status != TextStatus::Ok) return failure(status);
-  if (get(header, 4) != INDEX_MAGIC || header[4] != 1) return failure(TextStatus::InvalidText);
+  if (get(header, 4) != INDEX_MAGIC || header[4] != INDEX_VERSION) return failure(TextStatus::InvalidText);
   if (get(header + 5, 4) != sourceSize_ || get(header + 17, 8) != fingerprint_ ||
       static_cast<int32_t>(get(header + 25, 4)) != fontId_ || get(header + 29, 2) != width_ ||
       get(header + 31, 2) != height_ || header[33] != alignment_)
@@ -335,7 +336,7 @@ bool NativeTxtCache::build(GfxRenderer& renderer) {
     nativeTextYield();
   }
   if (!matches(renderer, width_, height_, alignment_)) return abort(TextStatus::InvalidFont);
-  const uint8_t complete = 1;
+  const uint8_t complete = INDEX_VERSION;
   if (!file.seek(4) || file.write(&complete, 1) != 1) return abort(TextStatus::StorageError);
   file.flush();
   if (!file.close()) return abort(TextStatus::StorageError);

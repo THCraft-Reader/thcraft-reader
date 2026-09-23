@@ -34,12 +34,14 @@ bool readFlag(serialization::BoundedFileReader& file, bool& flag) {
   return true;
 }
 bool writeStyle(HalFile& file, const BlockStyle& s) {
-  return writeField(file, s.alignment) && writeField(file, static_cast<uint8_t>(s.textAlignDefined)) &&
-         writeField(file, s.marginTop) && writeField(file, s.marginBottom) && writeField(file, s.marginLeft) &&
-         writeField(file, s.marginRight) && writeField(file, s.paddingTop) && writeField(file, s.paddingBottom) &&
-         writeField(file, s.paddingLeft) && writeField(file, s.paddingRight) && writeField(file, s.textIndent) &&
+  return s.characterSpacing >= -2 && s.characterSpacing <= 2 && writeField(file, s.alignment) &&
+         writeField(file, static_cast<uint8_t>(s.textAlignDefined)) && writeField(file, s.marginTop) &&
+         writeField(file, s.marginBottom) && writeField(file, s.marginLeft) && writeField(file, s.marginRight) &&
+         writeField(file, s.paddingTop) && writeField(file, s.paddingBottom) && writeField(file, s.paddingLeft) &&
+         writeField(file, s.paddingRight) && writeField(file, s.textIndent) &&
          writeField(file, static_cast<uint8_t>(s.textIndentDefined)) &&
-         writeField(file, static_cast<uint8_t>(s.isRtl)) && writeField(file, static_cast<uint8_t>(s.directionDefined));
+         writeField(file, static_cast<uint8_t>(s.isRtl)) &&
+         writeField(file, static_cast<uint8_t>(s.directionDefined)) && writeField(file, s.characterSpacing);
 }
 bool readStyle(serialization::BoundedFileReader& file, BlockStyle& s) {
   uint8_t alignment = 0;
@@ -49,7 +51,8 @@ bool readStyle(serialization::BoundedFileReader& file, BlockStyle& s) {
          readField(file, s.marginLeft) && readField(file, s.marginRight) && readField(file, s.paddingTop) &&
          readField(file, s.paddingBottom) && readField(file, s.paddingLeft) && readField(file, s.paddingRight) &&
          readField(file, s.textIndent) && readFlag(file, s.textIndentDefined) && readFlag(file, s.isRtl) &&
-         readFlag(file, s.directionDefined);
+         readFlag(file, s.directionDefined) && readField(file, s.characterSpacing) && s.characterSpacing >= -2 &&
+         s.characterSpacing <= 2;
 }
 
 #ifdef CROSSPOINT_NATIVE_TEXT
@@ -82,7 +85,8 @@ bool validNativeHeader(const NativeLineData& line) {
          line.paragraphLevel >= 0 && line.paragraphLevel <= 1 && line.lineHeight >= 0 && line.baseline >= 0 &&
          line.baseline <= line.lineHeight && line.rubyLift >= 0 && line.rubyLift <= line.lineHeight &&
          validPosition(line.alignmentX26) && (line.syntheticSuffixCp == 0 || line.syntheticSuffixCp == 0x2d) &&
-         line.overflowClipWidth <= INT16_MAX;
+         line.overflowClipWidth <= INT16_MAX && line.characterSpacing >= -2 && line.characterSpacing <= 2 &&
+         line.wordSpacingPercent >= 50 && line.wordSpacingPercent <= 200;
 }
 bool validateNative(const NativeLineData& line) {
   if (!validNativeHeader(line) || !validUtf8(line.logicalText())) return false;
@@ -150,7 +154,8 @@ bool writeNative(HalFile& file, const NativeLineData& line) {
       !writeField(file, static_cast<uint16_t>(line.ruby.size())) || !writeField(file, line.paragraphLevel) ||
       !writeField(file, line.lineHeight) || !writeField(file, line.baseline) || !writeField(file, line.rubyLift) ||
       !writeField(file, line.alignmentX26) || !writeField(file, line.syntheticSuffixCp) ||
-      !writeField(file, line.overflowClipWidth) ||
+      !writeField(file, line.overflowClipWidth) || !writeField(file, line.characterSpacing) ||
+      !writeField(file, line.wordSpacingPercent) ||
       (!line.text.empty() && file.write(line.text.data(), line.text.size()) != line.text.size()))
     return false;
   for (const auto& span : line.spans.span()) {
@@ -205,12 +210,13 @@ bool readNative(serialization::BoundedFileReader& file, NativeLineData& line, Bl
       !readField(file, gapCount) || !readField(file, rubyCount) || !readField(file, line.paragraphLevel) ||
       !readField(file, line.lineHeight) || !readField(file, line.baseline) || !readField(file, line.rubyLift) ||
       !readField(file, line.alignmentX26) || !readField(file, line.syntheticSuffixCp) ||
-      !readField(file, line.overflowClipWidth) || textBytes > MAX_NATIVE_TEXT_BYTES || spanCount > MAX_NATIVE_SCALARS ||
-      wordCount > MAX_NATIVE_SCALARS || gapCount > MAX_NATIVE_SCALARS || rubyCount > MAX_NATIVE_SCALARS ||
-      !validNativeHeader(line))
+      !readField(file, line.overflowClipWidth) || !readField(file, line.characterSpacing) ||
+      !readField(file, line.wordSpacingPercent) || textBytes > MAX_NATIVE_TEXT_BYTES ||
+      spanCount > MAX_NATIVE_SCALARS || wordCount > MAX_NATIVE_SCALARS || gapCount > MAX_NATIVE_SCALARS ||
+      rubyCount > MAX_NATIVE_SCALARS || !validNativeHeader(line))
     return false;
   const size_t minimumBytes =
-      textBytes + size_t(spanCount) * 6 + size_t(wordCount) * 16 + size_t(gapCount) * 6 + size_t(rubyCount) * 15 + 23;
+      textBytes + size_t(spanCount) * 6 + size_t(wordCount) * 16 + size_t(gapCount) * 6 + size_t(rubyCount) * 15 + 24;
   if (!availableBytes(file, minimumBytes)) return false;
   if (!line.text.resize(textBytes)) {
     file.outOfMemory();
@@ -565,6 +571,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     return;
   }
 #endif
+  const int8_t tracking = blockStyle.characterSpacing;
 
   const bool scanning = renderer.isFontCacheScanning();
   const int ascender = renderer.getFontAscenderSize(fontId);
@@ -588,9 +595,9 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
         }
         int groupActualWidth = 0;
         for (int k = 0; k < groupWordCount; ++k) {
-          groupActualWidth += renderer.getTextAdvanceX(fontId, wordText(i + k), wordStyle(i + k));
+          groupActualWidth += renderer.getTextAdvanceX(fontId, wordText(i + k), wordStyle(i + k), tracking);
         }
-        const int rubyWidth = renderer.getTextAdvanceX(fontId, rubyTexts[i].c_str(), EpdFontFamily::SUP);
+        const int rubyWidth = renderer.getTextAdvanceX(fontId, rubyTexts[i].c_str(), EpdFontFamily::SUP, tracking);
         const int leaderWordX = xposArr[i] + x;
         const auto baseDir =
             static_cast<BidiUtils::BidiBaseDir>(BidiUtils::detectParagraphLevel(wordText(i), blockStyle.isRtl ? 1 : 0));
@@ -671,19 +678,19 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
           std::min<size_t>({static_cast<size_t>(boundary), static_cast<size_t>(wordTextLen(i)), sizeof(boldBuf) - 1});
       memcpy(boldBuf, word, boldLen);
       boldBuf[boldLen] = '\0';
-      renderer.drawText(fontId, drawX, wordY, boldBuf, true, boldStyle, baseDir);
+      renderer.drawText(fontId, drawX, wordY, boldBuf, true, boldStyle, baseDir, tracking);
       const int suffixX = drawX + focusSuffixXArr[i];
-      renderer.drawText(fontId, suffixX, wordY, word + boldLen, true, currentStyle, baseDir);
+      renderer.drawText(fontId, suffixX, wordY, word + boldLen, true, currentStyle, baseDir, tracking);
     } else {
-      renderer.drawText(fontId, drawX, wordY, word, true, currentStyle, baseDir);
+      renderer.drawText(fontId, drawX, wordY, word, true, currentStyle, baseDir, tracking);
     }
 
     // Horizontal ruby text rendering
     if (blockHasRuby && i < rubyTexts.size() && !rubyTexts[i].empty() &&
         (wordStyle(i) & EpdFontFamily::RUBY_CONTINUE) == 0) {
       const int rubyY = wordY - ascender;
-      renderer.drawText(fontId, rubies[i].x, rubyY, rubies[i].text.c_str(), true, EpdFontFamily::SUP,
-                        rubies[i].baseDir);
+      renderer.drawText(fontId, rubies[i].x, rubyY, rubies[i].text.c_str(), true, EpdFontFamily::SUP, rubies[i].baseDir,
+                        tracking);
     }
 
     if (scanning) {
@@ -692,21 +699,17 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
 
     if (EpdFontFamily::hasTextDecoration(currentStyle)) {
       int lineStartX = drawX;
-      int lineWidth = renderer.getTextWidth(fontId, word, currentStyle, baseDir);
-
-      if ((currentStyle & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
-        lineWidth = (lineWidth + 1) / 2;
-      }
+      int lineWidth = renderer.getTextAdvanceX(fontId, word, currentStyle, tracking, baseDir,
+                                               GfxRenderer::TextMeasureMode::Rendered);
 
       // Do not decorate the synthetic em-space used for paragraph indentation.
       if (wordTextLen(i) >= 3 && static_cast<uint8_t>(word[0]) == 0xE2 && static_cast<uint8_t>(word[1]) == 0x80 &&
           static_cast<uint8_t>(word[2]) == 0x83) {
         const char* visibleText = word + 3;
-        lineStartX += renderer.getTextAdvanceX(fontId, "\xe2\x80\x83", currentStyle);
-        lineWidth = renderer.getTextWidth(fontId, visibleText, currentStyle, baseDir);
-        if ((currentStyle & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
-          lineWidth = (lineWidth + 1) / 2;
-        }
+        lineStartX += renderer.getTextAdvanceX(fontId, "\xe2\x80\x83", currentStyle, tracking, baseDir,
+                                               GfxRenderer::TextMeasureMode::Rendered);
+        lineWidth = renderer.getTextAdvanceX(fontId, visibleText, currentStyle, tracking, baseDir,
+                                             GfxRenderer::TextMeasureMode::Rendered);
       }
 
       for (auto& line : decorationLines) {
@@ -780,7 +783,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(serialization::BoundedFileRead
   block->textBytes = bytes;
   block->focusPresent = hasFocus != 0;
   const size_t size = arenaSize(wc, block->focusPresent, bytes);
-  if (!availableBytes(file, size + size_t(wc) * sizeof(uint32_t) + 23)) return nullptr;
+  if (!availableBytes(file, size + size_t(wc) * sizeof(uint32_t) + 24)) return nullptr;
   if (wc > 0) {
     block->arena = makeUniqueNoThrow<uint8_t[]>(size);
     if (!block->arena) {

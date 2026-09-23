@@ -141,6 +141,20 @@ bool attaches(uint32_t previous, uint32_t cp, size_t regionalCount) {
          (cp == 0x0e33 && native_text::isThai(previous)) ||
          (previous >= 0x1f1e6 && previous <= 0x1f1ff && cp >= 0x1f1e6 && cp <= 0x1f1ff && regionalCount % 2);
 }
+enum class ClusterSpacing { None, Text, Space };
+ClusterSpacing clusterSpacing(std::string_view text, size_t start) {
+  uint32_t cp = 0;
+  if (!native_text::nextUtf8(text, start, cp)) return ClusterSpacing::None;
+  const auto category = hb_unicode_general_category(hb_unicode_funcs_get_default(), cp);
+  if (category == HB_UNICODE_GENERAL_CATEGORY_SPACE_SEPARATOR) return ClusterSpacing::Space;
+  if (category == HB_UNICODE_GENERAL_CATEGORY_CONTROL || category == HB_UNICODE_GENERAL_CATEGORY_FORMAT ||
+      category == HB_UNICODE_GENERAL_CATEGORY_LINE_SEPARATOR ||
+      category == HB_UNICODE_GENERAL_CATEGORY_PARAGRAPH_SEPARATOR ||
+      category == HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK ||
+      category == HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK || category == HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK)
+    return ClusterSpacing::None;
+  return ClusterSpacing::Text;
+}
 bool l1Whitespace(uint32_t cp) {
   const auto type = bidi_class(cp);
   return type == WS || type == BN || type == LRE || type == RLE || type == LRO || type == RLO || type == PDF ||
@@ -453,7 +467,8 @@ struct NativeTextEngine::Impl {
                : TextStatus::CapacityExceeded;
   }
   TextStatus emitFragment(const NativeLineInput& input, std::string_view text, Scalar* scalars, Unit* units,
-                          const Fragment& fragment, bool* gapsUsed, NativeGlyphRun& output, bool& hasInk) {
+                          const Fragment& fragment, bool* gapsUsed, NativeGlyphRun& output, bool& hasInk,
+                          size_t& previousTextCluster, size_t& previousGlyphEnd) {
     Unit& unit = units[fragment.first];
     FaceLease face(registry);
     auto status = registry.acquire(unit.face, face.handle);
@@ -491,6 +506,25 @@ struct NativeTextEngine::Impl {
       const uint32_t start = infos[firstGlyph].cluster;
       const uint32_t end = rtl ? (firstGlyph ? infos[firstGlyph - 1].cluster : fragmentEnd)
                                : (lastGlyph < count ? infos[lastGlyph].cluster : fragmentEnd);
+      const auto spacing = input.characterSpacing || input.wordSpacingPercent != 100 ? clusterSpacing(text, start)
+                                                                                     : ClusterSpacing::None;
+      if (input.characterSpacing && previousTextCluster != SIZE_MAX && spacing == ClusterSpacing::Text) {
+        // Insert tracking only at complete visual shaping-cluster boundaries,
+        // including face/style/bidi transitions. Never move a Thai mark on its own.
+        auto& previous = output.clusters[previousTextCluster];
+        const int32_t tracking = std::max<int32_t>(input.characterSpacing * 64, -previous.advance26);
+        if (!checkedPosition(static_cast<int64_t>(previous.advance26) + tracking, previous.advance26))
+          return TextStatus::CapacityExceeded;
+        // Invisible zero-advance clusters (soft hyphens and bidi controls)
+        // neither receive tracking nor swallow the gap between visible cells.
+        for (size_t i = previousTextCluster + 1; i < output.clusters.size(); ++i)
+          if (!checkedPosition(static_cast<int64_t>(output.clusters[i].x26) + tracking, output.clusters[i].x26))
+            return TextStatus::CapacityExceeded;
+        for (size_t i = previousGlyphEnd; i < glyphBase + firstGlyph; ++i)
+          if (!checkedPosition(static_cast<int64_t>(output.glyphs[i].x26) + tracking, output.glyphs[i].x26))
+            return TextStatus::CapacityExceeded;
+        pen += tracking;
+      }
       NativeCluster cluster{};
       cluster.startByte = std::min<uint32_t>(start, input.text.size());
       cluster.endByte = std::min<uint32_t>(end, input.text.size());
@@ -556,6 +590,10 @@ struct NativeTextEngine::Impl {
         }
         pen += glyph.advanceX26;
       }
+      // Word spacing scales the shaped advance of a real space, not a
+      // dictionary word boundary or a justification/ruby gap.
+      if (spacing == ClusterSpacing::Space && input.wordSpacingPercent != 100)
+        pen = clusterPen + ((pen - clusterPen) * input.wordSpacingPercent + 50) / 100;
       if (cluster.startByte != cluster.endByte) {
         const auto gap =
             std::lower_bound(input.gaps.begin(), input.gaps.end(), cluster.endByte,
@@ -570,6 +608,12 @@ struct NativeTextEngine::Impl {
       const size_t clusterIndex = output.clusters.size();
       if (!output.clusters.resize(clusterIndex + 1)) return TextStatus::OutOfMemory;
       output.clusters[clusterIndex] = cluster;
+      if (spacing == ClusterSpacing::Text) {
+        previousTextCluster = clusterIndex;
+        previousGlyphEnd = glyphBase + lastGlyph;
+      } else if (spacing == ClusterSpacing::Space || cluster.advance26 || clusterInk) {
+        previousTextCluster = SIZE_MAX;
+      }
       firstGlyph = lastGlyph;
     }
     if (!checkedPosition(pen, output.advance26)) return TextStatus::CapacityExceeded;
@@ -605,7 +649,8 @@ struct NativeTextEngine::Impl {
     }
     previousEnd = 0;
     for (const auto& gap : input.gaps) {
-      if (gap.byteOffset <= previousEnd || !native_text::utf8Boundary(input.text, gap.byteOffset))
+      if (gap.extraAdvance26 < 0 || gap.byteOffset <= previousEnd ||
+          !native_text::utf8Boundary(input.text, gap.byteOffset))
         return TextStatus::InvalidText;
       previousEnd = gap.byteOffset;
     }
@@ -628,6 +673,8 @@ struct NativeTextEngine::Impl {
     writer.integer(input.syntheticSuffixCp, 4);
     writer.integer(input.readerFeatures, 1);
     writer.integer(input.resolvedLevels, 1);
+    writer.integer(static_cast<uint8_t>(input.characterSpacing), 1);
+    writer.integer(input.wordSpacingPercent, 1);
     writer.integer(input.text.size(), 4);
     writer.bytes(input.text.data(), input.text.size());
     writer.integer(input.spans.size(), 4);
@@ -788,8 +835,10 @@ struct NativeTextEngine::Impl {
       }
     }
     bool hasInk = false;
+    size_t previousTextCluster = SIZE_MAX, previousGlyphEnd = 0;
     for (uint16_t i = 0; i < fragmentCount; ++i) {
-      const auto status = emitFragment(input, text, scalars, units, fragments[i], gapsUsed, output, hasInk);
+      const auto status = emitFragment(input, text, scalars, units, fragments[i], gapsUsed, output, hasInk,
+                                       previousTextCluster, previousGlyphEnd);
       if (status != TextStatus::Ok) return status;
     }
     for (size_t i = 0; i < input.gaps.size(); ++i)
@@ -1082,7 +1131,7 @@ uint64_t NativeTextEngine::layoutFingerprint(int fontId) const {
       "dpi=150;load=default,no-bitmap,target-normal;render=gray;metrics=26.6;"
       "bold=positive-advance-once;oblique=0x366a;sup=40%;sub=25%;pnum=reader;"
       "bidi=logical,L1,L2;clusters=monotone-graphemes;segment=libthai-window4096-v1;"
-      "record=overflow-clip-v2";
+      "record=overflow-clip-spacing-v3;tracking=visual-clusters;word-spacing=unicode-space-advance";
   uint64_t hash = hashBytes(FNV_OFFSET, policy, sizeof(policy) - 1);
   hash = hashBytes(hash, native_text::assets::thaiDictionarySha256,
                    std::strlen(native_text::assets::thaiDictionarySha256));
