@@ -18,7 +18,12 @@ LGPL relinking delivery described here.
   FreeType Project (https://freetype.org). All rights reserved. The original
   `docs/FTL.TXT` and other upstream notices are retained. The port disables
   pathname-based stdio streams while retaining caller-supplied memory/stream
-  access; `port/freetype-2.14.3-native.patch` records the upstream source change.
+  access. Large autofitter, rasterizer, and CFF interpreter work buffers use
+  reusable module/raster/font-owned allocations through FreeType's memory
+  callbacks (PSRAM in firmware), with separate storage for nested calls and
+  cleanup when the owner is destroyed. Autohinter allocation failures propagate
+  without leaving an unusable reverse character map.
+  `port/freetype-2.14.3-native.patch` records these upstream source changes.
   The separate `port/freetype/` configuration selects supported modules/features.
 - **HarfBuzz 14.5.0:** its MIT-style license and per-file notices are retained in
   `vendor/harfbuzz-14.5.0/COPYING` and the original source tree. The allocator and

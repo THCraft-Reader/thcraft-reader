@@ -5,10 +5,12 @@
 #include <thai/thbrk.h>
 #include <thai/thwchar.h>
 #include FT_FREETYPE_H
+#include FT_OUTLINE_H
 #include <hb-ft.h>
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -245,5 +247,138 @@ TEST_F(NativeTextResources, CorruptDictionaryCountsCannotDriveUnboundedAllocatio
     if (trie) trie_free(trie);
     EXPECT_EQ(native_text::allocationStats().used, baseline);
   }
+}
+
+struct FreeTypeFace {
+  FT_Library library = nullptr;
+  FT_Face face = nullptr;
+  ~FreeTypeFace() {
+    if (face) FT_Done_Face(face);
+    if (library) FT_Done_FreeType(library);
+  }
+  bool open(const std::vector<uint8_t>& bytes) {
+    return FT_Init_FreeType(&library) == 0 &&
+           FT_New_Memory_Face(library, bytes.data(), static_cast<FT_Long>(bytes.size()), 0, &face) == 0 &&
+           FT_Set_Char_Size(face, 0, 14 * 64, 150, 150) == 0;
+  }
+};
+
+struct GlyphPixels {
+  unsigned width, rows;
+  int left, top;
+  std::vector<uint8_t> bytes;
+  bool operator==(const GlyphPixels&) const = default;
+};
+
+GlyphPixels glyphPixels(FT_GlyphSlot slot) {
+  const auto& bitmap = slot->bitmap;
+  GlyphPixels result{bitmap.width, bitmap.rows, slot->bitmap_left, slot->bitmap_top, {}};
+  result.bytes.reserve(static_cast<size_t>(bitmap.width) * bitmap.rows);
+  for (unsigned row = 0; row < bitmap.rows; ++row) {
+    const auto* data = bitmap.buffer + row * bitmap.pitch;
+    result.bytes.insert(result.bytes.end(), data, data + bitmap.width);
+  }
+  return result;
+}
+
+TEST_F(NativeTextResources, FirstGlyphAllocationFailuresRecoverWithoutChangingPixelsOrLeaking) {
+  const auto cffPath =
+      std::filesystem::path(NATIVE_VARIABLE_FONT_PATH).parent_path() / "AdobeVFPrototype.abc.static.otf";
+  const std::array<std::pair<std::string, FT_ULong>, 2> samples{{{NATIVE_FONT_PATH, 0x0e01}, {cffPath.string(), 'a'}}};
+  for (size_t sample = 0; sample < samples.size(); ++sample) {
+    const auto& [path, codepoint] = samples[sample];
+    SCOPED_TRACE(path);
+    const auto bytes = readBytes(path.c_str());
+    ASSERT_FALSE(bytes.empty());
+    const FT_Int32 flags =
+        FT_LOAD_NO_BITMAP | FT_LOAD_RENDER | (sample == 0 ? FT_LOAD_FORCE_AUTOHINT : FT_LOAD_NO_AUTOHINT);
+    GlyphPixels expected;
+    {
+      FreeTypeFace baseline;
+      ASSERT_TRUE(baseline.open(bytes));
+      ASSERT_EQ(FT_Load_Char(baseline.face, codepoint, flags), 0);
+      expected = glyphPixels(baseline.face->glyph);
+    }
+    bool reachedSuccess = false;
+    unsigned failuresChecked = 0;
+    for (size_t failAt = 0; failAt < 256; ++failAt) {
+      SCOPED_TRACE(failAt);
+      const auto before = native_text::allocationStats().used;
+      {
+        FreeTypeFace attempt;
+        ASSERT_TRUE(attempt.open(bytes));
+        const auto failures = native_text::allocationStats().failures;
+        native_text::failAllocationsAfter(failAt);
+        const auto error = FT_Load_Char(attempt.face, codepoint, flags);
+        native_text::failAllocationsAfter(std::numeric_limits<size_t>::max());
+        if (native_text::allocationStats().failures != failures) {
+          EXPECT_NE(error, 0);
+          ++failuresChecked;
+          ASSERT_EQ(FT_Load_Char(attempt.face, codepoint, flags), 0);
+        } else {
+          ASSERT_EQ(error, 0);
+          reachedSuccess = true;
+        }
+        EXPECT_EQ(glyphPixels(attempt.face->glyph), expected);
+      }
+      EXPECT_EQ(native_text::allocationStats().used, before);
+      if (reachedSuccess) break;
+    }
+    EXPECT_TRUE(reachedSuccess);
+    EXPECT_GT(failuresChecked, 0u);
+  }
+}
+
+struct SpanCapture {
+  FT_Library library;
+  std::vector<uint8_t> pixels = std::vector<uint8_t>(32 * 32);
+  FT_Outline* nestedOutline = nullptr;
+  SpanCapture* nestedCapture = nullptr;
+  bool nestedCalled = false;
+  FT_Error nestedError = 0;
+};
+
+void captureSpans(int y, int count, const FT_Span* spans, void* user);
+
+FT_Error renderSpans(FT_Outline& outline, SpanCapture& capture) {
+  FT_Raster_Params params{};
+  params.flags = FT_RASTER_FLAG_AA | FT_RASTER_FLAG_DIRECT | FT_RASTER_FLAG_CLIP;
+  params.gray_spans = captureSpans;
+  params.user = &capture;
+  params.clip_box = {0, 0, 32, 32};
+  return FT_Outline_Render(capture.library, &outline, &params);
+}
+
+void captureSpans(int y, int count, const FT_Span* spans, void* user) {
+  auto& capture = *static_cast<SpanCapture*>(user);
+  if (capture.nestedOutline && !capture.nestedCalled) {
+    capture.nestedCalled = true;
+    capture.nestedError = renderSpans(*capture.nestedOutline, *capture.nestedCapture);
+  }
+  for (int i = 0; i < count; ++i)
+    for (unsigned x = spans[i].x; x < spans[i].x + spans[i].len; ++x) capture.pixels[y * 32 + x] = spans[i].coverage;
+}
+
+TEST_F(NativeTextResources, NestedDirectSpanRenderingPreservesBothOutlines) {
+  const auto bytes = readBytes(NATIVE_FONT_PATH);
+  FreeTypeFace font;
+  ASSERT_TRUE(font.open(bytes));
+  FT_Vector diamond[] = {{16 * 64, 64}, {31 * 64, 16 * 64}, {16 * 64, 31 * 64}, {64, 16 * 64}};
+  FT_Vector square[] = {{2 * 64, 2 * 64}, {10 * 64, 2 * 64}, {10 * 64, 10 * 64}, {2 * 64, 10 * 64}};
+  unsigned char tags[] = {FT_CURVE_TAG_ON, FT_CURVE_TAG_ON, FT_CURVE_TAG_ON, FT_CURVE_TAG_ON};
+  unsigned short contours[] = {3};
+  FT_Outline outer{1, 4, diamond, tags, contours, 0};
+  FT_Outline inner{1, 4, square, tags, contours, 0};
+  SpanCapture expectedOuter{font.library}, expectedInner{font.library};
+  ASSERT_EQ(renderSpans(outer, expectedOuter), 0);
+  ASSERT_EQ(renderSpans(inner, expectedInner), 0);
+  SpanCapture actualOuter{font.library}, actualInner{font.library};
+  actualOuter.nestedOutline = &inner;
+  actualOuter.nestedCapture = &actualInner;
+  ASSERT_EQ(renderSpans(outer, actualOuter), 0);
+  EXPECT_TRUE(actualOuter.nestedCalled);
+  EXPECT_EQ(actualOuter.nestedError, 0);
+  EXPECT_EQ(actualOuter.pixels, expectedOuter.pixels);
+  EXPECT_EQ(actualInner.pixels, expectedInner.pixels);
 }
 }  // namespace

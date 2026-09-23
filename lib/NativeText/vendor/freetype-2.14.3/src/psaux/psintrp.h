@@ -64,6 +64,9 @@ FT_BEGIN_HEADER
                        size_t        bitCount );
 
   FT_LOCAL( void )
+  cf2_interp_freeStorage( CF2_Font  font );
+
+  FT_LOCAL( void )
   cf2_interpT2CharString( CF2_Font              font,
                           const CF2_Buffer      buf,
                           CF2_OutlineCallbacks  callbacks,

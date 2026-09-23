@@ -1308,7 +1308,10 @@
 
     error = ft_hash_num_init( *map, memory );
     if ( error )
+    {
+      FT_FREE( *map );
       goto Exit;
+    }
 
     /* Initialize reverse cmap with data directly from the cmap table. */
     for ( i = 0; i < AF_ADJUSTMENT_DATABASE_LENGTH; i++ )

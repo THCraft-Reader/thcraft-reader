@@ -51,12 +51,14 @@
   /* Find segments and links, compute all stem widths, and initialize */
   /* standard width and height for the glyph with given charcode.     */
 
-  FT_LOCAL_DEF( void )
+  FT_LOCAL_DEF( FT_Error )
   af_latin_metrics_init_widths( AF_LatinMetrics  metrics,
                                 FT_Face          face )
   {
     /* scan the array of segments in each direction */
-    AF_GlyphHintsRec  hints[1];
+    AF_HintsWorkspace  workspace;
+    AF_GlyphHints      hints;
+    FT_Error           error;
 
 
     FT_TRACE5(( "\n" ));
@@ -65,17 +67,22 @@
     FT_TRACE5(( "=====================================================\n" ));
     FT_TRACE5(( "\n" ));
 
-    af_glyph_hints_init( hints, face->memory );
+    error = af_module_acquire_workspace( metrics->root.globals->module,
+                                          sizeof ( AF_LatinMetricsRec ),
+                                          &workspace );
+    if ( error )
+      return error;
+
+    hints = workspace->hints;
 
     metrics->axis[AF_DIMENSION_HORZ].width_count = 0;
     metrics->axis[AF_DIMENSION_VERT].width_count = 0;
 
     {
-      FT_Error            error;
-      FT_ULong            glyph_index;
-      int                 dim;
-      AF_LatinMetricsRec  dummy[1];
-      AF_Scaler           scaler = &dummy->root.scaler;
+      FT_ULong         glyph_index;
+      int              dim;
+      AF_LatinMetrics  dummy = (AF_LatinMetrics)workspace->metrics;
+      AF_Scaler        scaler = &dummy->root.scaler;
 
       AF_StyleClass   style_class  = metrics->root.style_class;
       AF_ScriptClass  script_class = af_script_classes[style_class->script];
@@ -261,7 +268,8 @@
 
     FT_TRACE5(( "\n" ));
 
-    af_glyph_hints_done( hints );
+    af_module_release_workspace( workspace, error );
+    return error;
   }
 
 
@@ -1152,7 +1160,10 @@
 
     if ( !FT_Select_Charmap( face, FT_ENCODING_UNICODE ) )
     {
-      af_latin_metrics_init_widths( metrics, face );
+      error = af_latin_metrics_init_widths( metrics, face );
+      if ( error )
+        goto Exit;
+
       if ( af_latin_metrics_init_blues( metrics, face ) )
       {
         /* use internal error code to indicate missing blue zones */
@@ -1162,8 +1173,8 @@
       af_latin_metrics_check_digits( metrics, face );
     }
 
-    af_reverse_character_map_new( &metrics->root.reverse_charmap,
-                                  &metrics->root );
+    error = af_reverse_character_map_new( &metrics->root.reverse_charmap,
+                                          &metrics->root );
 
   Exit:
     face->charmap = oldmap;

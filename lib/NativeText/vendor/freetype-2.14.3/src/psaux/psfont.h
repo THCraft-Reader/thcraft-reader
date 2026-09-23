@@ -65,6 +65,9 @@ FT_BEGIN_HEADER
     FT_Memory  memory;
     FT_Error   error;     /* shared error for this instance */
 
+    /* Cached working storage, with one entry per active interpreter call. */
+    struct CF2_InterpStorageRec_*  interpStorage;
+
     FT_Bool             isT1;
     FT_Bool             isCFF2;
     CF2_RenderingFlags  renderingFlags;

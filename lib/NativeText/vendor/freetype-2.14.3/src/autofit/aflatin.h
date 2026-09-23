@@ -132,7 +132,7 @@ FT_BEGIN_HEADER
   af_latin_metrics_scale( AF_StyleMetrics  metrics,
                           AF_Scaler        scaler );
 
-  FT_LOCAL( void )
+  FT_LOCAL( FT_Error )
   af_latin_metrics_init_widths( AF_LatinMetrics  metrics,
                                 FT_Face          face );
 

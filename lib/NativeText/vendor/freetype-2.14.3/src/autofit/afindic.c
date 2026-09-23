@@ -32,6 +32,7 @@
                          FT_Face          face )
   {
     AF_CJKMetrics  metrics = (AF_CJKMetrics)metrics_;
+    FT_Error       error   = FT_Err_Ok;
 
 
     /* skip blue zone init in CJK routines */
@@ -44,7 +45,10 @@
       face->charmap = NULL;
     else
     {
-      af_cjk_metrics_init_widths( metrics, face );
+      error = af_cjk_metrics_init_widths( metrics, face );
+      if ( error )
+        goto Exit;
+
 #if 0
       /* either need indic specific blue_chars[] or just skip blue zones */
       af_cjk_metrics_init_blues( metrics, face, af_cjk_blue_chars );
@@ -52,8 +56,9 @@
       af_cjk_metrics_check_digits( metrics, face );
     }
 
+  Exit:
     face->charmap = oldmap;
-    return FT_Err_Ok;
+    return error;
   }
 
 

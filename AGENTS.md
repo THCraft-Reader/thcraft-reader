@@ -3,6 +3,16 @@
 Project: Open-source e-reader firmware for Xteink X4 (ESP32-C3)
 Mission: Provide a lightweight, high-performance reading experience focused on EPUB rendering on constrained hardware.
 
+## Local Build Verification Policy
+
+For current and future development, compile verification MUST use only the X4 Pro production target:
+
+```bash
+pio run -e x4pro-gh_release
+```
+
+Do not compile development, release-candidate, other-device, or host-test targets unless the user explicitly changes this requirement. This policy takes precedence over the generic build examples below. Device boot and runtime verification remain separate from compilation.
+
 ## AI Agent Identity and Cognitive Rules
 
 * Role: Senior Embedded Systems Engineer (ESP-IDF/Arduino-ESP32 specialized).

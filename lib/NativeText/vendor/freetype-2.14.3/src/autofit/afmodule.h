@@ -22,9 +22,22 @@
 #include <freetype/internal/ftobjs.h>
 #include <freetype/ftmodapi.h>
 
+#include "afhints.h"
+
 #include "ft-hb.h"
 
 FT_BEGIN_HEADER
+
+  typedef struct  AF_HintsWorkspaceRec_
+  {
+    struct AF_HintsWorkspaceRec_*  next;
+    FT_Bool                       in_use;
+    AF_GlyphHintsRec               hints[1];
+    AF_StyleMetrics                metrics;
+    FT_ULong                       metrics_size;
+
+  } AF_HintsWorkspaceRec, *AF_HintsWorkspace;
+
 
 
   /*
@@ -41,12 +54,25 @@ FT_BEGIN_HEADER
     FT_Bool       no_stem_darkening;
     FT_Int        darken_params[8];
 
+    /* Leased independently by glyph loading and nested metrics analysis. */
+    AF_HintsWorkspace  workspaces;
+
 #if defined( FT_CONFIG_OPTION_USE_HARFBUZZ )         && \
     defined( FT_CONFIG_OPTION_USE_HARFBUZZ_DYNAMIC )
     ft_hb_funcs_t*  hb_funcs;
 #endif
 
   } AF_ModuleRec, *AF_Module;
+
+  FT_LOCAL( FT_Error )
+  af_module_acquire_workspace( AF_Module           module,
+                               FT_ULong            metrics_size,
+                               AF_HintsWorkspace  *aworkspace );
+
+  FT_LOCAL( void )
+  af_module_release_workspace( AF_HintsWorkspace  workspace,
+                               FT_Error           error );
+
 
 
 FT_DECLARE_AUTOHINTER_INTERFACE( af_autofitter_interface )

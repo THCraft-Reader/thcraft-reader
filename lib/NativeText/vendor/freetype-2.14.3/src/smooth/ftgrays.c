@@ -307,22 +307,23 @@ typedef ptrdiff_t  FT_PtrDist;
 #undef RAS_VAR
 #undef RAS_VAR_
 
-#ifndef FT_STATIC_RASTER
+  /* Library rasters always keep independent, reentrant worker storage. */
+#if !defined( FT_STATIC_RASTER ) || !defined( STANDALONE_ )
 
 #define RAS_ARG   gray_PWorker  worker
 #define RAS_ARG_  gray_PWorker  worker,
 
 #define RAS_VAR   worker
 #define RAS_VAR_  worker,
-
-#else /* FT_STATIC_RASTER */
+#else /* standalone static raster */
 
 #define RAS_ARG   void
 #define RAS_ARG_  /* empty */
 #define RAS_VAR   /* empty */
 #define RAS_VAR_  /* empty */
 
-#endif /* FT_STATIC_RASTER */
+#endif
+
 
 
   /* must be at least 6 bits! */
@@ -507,13 +508,20 @@ typedef ptrdiff_t  FT_PtrDist;
     FT_Raster_Span_Func  render_span;
     void*                render_span_data;
 
+#ifndef STANDALONE_
+    /* Persistent scratch; nested direct callbacks need their own worker. */
+    struct gray_TWorker_*  next;
+    int                    busy;
+    TCell                  buffer[FT_MAX_GRAY_POOL];
+#endif
+
   } gray_TWorker, *gray_PWorker;
 
 #if defined( _MSC_VER )
 #pragma warning( pop )
 #endif
 
-#ifndef FT_STATIC_RASTER
+#if !defined( FT_STATIC_RASTER ) || !defined( STANDALONE_ )
 #define ras  (*worker)
 #else
   static gray_TWorker  ras;
@@ -531,7 +539,10 @@ typedef ptrdiff_t  FT_PtrDist;
 
   typedef struct gray_TRaster_
   {
-    void*  memory;
+    void*         memory;
+#ifndef STANDALONE_
+    gray_TWorker  worker;
+#endif
 
   } gray_TRaster, *gray_PRaster;
 
@@ -1861,7 +1872,11 @@ typedef ptrdiff_t  FT_PtrDist;
   static int
   gray_convert_glyph( RAS_ARG )
   {
+#ifdef STANDALONE_
     TCell    buffer[FT_MAX_GRAY_POOL];
+#else
+    PCell    buffer = ras.buffer;
+#endif
     size_t   height = (size_t)( ras.cbox.yMax - ras.cbox.yMin );
     size_t   n = FT_MAX_GRAY_POOL / 8;
     TCoord   y;
@@ -1961,12 +1976,18 @@ typedef ptrdiff_t  FT_PtrDist;
 
 
   static int
+#ifdef STANDALONE_
   gray_raster_render( FT_Raster                raster,
                       const FT_Raster_Params*  params )
+#else
+  gray_raster_render_worker( RAS_ARG_
+                             const FT_Raster_Params*  params )
+#endif
   {
     const FT_Outline*  outline    = (const FT_Outline*)params->source;
     const FT_Bitmap*   target_map = params->target;
 
+#ifdef STANDALONE_
 #ifndef FT_STATIC_RASTER
     gray_TWorker  worker[1];
 #endif
@@ -1974,6 +1995,8 @@ typedef ptrdiff_t  FT_PtrDist;
 
     if ( !raster )
       return FT_THROW( Invalid_Argument );
+#endif
+
 
     /* this version does not support monochrome rendering */
     if ( !( params->flags & FT_RASTER_FLAG_AA ) )
@@ -2043,6 +2066,44 @@ typedef ptrdiff_t  FT_PtrDist;
   }
 
 
+#ifndef STANDALONE_
+  static int
+  gray_raster_render( FT_Raster                raster_,
+                      const FT_Raster_Params*  params )
+  {
+    gray_PRaster  raster = (gray_PRaster)raster_;
+    gray_PWorker  worker;
+    int           error;
+    FT_Memory     memory;
+
+
+    if ( !raster )
+      return FT_THROW( Invalid_Argument );
+
+    memory = (FT_Memory)raster->memory;
+    worker = &raster->worker;
+
+    /* Cache one full pool per active recursion level.  Direct span
+     * callbacks may render another outline using this same raster. */
+    while ( worker->busy )
+    {
+      if ( !worker->next )
+      {
+        if ( FT_NEW( worker->next ) )
+          return error;
+      }
+      worker = worker->next;
+    }
+
+    worker->busy = 1;
+    error = gray_raster_render_worker( RAS_VAR_ params );
+    worker->busy = 0;
+
+    return error;
+  }
+#endif /* !STANDALONE_ */
+
+
   /**** RASTER OBJECT CREATION: In stand-alone mode, we simply use *****/
   /****                         a static object.                   *****/
 
@@ -2094,11 +2155,21 @@ typedef ptrdiff_t  FT_PtrDist;
 
 
   static void
-  gray_raster_done( FT_Raster  raster )
+  gray_raster_done( FT_Raster  raster_ )
   {
-    FT_Memory  memory = (FT_Memory)((gray_PRaster)raster)->memory;
+    gray_PRaster  raster = (gray_PRaster)raster_;
+    FT_Memory     memory = (FT_Memory)raster->memory;
+    gray_PWorker  worker = raster->worker.next;
 
 
+    while ( worker )
+    {
+      gray_PWorker  next = worker->next;
+
+
+      FT_FREE( worker );
+      worker = next;
+    }
     FT_FREE( raster );
   }
 

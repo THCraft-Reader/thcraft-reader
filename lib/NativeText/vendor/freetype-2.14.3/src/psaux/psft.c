@@ -41,6 +41,7 @@
 
 #include "psfont.h"
 #include "pserror.h"
+#include "psintrp.h"
 #include "psobjs.h"
 #include "cffdecode.h"
 
@@ -113,6 +114,7 @@
       FT_Memory  memory = font->memory;
 
 
+      cf2_interp_freeStorage( font );
       FT_FREE( font->blend.lastNDV );
       FT_FREE( font->blend.BV );
     }

@@ -125,7 +125,7 @@ FT_BEGIN_HEADER
   af_cjk_metrics_check_digits( AF_CJKMetrics  metrics,
                                FT_Face        face );
 
-  FT_LOCAL( void )
+  FT_LOCAL( FT_Error )
   af_cjk_metrics_init_widths( AF_CJKMetrics  metrics,
                               FT_Face        face );
 #endif /* AF_CONFIG_OPTION_CJK */

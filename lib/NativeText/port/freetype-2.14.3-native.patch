@@ -10,3 +10,1162 @@
  
    /**************************************************************************
     *
+--- a/freetype-2.14.3/src/autofit/afmodule.c
++++ b/freetype-2.14.3/src/autofit/afmodule.c
+@@ -47,10 +47,8 @@
+   int  af_debug_disable_vert_hints_;
+   int  af_debug_disable_blue_hints_;
+ 
+-  /* we use a global object instead of a local one for debugging */
+-  static AF_GlyphHintsRec  af_debug_hints_rec_[1];
+-
+-  void*  af_debug_hints_ = af_debug_hints_rec_;
++  /* A view of the last glyph's module-owned hints, not shared scratch. */
++  void*  af_debug_hints_ = NULL;
+ #endif
+ 
+ #include <freetype/internal/ftobjs.h>
+@@ -393,6 +391,90 @@
+   }
+ 
+ 
++  FT_LOCAL_DEF( FT_Error )
++  af_module_acquire_workspace( AF_Module           module,
++                               FT_ULong            metrics_size,
++                               AF_HintsWorkspace  *aworkspace )
++  {
++    FT_Memory          memory = module->root.memory;
++    FT_Error           error;
++    AF_HintsWorkspace  workspace;
++    AF_GlyphHints      hints;
++    FT_UInt            dim;
++
++
++    *aworkspace = NULL;
++
++    for ( workspace = module->workspaces;
++          workspace && workspace->in_use;
++          workspace = workspace->next )
++      ;
++
++    if ( !workspace )
++    {
++      if ( FT_NEW( workspace ) )
++        return error;
++
++      af_glyph_hints_init( workspace->hints, memory );
++      workspace->next    = module->workspaces;
++      module->workspaces = workspace;
++    }
++
++    /* Reserve before allocating: memory and font callbacks can re-enter. */
++    workspace->in_use = TRUE;
++    if ( metrics_size > workspace->metrics_size )
++    {
++      if ( FT_REALLOC( workspace->metrics,
++                       workspace->metrics_size, metrics_size ) )
++      {
++        workspace->in_use = FALSE;
++        return error;
++      }
++      workspace->metrics_size = metrics_size;
++    }
++
++    /* Keep the grown buffers, but start with fresh per-glyph state. */
++    hints = workspace->hints;
++    hints->x_scale      = 0;
++    hints->y_scale      = 0;
++    hints->x_delta      = 0;
++    hints->y_delta      = 0;
++    hints->num_points  = 0;
++    hints->num_contours = 0;
++    hints->scaler_flags = 0;
++    hints->other_flags  = 0;
++    hints->metrics      = NULL;
++
++    for ( dim = 0; dim < AF_DIMENSION_MAX; dim++ )
++    {
++      hints->axis[dim].num_segments = 0;
++      hints->axis[dim].num_edges    = 0;
++      hints->axis[dim].major_dir    = (AF_Direction)0;
++    }
++
++    *aworkspace = workspace;
++    return FT_Err_Ok;
++  }
++
++
++  FT_LOCAL_DEF( void )
++  af_module_release_workspace( AF_HintsWorkspace  workspace,
++                               FT_Error           error )
++  {
++    if ( error )
++    {
++      FT_Memory  memory = workspace->hints->memory;
++
++
++      /* A failed grow can leave only some of the contour arrays resized. */
++      af_glyph_hints_done( workspace->hints );
++      af_glyph_hints_init( workspace->hints, memory );
++    }
++
++    workspace->in_use = FALSE;
++  }
++
++
+   FT_CALLBACK_DEF( FT_Error )
+   af_autofitter_init( FT_Module  ft_module )      /* AF_Module */
+   {
+@@ -424,17 +506,33 @@
+   FT_CALLBACK_DEF( void )
+   af_autofitter_done( FT_Module  ft_module )      /* AF_Module */
+   {
+-    FT_UNUSED( ft_module );
++    AF_Module          module = (AF_Module)ft_module;
++    FT_Memory          memory = module->root.memory;
++    AF_HintsWorkspace  workspace = module->workspaces;
++
++
++    while ( workspace )
++    {
++      AF_HintsWorkspace  next = workspace->next;
++
++
++#ifdef FT_DEBUG_AUTOFIT
++      if ( af_debug_hints_ == workspace->hints )
++        af_debug_hints_ = NULL;
++#endif
++      af_glyph_hints_done( workspace->hints );
++      FT_FREE( workspace->metrics );
++      FT_FREE( workspace );
++      workspace = next;
++    }
++
++    module->workspaces = NULL;
+ 
+ #if defined( FT_CONFIG_OPTION_USE_HARFBUZZ )         && \
+     defined( FT_CONFIG_OPTION_USE_HARFBUZZ_DYNAMIC )
+     ft_hb_funcs_done( (AF_Module)ft_module );
+ #endif
+ 
+-#ifdef FT_DEBUG_AUTOFIT
+-    if ( af_debug_hints_rec_->memory )
+-      af_glyph_hints_done( af_debug_hints_rec_ );
+-#endif
+   }
+ 
+ 
+@@ -445,29 +543,27 @@
+                             FT_UInt        glyph_index,
+                             FT_Int32       load_flags )
+   {
+-    AF_Module  module = (AF_Module)module_;
+-
+-    FT_Error   error  = FT_Err_Ok;
+-    FT_Memory  memory = module->root.memory;
+-
+-#ifdef FT_DEBUG_AUTOFIT
+-
+-    /* in debug mode, we use a global object that survives this routine */
+-
+-    AF_GlyphHints  hints = af_debug_hints_rec_;
+-    AF_LoaderRec   loader[1];
++    AF_Module          module = (AF_Module)module_;
++    FT_Error           error;
++    AF_HintsWorkspace  workspace;
++    AF_GlyphHints      hints;
++    AF_LoaderRec       loader[1];
+ 
+     FT_UNUSED( size );
+ 
+ 
+-    if ( hints->memory )
+-      af_glyph_hints_done( hints );
+-
+-    af_glyph_hints_init( hints, memory );
++    error = af_module_acquire_workspace( module, 0, &workspace );
++    if ( error )
++      return error;
++
++    hints = workspace->hints;
+     af_loader_init( loader, hints );
+ 
+     error = af_loader_load_glyph( loader, module, slot->face,
+                                   glyph_index, load_flags );
++
++#ifdef FT_DEBUG_AUTOFIT
++    af_debug_hints_ = hints;
+ 
+ #ifdef FT_DEBUG_LEVEL_TRACE
+     if ( ft_trace_levels[FT_TRACE_COMP( FT_COMPONENT )] )
+@@ -479,31 +575,12 @@
+ #ifdef FT_DEBUG_LEVEL_TRACE
+     }
+ #endif
++#endif /* FT_DEBUG_AUTOFIT */
+ 
+     af_loader_done( loader );
++    af_module_release_workspace( workspace, error );
+ 
+     return error;
+-
+-#else /* !FT_DEBUG_AUTOFIT */
+-
+-    AF_GlyphHintsRec  hints[1];
+-    AF_LoaderRec      loader[1];
+-
+-    FT_UNUSED( size );
+-
+-
+-    af_glyph_hints_init( hints, memory );
+-    af_loader_init( loader, hints );
+-
+-    error = af_loader_load_glyph( loader, module, slot->face,
+-                                  glyph_index, load_flags );
+-
+-    af_loader_done( loader );
+-    af_glyph_hints_done( hints );
+-
+-    return error;
+-
+-#endif /* !FT_DEBUG_AUTOFIT */
+   }
+ 
+ 
+--- a/freetype-2.14.3/src/autofit/afmodule.h
++++ b/freetype-2.14.3/src/autofit/afmodule.h
+@@ -22,9 +22,22 @@
+ #include <freetype/internal/ftobjs.h>
+ #include <freetype/ftmodapi.h>
+ 
++#include "afhints.h"
++
+ #include "ft-hb.h"
+ 
+ FT_BEGIN_HEADER
++
++  typedef struct  AF_HintsWorkspaceRec_
++  {
++    struct AF_HintsWorkspaceRec_*  next;
++    FT_Bool                       in_use;
++    AF_GlyphHintsRec               hints[1];
++    AF_StyleMetrics                metrics;
++    FT_ULong                       metrics_size;
++
++  } AF_HintsWorkspaceRec, *AF_HintsWorkspace;
++
+ 
+ 
+   /*
+@@ -41,12 +54,25 @@
+     FT_Bool       no_stem_darkening;
+     FT_Int        darken_params[8];
+ 
++    /* Leased independently by glyph loading and nested metrics analysis. */
++    AF_HintsWorkspace  workspaces;
++
+ #if defined( FT_CONFIG_OPTION_USE_HARFBUZZ )         && \
+     defined( FT_CONFIG_OPTION_USE_HARFBUZZ_DYNAMIC )
+     ft_hb_funcs_t*  hb_funcs;
+ #endif
+ 
+   } AF_ModuleRec, *AF_Module;
++
++  FT_LOCAL( FT_Error )
++  af_module_acquire_workspace( AF_Module           module,
++                               FT_ULong            metrics_size,
++                               AF_HintsWorkspace  *aworkspace );
++
++  FT_LOCAL( void )
++  af_module_release_workspace( AF_HintsWorkspace  workspace,
++                               FT_Error           error );
++
+ 
+ 
+ FT_DECLARE_AUTOHINTER_INTERFACE( af_autofitter_interface )
+--- a/freetype-2.14.3/src/autofit/aflatin.c
++++ b/freetype-2.14.3/src/autofit/aflatin.c
+@@ -51,12 +51,14 @@
+   /* Find segments and links, compute all stem widths, and initialize */
+   /* standard width and height for the glyph with given charcode.     */
+ 
+-  FT_LOCAL_DEF( void )
++  FT_LOCAL_DEF( FT_Error )
+   af_latin_metrics_init_widths( AF_LatinMetrics  metrics,
+                                 FT_Face          face )
+   {
+     /* scan the array of segments in each direction */
+-    AF_GlyphHintsRec  hints[1];
++    AF_HintsWorkspace  workspace;
++    AF_GlyphHints      hints;
++    FT_Error           error;
+ 
+ 
+     FT_TRACE5(( "\n" ));
+@@ -65,17 +67,22 @@
+     FT_TRACE5(( "=====================================================\n" ));
+     FT_TRACE5(( "\n" ));
+ 
+-    af_glyph_hints_init( hints, face->memory );
++    error = af_module_acquire_workspace( metrics->root.globals->module,
++                                          sizeof ( AF_LatinMetricsRec ),
++                                          &workspace );
++    if ( error )
++      return error;
++
++    hints = workspace->hints;
+ 
+     metrics->axis[AF_DIMENSION_HORZ].width_count = 0;
+     metrics->axis[AF_DIMENSION_VERT].width_count = 0;
+ 
+     {
+-      FT_Error            error;
+-      FT_ULong            glyph_index;
+-      int                 dim;
+-      AF_LatinMetricsRec  dummy[1];
+-      AF_Scaler           scaler = &dummy->root.scaler;
++      FT_ULong         glyph_index;
++      int              dim;
++      AF_LatinMetrics  dummy = (AF_LatinMetrics)workspace->metrics;
++      AF_Scaler        scaler = &dummy->root.scaler;
+ 
+       AF_StyleClass   style_class  = metrics->root.style_class;
+       AF_ScriptClass  script_class = af_script_classes[style_class->script];
+@@ -261,7 +268,8 @@
+ 
+     FT_TRACE5(( "\n" ));
+ 
+-    af_glyph_hints_done( hints );
++    af_module_release_workspace( workspace, error );
++    return error;
+   }
+ 
+ 
+@@ -1152,7 +1160,10 @@
+ 
+     if ( !FT_Select_Charmap( face, FT_ENCODING_UNICODE ) )
+     {
+-      af_latin_metrics_init_widths( metrics, face );
++      error = af_latin_metrics_init_widths( metrics, face );
++      if ( error )
++        goto Exit;
++
+       if ( af_latin_metrics_init_blues( metrics, face ) )
+       {
+         /* use internal error code to indicate missing blue zones */
+@@ -1162,8 +1173,8 @@
+       af_latin_metrics_check_digits( metrics, face );
+     }
+ 
+-    af_reverse_character_map_new( &metrics->root.reverse_charmap,
+-                                  &metrics->root );
++    error = af_reverse_character_map_new( &metrics->root.reverse_charmap,
++                                          &metrics->root );
+ 
+   Exit:
+     face->charmap = oldmap;
+--- a/freetype-2.14.3/src/autofit/aflatin.h
++++ b/freetype-2.14.3/src/autofit/aflatin.h
+@@ -132,7 +132,7 @@
+   af_latin_metrics_scale( AF_StyleMetrics  metrics,
+                           AF_Scaler        scaler );
+ 
+-  FT_LOCAL( void )
++  FT_LOCAL( FT_Error )
+   af_latin_metrics_init_widths( AF_LatinMetrics  metrics,
+                                 FT_Face          face );
+ 
+--- a/freetype-2.14.3/src/autofit/afcjk.c
++++ b/freetype-2.14.3/src/autofit/afcjk.c
+@@ -59,12 +59,14 @@
+   /* Basically the Latin version with AF_CJKMetrics */
+   /* to replace AF_LatinMetrics.                    */
+ 
+-  FT_LOCAL_DEF( void )
++  FT_LOCAL_DEF( FT_Error )
+   af_cjk_metrics_init_widths( AF_CJKMetrics  metrics,
+                               FT_Face        face )
+   {
+     /* scan the array of segments in each direction */
+-    AF_GlyphHintsRec  hints[1];
++    AF_HintsWorkspace  workspace;
++    AF_GlyphHints      hints;
++    FT_Error           error;
+ 
+ 
+     FT_TRACE5(( "\n" ));
+@@ -73,17 +75,22 @@
+     FT_TRACE5(( "===================================================\n" ));
+     FT_TRACE5(( "\n" ));
+ 
+-    af_glyph_hints_init( hints, face->memory );
++    error = af_module_acquire_workspace( metrics->root.globals->module,
++                                          sizeof ( AF_CJKMetricsRec ),
++                                          &workspace );
++    if ( error )
++      return error;
++
++    hints = workspace->hints;
+ 
+     metrics->axis[AF_DIMENSION_HORZ].width_count = 0;
+     metrics->axis[AF_DIMENSION_VERT].width_count = 0;
+ 
+     {
+-      FT_Error          error;
+-      FT_ULong          glyph_index;
+-      int               dim;
+-      AF_CJKMetricsRec  dummy[1];
+-      AF_Scaler         scaler = &dummy->root.scaler;
++      FT_ULong       glyph_index;
++      int            dim;
++      AF_CJKMetrics  dummy = (AF_CJKMetrics)workspace->metrics;
++      AF_Scaler      scaler = &dummy->root.scaler;
+ 
+       AF_StyleClass   style_class  = metrics->root.style_class;
+       AF_ScriptClass  script_class = af_script_classes[style_class->script];
+@@ -262,7 +269,8 @@
+ 
+     FT_TRACE5(( "\n" ));
+ 
+-    af_glyph_hints_done( hints );
++    af_module_release_workspace( workspace, error );
++    return error;
+   }
+ 
+ 
+@@ -625,19 +633,24 @@
+   {
+     AF_CJKMetrics  metrics = (AF_CJKMetrics)metrics_;
+     FT_CharMap     oldmap  = face->charmap;
++    FT_Error       error   = FT_Err_Ok;
+ 
+ 
+     metrics->units_per_em = face->units_per_EM;
+ 
+     if ( !FT_Select_Charmap( face, FT_ENCODING_UNICODE ) )
+     {
+-      af_cjk_metrics_init_widths( metrics, face );
++      error = af_cjk_metrics_init_widths( metrics, face );
++      if ( error )
++        goto Exit;
++
+       af_cjk_metrics_init_blues( metrics, face );
+       af_cjk_metrics_check_digits( metrics, face );
+     }
+ 
++  Exit:
+     face->charmap = oldmap;
+-    return FT_Err_Ok;
++    return error;
+   }
+ 
+ 
+--- a/freetype-2.14.3/src/autofit/afcjk.h
++++ b/freetype-2.14.3/src/autofit/afcjk.h
+@@ -125,7 +125,7 @@
+   af_cjk_metrics_check_digits( AF_CJKMetrics  metrics,
+                                FT_Face        face );
+ 
+-  FT_LOCAL( void )
++  FT_LOCAL( FT_Error )
+   af_cjk_metrics_init_widths( AF_CJKMetrics  metrics,
+                               FT_Face        face );
+ #endif /* AF_CONFIG_OPTION_CJK */
+--- a/freetype-2.14.3/src/autofit/afindic.c
++++ b/freetype-2.14.3/src/autofit/afindic.c
+@@ -32,6 +32,7 @@
+                          FT_Face          face )
+   {
+     AF_CJKMetrics  metrics = (AF_CJKMetrics)metrics_;
++    FT_Error       error   = FT_Err_Ok;
+ 
+ 
+     /* skip blue zone init in CJK routines */
+@@ -44,7 +45,10 @@
+       face->charmap = NULL;
+     else
+     {
+-      af_cjk_metrics_init_widths( metrics, face );
++      error = af_cjk_metrics_init_widths( metrics, face );
++      if ( error )
++        goto Exit;
++
+ #if 0
+       /* either need indic specific blue_chars[] or just skip blue zones */
+       af_cjk_metrics_init_blues( metrics, face, af_cjk_blue_chars );
+@@ -52,8 +56,9 @@
+       af_cjk_metrics_check_digits( metrics, face );
+     }
+ 
++  Exit:
+     face->charmap = oldmap;
+-    return FT_Err_Ok;
++    return error;
+   }
+ 
+ 
+--- a/freetype-2.14.3/src/autofit/afadjust.c
++++ b/freetype-2.14.3/src/autofit/afadjust.c
+@@ -1308,7 +1308,10 @@
+ 
+     error = ft_hash_num_init( *map, memory );
+     if ( error )
++    {
++      FT_FREE( *map );
+       goto Exit;
++    }
+ 
+     /* Initialize reverse cmap with data directly from the cmap table. */
+     for ( i = 0; i < AF_ADJUSTMENT_DATABASE_LENGTH; i++ )
+--- a/freetype-2.14.3/src/smooth/ftgrays.c
++++ b/freetype-2.14.3/src/smooth/ftgrays.c
+@@ -307,22 +307,23 @@
+ #undef RAS_VAR
+ #undef RAS_VAR_
+ 
+-#ifndef FT_STATIC_RASTER
++  /* Library rasters always keep independent, reentrant worker storage. */
++#if !defined( FT_STATIC_RASTER ) || !defined( STANDALONE_ )
+ 
+ #define RAS_ARG   gray_PWorker  worker
+ #define RAS_ARG_  gray_PWorker  worker,
+ 
+ #define RAS_VAR   worker
+ #define RAS_VAR_  worker,
+-
+-#else /* FT_STATIC_RASTER */
++#else /* standalone static raster */
+ 
+ #define RAS_ARG   void
+ #define RAS_ARG_  /* empty */
+ #define RAS_VAR   /* empty */
+ #define RAS_VAR_  /* empty */
+ 
+-#endif /* FT_STATIC_RASTER */
++#endif
++
+ 
+ 
+   /* must be at least 6 bits! */
+@@ -507,13 +508,20 @@
+     FT_Raster_Span_Func  render_span;
+     void*                render_span_data;
+ 
++#ifndef STANDALONE_
++    /* Persistent scratch; nested direct callbacks need their own worker. */
++    struct gray_TWorker_*  next;
++    int                    busy;
++    TCell                  buffer[FT_MAX_GRAY_POOL];
++#endif
++
+   } gray_TWorker, *gray_PWorker;
+ 
+ #if defined( _MSC_VER )
+ #pragma warning( pop )
+ #endif
+ 
+-#ifndef FT_STATIC_RASTER
++#if !defined( FT_STATIC_RASTER ) || !defined( STANDALONE_ )
+ #define ras  (*worker)
+ #else
+   static gray_TWorker  ras;
+@@ -531,7 +539,10 @@
+ 
+   typedef struct gray_TRaster_
+   {
+-    void*  memory;
++    void*         memory;
++#ifndef STANDALONE_
++    gray_TWorker  worker;
++#endif
+ 
+   } gray_TRaster, *gray_PRaster;
+ 
+@@ -1861,7 +1872,11 @@
+   static int
+   gray_convert_glyph( RAS_ARG )
+   {
++#ifdef STANDALONE_
+     TCell    buffer[FT_MAX_GRAY_POOL];
++#else
++    PCell    buffer = ras.buffer;
++#endif
+     size_t   height = (size_t)( ras.cbox.yMax - ras.cbox.yMin );
+     size_t   n = FT_MAX_GRAY_POOL / 8;
+     TCoord   y;
+@@ -1961,12 +1976,18 @@
+ 
+ 
+   static int
++#ifdef STANDALONE_
+   gray_raster_render( FT_Raster                raster,
+                       const FT_Raster_Params*  params )
++#else
++  gray_raster_render_worker( RAS_ARG_
++                             const FT_Raster_Params*  params )
++#endif
+   {
+     const FT_Outline*  outline    = (const FT_Outline*)params->source;
+     const FT_Bitmap*   target_map = params->target;
+ 
++#ifdef STANDALONE_
+ #ifndef FT_STATIC_RASTER
+     gray_TWorker  worker[1];
+ #endif
+@@ -1974,6 +1995,8 @@
+ 
+     if ( !raster )
+       return FT_THROW( Invalid_Argument );
++#endif
++
+ 
+     /* this version does not support monochrome rendering */
+     if ( !( params->flags & FT_RASTER_FLAG_AA ) )
+@@ -2043,6 +2066,44 @@
+   }
+ 
+ 
++#ifndef STANDALONE_
++  static int
++  gray_raster_render( FT_Raster                raster_,
++                      const FT_Raster_Params*  params )
++  {
++    gray_PRaster  raster = (gray_PRaster)raster_;
++    gray_PWorker  worker;
++    int           error;
++    FT_Memory     memory;
++
++
++    if ( !raster )
++      return FT_THROW( Invalid_Argument );
++
++    memory = (FT_Memory)raster->memory;
++    worker = &raster->worker;
++
++    /* Cache one full pool per active recursion level.  Direct span
++     * callbacks may render another outline using this same raster. */
++    while ( worker->busy )
++    {
++      if ( !worker->next )
++      {
++        if ( FT_NEW( worker->next ) )
++          return error;
++      }
++      worker = worker->next;
++    }
++
++    worker->busy = 1;
++    error = gray_raster_render_worker( RAS_VAR_ params );
++    worker->busy = 0;
++
++    return error;
++  }
++#endif /* !STANDALONE_ */
++
++
+   /**** RASTER OBJECT CREATION: In stand-alone mode, we simply use *****/
+   /****                         a static object.                   *****/
+ 
+@@ -2094,11 +2155,21 @@
+ 
+ 
+   static void
+-  gray_raster_done( FT_Raster  raster )
+-  {
+-    FT_Memory  memory = (FT_Memory)((gray_PRaster)raster)->memory;
+-
+-
++  gray_raster_done( FT_Raster  raster_ )
++  {
++    gray_PRaster  raster = (gray_PRaster)raster_;
++    FT_Memory     memory = (FT_Memory)raster->memory;
++    gray_PWorker  worker = raster->worker.next;
++
++
++    while ( worker )
++    {
++      gray_PWorker  next = worker->next;
++
++
++      FT_FREE( worker );
++      worker = next;
++    }
+     FT_FREE( raster );
+   }
+ 
+--- a/freetype-2.14.3/src/raster/ftraster.c
++++ b/freetype-2.14.3/src/raster/ftraster.c
+@@ -365,8 +365,8 @@
+ #undef RAS_VAR
+ #undef RAS_VARS
+ 
+-#ifdef FT_STATIC_RASTER
+-
++  /* Library rasters always use their own worker and render pool. */
++#if defined( FT_STATIC_RASTER ) && defined( STANDALONE_ )
+ 
+ #define RAS_ARGS       /* void */
+ #define RAS_ARG        void
+@@ -376,9 +376,7 @@
+ 
+ #define FT_UNUSED_RASTER  do { } while ( 0 )
+ 
+-
+-#else /* !FT_STATIC_RASTER */
+-
++#else
+ 
+ #define RAS_ARGS       black_PWorker  worker,
+ #define RAS_ARG        black_PWorker  worker
+@@ -387,9 +385,9 @@
+ #define RAS_VAR        worker
+ 
+ #define FT_UNUSED_RASTER  FT_UNUSED( worker )
+-
+-
+-#endif /* !FT_STATIC_RASTER */
++#endif
++
++
+ 
+ 
+   typedef struct black_TWorker_  black_TWorker, *black_PWorker;
+@@ -487,24 +485,28 @@
+     Function_Sweep_Span*  Proc_Sweep_Drop;
+     Function_Sweep_Step*  Proc_Sweep_Step;
+ 
++#ifndef STANDALONE_
++    Long        buffer[FT_MAX_BLACK_POOL];
++#endif
++
+   };
+ 
+ 
+   typedef struct  black_TRaster_
+   {
+     void*          memory;
++#ifndef STANDALONE_
++    black_TWorker  worker;
++#endif
+ 
+   } black_TRaster, *black_PRaster;
+ 
+-#ifdef FT_STATIC_RASTER
+-
++#if defined( FT_STATIC_RASTER ) && defined( STANDALONE_ )
+   static black_TWorker  ras;
+-
+-#else /* !FT_STATIC_RASTER */
+-
++#else
+ #define ras  (*worker)
+-
+-#endif /* !FT_STATIC_RASTER */
++#endif
++
+ 
+ 
+   /*************************************************************************/
+@@ -2517,11 +2519,15 @@
+   Render_Glyph( RAS_ARG )
+   {
+     FT_Error  error;
++#ifdef STANDALONE_
+     Long      buffer[FT_MAX_BLACK_POOL];
++#else
++    PLong     buffer = ras.buffer;
++#endif
+ 
+ 
+     ras.buff     = buffer;
+-    ras.sizeBuff = (&buffer)[1]; /* Points to right after buffer. */
++    ras.sizeBuff = buffer + FT_MAX_BLACK_POOL;
+ 
+     Set_High_Precision( RAS_VARS ras.outline.flags &
+                                  FT_OUTLINE_HIGH_PRECISION );
+@@ -2665,13 +2671,21 @@
+     const FT_Outline*  outline    = (const FT_Outline*)params->source;
+     const FT_Bitmap*   target_map = params->target;
+ 
++#ifdef STANDALONE_
+ #ifndef FT_STATIC_RASTER
+     black_TWorker  worker[1];
+ #endif
++#else
++    black_PWorker  worker;
++#endif
+ 
+ 
+     if ( !raster )
+       return FT_THROW( Raster_Uninitialized );
++
++#ifndef STANDALONE_
++    worker = &((black_PRaster)raster)->worker;
++#endif
+ 
+     if ( !outline )
+       return FT_THROW( Invalid_Outline );
+--- a/freetype-2.14.3/src/psaux/psintrp.c
++++ b/freetype-2.14.3/src/psaux/psintrp.c
+@@ -458,6 +458,66 @@
+   }
+ 
+ 
++  typedef struct  CF2_InterpStorageRec_
++  {
++    struct CF2_InterpStorageRec_*  next;
++    FT_Bool                       inUse;
++
++    CF2_GlyphPathRec  glyphPath;
++    CF2_HintMapRec    counterHintMap;
++
++  } CF2_InterpStorageRec, *CF2_InterpStorage;
++
++
++  /* Keep the large hint maps off the stack.  An active interpreter owns
++   * its entry until exit, so seac components and callbacks can recurse
++   * without overwriting their caller's maps.  Retain entries across glyphs.
++   */
++  static CF2_InterpStorage
++  cf2_interp_getStorage( CF2_Font  font )
++  {
++    FT_Memory  memory = font->memory;
++    FT_Error   error;
++
++    CF2_InterpStorage*  entry = &font->interpStorage;
++
++
++    while ( *entry && ( *entry )->inUse )
++      entry = &( *entry )->next;
++
++    if ( !*entry && FT_NEW( *entry ) )
++    {
++      cf2_setError( &font->error, error );
++      return NULL;
++    }
++
++    ( *entry )->inUse = TRUE;
++
++    return *entry;
++  }
++
++
++  FT_LOCAL_DEF( void )
++  cf2_interp_freeStorage( CF2_Font  font )
++  {
++    FT_Memory          memory = font->memory;
++    CF2_InterpStorage  entry  = font->interpStorage;
++
++
++    while ( entry )
++    {
++      CF2_InterpStorage  next = entry->next;
++
++
++      FT_ASSERT( !entry->inUse );
++      FT_FREE( entry );
++      entry = next;
++    }
++
++    font->interpStorage = NULL;
++  }
++
++
+   /*
+    * `error' is a shared error code used by many objects in this
+    * routine.  Before the code continues from an error, it must check and
+@@ -531,9 +591,18 @@
+     CF2_ArrStackRec  hStemHintArray;
+     CF2_ArrStackRec  vStemHintArray;
+ 
+-    CF2_HintMaskRec   hintMask;
+-    CF2_GlyphPathRec  glyphPath;
+-
++    CF2_HintMaskRec    hintMask;
++    CF2_GlyphPath      glyphPath;
++    CF2_InterpStorage  interpStorage;
++
++
++    interpStorage = cf2_interp_getStorage( font );
++    if ( !interpStorage )
++    {
++      *width = cf2_getDefaultWidthX( decoder );
++      return;
++    }
++    glyphPath = &interpStorage->glyphPath;
+ 
+     FT_ZERO( &storage );
+     FT_ZERO( &results );
+@@ -561,7 +630,7 @@
+     /* Note: last 4 params are used to handle `MoveToPermissive', which */
+     /*       may need to call `hintMap.Build'                           */
+     /* TODO: MoveToPermissive is gone; are these still needed?          */
+-    cf2_glyphpath_init( &glyphPath,
++    cf2_glyphpath_init( glyphPath,
+                         font,
+                         callbacks,
+                         scaleY,
+@@ -863,7 +932,7 @@
+         curY = ADD_INT32( curY, cf2_stack_popFixed( opStack ) );
+ 
+         if ( !decoder->flex_state )
+-          cf2_glyphpath_moveTo( &glyphPath, curX, curY );
++          cf2_glyphpath_moveTo( glyphPath, curX, curY );
+ 
+         break;
+ 
+@@ -882,7 +951,7 @@
+             curY = ADD_INT32( curY, cf2_stack_getReal( opStack,
+                                                        idx + 1 ) );
+ 
+-            cf2_glyphpath_lineTo( &glyphPath, curX, curY );
++            cf2_glyphpath_lineTo( glyphPath, curX, curY );
+           }
+ 
+           cf2_stack_clear( opStack );
+@@ -912,7 +981,7 @@
+ 
+             isX = !isX;
+ 
+-            cf2_glyphpath_lineTo( &glyphPath, curX, curY );
++            cf2_glyphpath_lineTo( glyphPath, curX, curY );
+           }
+ 
+           cf2_stack_clear( opStack );
+@@ -941,7 +1010,7 @@
+             x3 = ADD_INT32( cf2_stack_getReal( opStack, idx + 4 ), x2 );
+             y3 = ADD_INT32( cf2_stack_getReal( opStack, idx + 5 ), y2 );
+ 
+-            cf2_glyphpath_curveTo( &glyphPath, x1, y1, x2, y2, x3, y3 );
++            cf2_glyphpath_curveTo( glyphPath, x1, y1, x2, y2, x3, y3 );
+ 
+             curX  = x3;
+             curY  = y3;
+@@ -955,7 +1024,7 @@
+             curY = ADD_INT32( curY, cf2_stack_getReal( opStack,
+                                                        idx + 1 ) );
+ 
+-            cf2_glyphpath_lineTo( &glyphPath, curX, curY );
++            cf2_glyphpath_lineTo( glyphPath, curX, curY );
+           }
+ 
+           cf2_stack_clear( opStack );
+@@ -970,7 +1039,7 @@
+           FT_TRACE4(( " closepath\n" ));
+ 
+           /* if there is no path, `closepath' is a no-op */
+-          cf2_glyphpath_closeOpenPath( &glyphPath );
++          cf2_glyphpath_closeOpenPath( glyphPath );
+ 
+           haveWidth = TRUE;
+         }
+@@ -1093,7 +1162,7 @@
+               cf2_doFlex( opStack,
+                           &curX,
+                           &curY,
+-                          &glyphPath,
++                          glyphPath,
+                           readFromStack,
+                           FALSE /* doConditionalLastRead */ );
+             }
+@@ -1117,7 +1186,7 @@
+               cf2_doFlex( opStack,
+                           &curX,
+                           &curY,
+-                          &glyphPath,
++                          glyphPath,
+                           readFromStack,
+                           FALSE /* doConditionalLastRead */ );
+             }
+@@ -1141,7 +1210,7 @@
+               cf2_doFlex( opStack,
+                           &curX,
+                           &curY,
+-                          &glyphPath,
++                          glyphPath,
+                           readFromStack,
+                           FALSE /* doConditionalLastRead */ );
+             }
+@@ -1165,7 +1234,7 @@
+               cf2_doFlex( opStack,
+                           &curX,
+                           &curY,
+-                          &glyphPath,
++                          glyphPath,
+                           readFromStack,
+                           TRUE /* doConditionalLastRead */ );
+             }
+@@ -1791,7 +1860,7 @@
+                           flexStore[idx2 - 1] = curY;
+ 
+                           if ( idx == 3 || idx == 6 )
+-                            cf2_glyphpath_curveTo( &glyphPath,
++                            cf2_glyphpath_curveTo( glyphPath,
+                                                    flexStore[0],
+                                                    flexStore[1],
+                                                    flexStore[2],
+@@ -2460,7 +2529,7 @@
+                       "Build initial hintmap, rewinding...\n" ));
+ 
+           /* trigger initial hintmap build */
+-          cf2_glyphpath_moveTo( &glyphPath, curX, curY );
++          cf2_glyphpath_moveTo( glyphPath, curX, curY );
+ 
+           initial_map_ready = TRUE;
+ 
+@@ -2506,7 +2575,7 @@
+           goto exit;
+ 
+         /* close path if still open */
+-        cf2_glyphpath_closeOpenPath( &glyphPath );
++        cf2_glyphpath_closeOpenPath( glyphPath );
+ 
+         /* disable seac for CFF2 and Type1        */
+         /* (charstring ending with args on stack) */
+@@ -2617,14 +2686,14 @@
+            * discard `counterMask' and `counterHintMap'.
+            *
+            */
+-          CF2_HintMapRec   counterHintMap;
++          CF2_HintMap      counterHintMap = &interpStorage->counterHintMap;
+           CF2_HintMaskRec  counterMask;
+ 
+ 
+-          cf2_hintmap_init( &counterHintMap,
++          cf2_hintmap_init( counterHintMap,
+                             font,
+-                            &glyphPath.initialHintMap,
+-                            &glyphPath.hintMoves,
++                            &glyphPath->initialHintMap,
++                            &glyphPath->hintMoves,
+                             scaleY );
+           cf2_hintmask_init( &counterMask, error );
+ 
+@@ -2632,7 +2701,7 @@
+                              charstring,
+                              cf2_arrstack_size( &hStemHintArray ) +
+                                cf2_arrstack_size( &vStemHintArray ) );
+-          cf2_hintmap_build( &counterHintMap,
++          cf2_hintmap_build( counterHintMap,
+                              &hStemHintArray,
+                              &vStemHintArray,
+                              &counterMask,
+@@ -2662,7 +2731,7 @@
+         curX = ADD_INT32( curX, cf2_stack_popFixed( opStack ) );
+ 
+         if ( !decoder->flex_state )
+-          cf2_glyphpath_moveTo( &glyphPath, curX, curY );
++          cf2_glyphpath_moveTo( glyphPath, curX, curY );
+ 
+         break;
+ 
+@@ -2686,7 +2755,7 @@
+         curX = ADD_INT32( curX, cf2_stack_popFixed( opStack ) );
+ 
+         if ( !decoder->flex_state )
+-          cf2_glyphpath_moveTo( &glyphPath, curX, curY );
++          cf2_glyphpath_moveTo( glyphPath, curX, curY );
+ 
+         break;
+ 
+@@ -2705,7 +2774,7 @@
+             curY = ADD_INT32( curY, cf2_stack_getReal( opStack,
+                                                        idx + 1 ) );
+ 
+-            cf2_glyphpath_lineTo( &glyphPath, curX, curY );
++            cf2_glyphpath_lineTo( glyphPath, curX, curY );
+             idx += 2;
+           }
+ 
+@@ -2721,7 +2790,7 @@
+             x3 = ADD_INT32( cf2_stack_getReal( opStack, idx + 4 ), x2 );
+             y3 = ADD_INT32( cf2_stack_getReal( opStack, idx + 5 ), y2 );
+ 
+-            cf2_glyphpath_curveTo( &glyphPath, x1, y1, x2, y2, x3, y3 );
++            cf2_glyphpath_curveTo( glyphPath, x1, y1, x2, y2, x3, y3 );
+ 
+             curX  = x3;
+             curY  = y3;
+@@ -2766,7 +2835,7 @@
+             x3 = x2;
+             y3 = ADD_INT32( cf2_stack_getReal( opStack, idx + 3 ), y2 );
+ 
+-            cf2_glyphpath_curveTo( &glyphPath, x1, y1, x2, y2, x3, y3 );
++            cf2_glyphpath_curveTo( glyphPath, x1, y1, x2, y2, x3, y3 );
+ 
+             curX  = x3;
+             curY  = y3;
+@@ -2811,7 +2880,7 @@
+             x3 = ADD_INT32( cf2_stack_getReal( opStack, idx + 3 ), x2 );
+             y3 = y2;
+ 
+-            cf2_glyphpath_curveTo( &glyphPath, x1, y1, x2, y2, x3, y3 );
++            cf2_glyphpath_curveTo( glyphPath, x1, y1, x2, y2, x3, y3 );
+ 
+             curX  = x3;
+             curY  = y3;
+@@ -2884,7 +2953,7 @@
+               alternate = TRUE;
+             }
+ 
+-            cf2_glyphpath_curveTo( &glyphPath, x1, y1, x2, y2, x3, y3 );
++            cf2_glyphpath_curveTo( glyphPath, x1, y1, x2, y2, x3, y3 );
+ 
+             curX  = x3;
+             curY  = y3;
+@@ -3035,11 +3104,12 @@
+       FT_TRACE4(( "charstring error %d\n", *error ));
+ 
+     /* free resources from objects we've used */
+-    cf2_glyphpath_finalize( &glyphPath );
++    cf2_glyphpath_finalize( glyphPath );
+     cf2_arrstack_finalize( &vStemHintArray );
+     cf2_arrstack_finalize( &hStemHintArray );
+     cf2_arrstack_finalize( &subrStack );
+     cf2_stack_free( opStack );
++    interpStorage->inUse = FALSE;
+ 
+     FT_TRACE4(( "\n" ));
+ 
+--- a/freetype-2.14.3/src/psaux/psintrp.h
++++ b/freetype-2.14.3/src/psaux/psintrp.h
+@@ -64,6 +64,9 @@
+                        size_t        bitCount );
+ 
+   FT_LOCAL( void )
++  cf2_interp_freeStorage( CF2_Font  font );
++
++  FT_LOCAL( void )
+   cf2_interpT2CharString( CF2_Font              font,
+                           const CF2_Buffer      buf,
+                           CF2_OutlineCallbacks  callbacks,
+--- a/freetype-2.14.3/src/psaux/psfont.h
++++ b/freetype-2.14.3/src/psaux/psfont.h
+@@ -64,6 +64,9 @@
+   {
+     FT_Memory  memory;
+     FT_Error   error;     /* shared error for this instance */
++
++    /* Cached working storage, with one entry per active interpreter call. */
++    struct CF2_InterpStorageRec_*  interpStorage;
+ 
+     FT_Bool             isT1;
+     FT_Bool             isCFF2;
+--- a/freetype-2.14.3/src/psaux/psft.c
++++ b/freetype-2.14.3/src/psaux/psft.c
+@@ -41,6 +41,7 @@
+ 
+ #include "psfont.h"
+ #include "pserror.h"
++#include "psintrp.h"
+ #include "psobjs.h"
+ #include "cffdecode.h"
+ 
+@@ -113,6 +114,7 @@
+       FT_Memory  memory = font->memory;
+ 
+ 
++      cf2_interp_freeStorage( font );
+       FT_FREE( font->blend.lastNDV );
+       FT_FREE( font->blend.BV );
+     }

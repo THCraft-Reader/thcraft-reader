@@ -365,8 +365,8 @@
 #undef RAS_VAR
 #undef RAS_VARS
 
-#ifdef FT_STATIC_RASTER
-
+  /* Library rasters always use their own worker and render pool. */
+#if defined( FT_STATIC_RASTER ) && defined( STANDALONE_ )
 
 #define RAS_ARGS       /* void */
 #define RAS_ARG        void
@@ -376,9 +376,7 @@
 
 #define FT_UNUSED_RASTER  do { } while ( 0 )
 
-
-#else /* !FT_STATIC_RASTER */
-
+#else
 
 #define RAS_ARGS       black_PWorker  worker,
 #define RAS_ARG        black_PWorker  worker
@@ -387,9 +385,9 @@
 #define RAS_VAR        worker
 
 #define FT_UNUSED_RASTER  FT_UNUSED( worker )
+#endif
 
 
-#endif /* !FT_STATIC_RASTER */
 
 
   typedef struct black_TWorker_  black_TWorker, *black_PWorker;
@@ -487,24 +485,28 @@
     Function_Sweep_Span*  Proc_Sweep_Drop;
     Function_Sweep_Step*  Proc_Sweep_Step;
 
+#ifndef STANDALONE_
+    Long        buffer[FT_MAX_BLACK_POOL];
+#endif
+
   };
 
 
   typedef struct  black_TRaster_
   {
     void*          memory;
+#ifndef STANDALONE_
+    black_TWorker  worker;
+#endif
 
   } black_TRaster, *black_PRaster;
 
-#ifdef FT_STATIC_RASTER
-
+#if defined( FT_STATIC_RASTER ) && defined( STANDALONE_ )
   static black_TWorker  ras;
-
-#else /* !FT_STATIC_RASTER */
-
+#else
 #define ras  (*worker)
+#endif
 
-#endif /* !FT_STATIC_RASTER */
 
 
   /*************************************************************************/
@@ -2517,11 +2519,15 @@
   Render_Glyph( RAS_ARG )
   {
     FT_Error  error;
+#ifdef STANDALONE_
     Long      buffer[FT_MAX_BLACK_POOL];
+#else
+    PLong     buffer = ras.buffer;
+#endif
 
 
     ras.buff     = buffer;
-    ras.sizeBuff = (&buffer)[1]; /* Points to right after buffer. */
+    ras.sizeBuff = buffer + FT_MAX_BLACK_POOL;
 
     Set_High_Precision( RAS_VARS ras.outline.flags &
                                  FT_OUTLINE_HIGH_PRECISION );
@@ -2665,13 +2671,21 @@
     const FT_Outline*  outline    = (const FT_Outline*)params->source;
     const FT_Bitmap*   target_map = params->target;
 
+#ifdef STANDALONE_
 #ifndef FT_STATIC_RASTER
     black_TWorker  worker[1];
+#endif
+#else
+    black_PWorker  worker;
 #endif
 
 
     if ( !raster )
       return FT_THROW( Raster_Uninitialized );
+
+#ifndef STANDALONE_
+    worker = &((black_PRaster)raster)->worker;
+#endif
 
     if ( !outline )
       return FT_THROW( Invalid_Outline );

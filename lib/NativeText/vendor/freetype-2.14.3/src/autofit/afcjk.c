@@ -59,12 +59,14 @@
   /* Basically the Latin version with AF_CJKMetrics */
   /* to replace AF_LatinMetrics.                    */
 
-  FT_LOCAL_DEF( void )
+  FT_LOCAL_DEF( FT_Error )
   af_cjk_metrics_init_widths( AF_CJKMetrics  metrics,
                               FT_Face        face )
   {
     /* scan the array of segments in each direction */
-    AF_GlyphHintsRec  hints[1];
+    AF_HintsWorkspace  workspace;
+    AF_GlyphHints      hints;
+    FT_Error           error;
 
 
     FT_TRACE5(( "\n" ));
@@ -73,17 +75,22 @@
     FT_TRACE5(( "===================================================\n" ));
     FT_TRACE5(( "\n" ));
 
-    af_glyph_hints_init( hints, face->memory );
+    error = af_module_acquire_workspace( metrics->root.globals->module,
+                                          sizeof ( AF_CJKMetricsRec ),
+                                          &workspace );
+    if ( error )
+      return error;
+
+    hints = workspace->hints;
 
     metrics->axis[AF_DIMENSION_HORZ].width_count = 0;
     metrics->axis[AF_DIMENSION_VERT].width_count = 0;
 
     {
-      FT_Error          error;
-      FT_ULong          glyph_index;
-      int               dim;
-      AF_CJKMetricsRec  dummy[1];
-      AF_Scaler         scaler = &dummy->root.scaler;
+      FT_ULong       glyph_index;
+      int            dim;
+      AF_CJKMetrics  dummy = (AF_CJKMetrics)workspace->metrics;
+      AF_Scaler      scaler = &dummy->root.scaler;
 
       AF_StyleClass   style_class  = metrics->root.style_class;
       AF_ScriptClass  script_class = af_script_classes[style_class->script];
@@ -262,7 +269,8 @@
 
     FT_TRACE5(( "\n" ));
 
-    af_glyph_hints_done( hints );
+    af_module_release_workspace( workspace, error );
+    return error;
   }
 
 
@@ -625,19 +633,24 @@
   {
     AF_CJKMetrics  metrics = (AF_CJKMetrics)metrics_;
     FT_CharMap     oldmap  = face->charmap;
+    FT_Error       error   = FT_Err_Ok;
 
 
     metrics->units_per_em = face->units_per_EM;
 
     if ( !FT_Select_Charmap( face, FT_ENCODING_UNICODE ) )
     {
-      af_cjk_metrics_init_widths( metrics, face );
+      error = af_cjk_metrics_init_widths( metrics, face );
+      if ( error )
+        goto Exit;
+
       af_cjk_metrics_init_blues( metrics, face );
       af_cjk_metrics_check_digits( metrics, face );
     }
 
+  Exit:
     face->charmap = oldmap;
-    return FT_Err_Ok;
+    return error;
   }
 
 

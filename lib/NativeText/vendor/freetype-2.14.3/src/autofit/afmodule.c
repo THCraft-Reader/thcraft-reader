@@ -47,10 +47,8 @@
   int  af_debug_disable_vert_hints_;
   int  af_debug_disable_blue_hints_;
 
-  /* we use a global object instead of a local one for debugging */
-  static AF_GlyphHintsRec  af_debug_hints_rec_[1];
-
-  void*  af_debug_hints_ = af_debug_hints_rec_;
+  /* A view of the last glyph's module-owned hints, not shared scratch. */
+  void*  af_debug_hints_ = NULL;
 #endif
 
 #include <freetype/internal/ftobjs.h>
@@ -393,6 +391,90 @@
   }
 
 
+  FT_LOCAL_DEF( FT_Error )
+  af_module_acquire_workspace( AF_Module           module,
+                               FT_ULong            metrics_size,
+                               AF_HintsWorkspace  *aworkspace )
+  {
+    FT_Memory          memory = module->root.memory;
+    FT_Error           error;
+    AF_HintsWorkspace  workspace;
+    AF_GlyphHints      hints;
+    FT_UInt            dim;
+
+
+    *aworkspace = NULL;
+
+    for ( workspace = module->workspaces;
+          workspace && workspace->in_use;
+          workspace = workspace->next )
+      ;
+
+    if ( !workspace )
+    {
+      if ( FT_NEW( workspace ) )
+        return error;
+
+      af_glyph_hints_init( workspace->hints, memory );
+      workspace->next    = module->workspaces;
+      module->workspaces = workspace;
+    }
+
+    /* Reserve before allocating: memory and font callbacks can re-enter. */
+    workspace->in_use = TRUE;
+    if ( metrics_size > workspace->metrics_size )
+    {
+      if ( FT_REALLOC( workspace->metrics,
+                       workspace->metrics_size, metrics_size ) )
+      {
+        workspace->in_use = FALSE;
+        return error;
+      }
+      workspace->metrics_size = metrics_size;
+    }
+
+    /* Keep the grown buffers, but start with fresh per-glyph state. */
+    hints = workspace->hints;
+    hints->x_scale      = 0;
+    hints->y_scale      = 0;
+    hints->x_delta      = 0;
+    hints->y_delta      = 0;
+    hints->num_points  = 0;
+    hints->num_contours = 0;
+    hints->scaler_flags = 0;
+    hints->other_flags  = 0;
+    hints->metrics      = NULL;
+
+    for ( dim = 0; dim < AF_DIMENSION_MAX; dim++ )
+    {
+      hints->axis[dim].num_segments = 0;
+      hints->axis[dim].num_edges    = 0;
+      hints->axis[dim].major_dir    = (AF_Direction)0;
+    }
+
+    *aworkspace = workspace;
+    return FT_Err_Ok;
+  }
+
+
+  FT_LOCAL_DEF( void )
+  af_module_release_workspace( AF_HintsWorkspace  workspace,
+                               FT_Error           error )
+  {
+    if ( error )
+    {
+      FT_Memory  memory = workspace->hints->memory;
+
+
+      /* A failed grow can leave only some of the contour arrays resized. */
+      af_glyph_hints_done( workspace->hints );
+      af_glyph_hints_init( workspace->hints, memory );
+    }
+
+    workspace->in_use = FALSE;
+  }
+
+
   FT_CALLBACK_DEF( FT_Error )
   af_autofitter_init( FT_Module  ft_module )      /* AF_Module */
   {
@@ -424,17 +506,33 @@
   FT_CALLBACK_DEF( void )
   af_autofitter_done( FT_Module  ft_module )      /* AF_Module */
   {
-    FT_UNUSED( ft_module );
+    AF_Module          module = (AF_Module)ft_module;
+    FT_Memory          memory = module->root.memory;
+    AF_HintsWorkspace  workspace = module->workspaces;
+
+
+    while ( workspace )
+    {
+      AF_HintsWorkspace  next = workspace->next;
+
+
+#ifdef FT_DEBUG_AUTOFIT
+      if ( af_debug_hints_ == workspace->hints )
+        af_debug_hints_ = NULL;
+#endif
+      af_glyph_hints_done( workspace->hints );
+      FT_FREE( workspace->metrics );
+      FT_FREE( workspace );
+      workspace = next;
+    }
+
+    module->workspaces = NULL;
 
 #if defined( FT_CONFIG_OPTION_USE_HARFBUZZ )         && \
     defined( FT_CONFIG_OPTION_USE_HARFBUZZ_DYNAMIC )
     ft_hb_funcs_done( (AF_Module)ft_module );
 #endif
 
-#ifdef FT_DEBUG_AUTOFIT
-    if ( af_debug_hints_rec_->memory )
-      af_glyph_hints_done( af_debug_hints_rec_ );
-#endif
   }
 
 
@@ -445,29 +543,27 @@
                             FT_UInt        glyph_index,
                             FT_Int32       load_flags )
   {
-    AF_Module  module = (AF_Module)module_;
-
-    FT_Error   error  = FT_Err_Ok;
-    FT_Memory  memory = module->root.memory;
-
-#ifdef FT_DEBUG_AUTOFIT
-
-    /* in debug mode, we use a global object that survives this routine */
-
-    AF_GlyphHints  hints = af_debug_hints_rec_;
-    AF_LoaderRec   loader[1];
+    AF_Module          module = (AF_Module)module_;
+    FT_Error           error;
+    AF_HintsWorkspace  workspace;
+    AF_GlyphHints      hints;
+    AF_LoaderRec       loader[1];
 
     FT_UNUSED( size );
 
 
-    if ( hints->memory )
-      af_glyph_hints_done( hints );
+    error = af_module_acquire_workspace( module, 0, &workspace );
+    if ( error )
+      return error;
 
-    af_glyph_hints_init( hints, memory );
+    hints = workspace->hints;
     af_loader_init( loader, hints );
 
     error = af_loader_load_glyph( loader, module, slot->face,
                                   glyph_index, load_flags );
+
+#ifdef FT_DEBUG_AUTOFIT
+    af_debug_hints_ = hints;
 
 #ifdef FT_DEBUG_LEVEL_TRACE
     if ( ft_trace_levels[FT_TRACE_COMP( FT_COMPONENT )] )
@@ -479,31 +575,12 @@
 #ifdef FT_DEBUG_LEVEL_TRACE
     }
 #endif
+#endif /* FT_DEBUG_AUTOFIT */
 
     af_loader_done( loader );
+    af_module_release_workspace( workspace, error );
 
     return error;
-
-#else /* !FT_DEBUG_AUTOFIT */
-
-    AF_GlyphHintsRec  hints[1];
-    AF_LoaderRec      loader[1];
-
-    FT_UNUSED( size );
-
-
-    af_glyph_hints_init( hints, memory );
-    af_loader_init( loader, hints );
-
-    error = af_loader_load_glyph( loader, module, slot->face,
-                                  glyph_index, load_flags );
-
-    af_loader_done( loader );
-    af_glyph_hints_done( hints );
-
-    return error;
-
-#endif /* !FT_DEBUG_AUTOFIT */
   }
 
 
