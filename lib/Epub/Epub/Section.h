@@ -1,4 +1,5 @@
 #pragma once
+#include <HalStorage.h>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -14,6 +15,9 @@ class ChapterHtmlSlimParser;
 class CssParser;
 
 class Section {
+#ifdef CROSSPOINT_PARSER_TEST
+  friend class SectionThaiCacheTestPeer;
+#endif
   std::shared_ptr<Epub> epub;
   const int spineIndex;
   GfxRenderer& renderer;
@@ -47,6 +51,8 @@ class Section {
     // HTML byte progress, for estimating the section's total page count while it's still building.
     uint32_t bytesConsumed = 0;
     uint32_t totalBytes = 0;
+    // Preserve the supplied identity without reading back from the build's write handle.
+    uint32_t thaiLayoutId = 0;
     // Exponentially-smoothed page-count estimate (0 = not yet seeded) and the bytesConsumed at its
     // last update. The raw byte-ratio estimate jitters as the build crosses dense/sparse regions;
     // the EMA is stepped once per build advance (not per redraw) to damp that wobble.

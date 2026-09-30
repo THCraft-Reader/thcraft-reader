@@ -1063,6 +1063,10 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
   if (!section) return false;
   {
     RenderLock lock;
+#if THAI_ENGINE_STATS
+    beginThaiStatsWindow();
+    thaiTurnWindow = true;
+#endif
     clearDeferredReposition();
   }
   if (isForwardTurn) {
@@ -1102,6 +1106,13 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
 
 bool EpubReaderActivity::skipPages(int amount) {
   if (!section) return false;
+#if THAI_ENGINE_STATS
+  {
+    RenderLock lock;
+    beginThaiStatsWindow();
+    thaiTurnWindow = true;
+  }
+#endif
   if (amount > 0) {
     RenderLock lock;
     nextPageNumber = 0;
@@ -1146,6 +1157,15 @@ bool EpubReaderActivity::skipLoopDelay() {
 void EpubReaderActivity::renderBook() {
   currentPageLinks.clear();
   if (!epub) return;
+#if THAI_ENGINE_STATS
+  // Menu/progress jumps bypass pageTurn(). Their event window starts here;
+  // ordinary turns start at the input event, before section build/load work.
+  if (thaiLastRenderedSpine >= 0 && !thaiTurnWindow &&
+      (currentSpineIndex != thaiLastRenderedSpine || !section || section->currentPage != thaiLastRenderedPage)) {
+    beginThaiStatsWindow();
+    thaiTurnWindow = true;
+  }
+#endif
   // Runs under the render task's RenderLock; catches every requestUpdate()
   // exit from the overlay while its deferred chrome refresh is still pending.
   settleOverlayRefresh();
@@ -1449,6 +1469,14 @@ void EpubReaderActivity::renderBook() {
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
     lastRenderCompleteMs = millis();
     markPageRendered();
+#if THAI_ENGINE_STATS
+    if (thaiLastRenderedSpine != currentSpineIndex || thaiLastRenderedPage != section->currentPage) {
+      logThaiStatsPhase(thaiLastRenderedSpine < 0 ? "first_page" : "page_turn");
+      thaiLastRenderedSpine = currentSpineIndex;
+      thaiLastRenderedPage = section->currentPage;
+    }
+    thaiTurnWindow = false;
+#endif
   }
 
   if (currentSpineIndex != lastSavedSpineIndex || section->currentPage != lastSavedPage ||

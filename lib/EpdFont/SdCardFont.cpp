@@ -5,6 +5,10 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Utf8.h>
+#include <ThaiCharClass.h>
+#include <ThaiConfig.h>
+#include <MinizConfig.h>
+#include <HalMemory.h>
 
 #include <algorithm>
 #include <climits>
@@ -21,6 +25,8 @@
 // through psramNewArray MUST be released with psramDeleteArray.
 using freeink::font::psramDeleteArray;
 using freeink::font::psramNewArray;
+
+void ThaiShapeBufferDeleter::operator()(uint8_t* bytes) const { psramDeleteArray(bytes); }
 
 static_assert(sizeof(EpdGlyph) == 16, "EpdGlyph must be 16 bytes to match .cpfont file layout");
 static_assert(sizeof(EpdUnicodeInterval) == 12, "EpdUnicodeInterval must be 12 bytes to match .cpfont file layout");
@@ -51,30 +57,10 @@ constexpr uint32_t STYLE_TOC_ENTRY_SIZE = 32;
 // Helper to read little-endian values from byte buffer
 inline uint16_t readU16(const uint8_t* p) { return p[0] | (p[1] << 8); }
 inline int16_t readI16(const uint8_t* p) { return static_cast<int16_t>(p[0] | (p[1] << 8)); }
-inline uint32_t readU32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
-
-// Walks a null-terminated UTF-8 string and appends each unique codepoint to
-// codepoints[0..cpCount-1] via O(n²) dedup.  Returns true if the buffer
-// reached maxCount (cap hit), false if all codepoints fit.
-bool collectUniqueCodepoints(const char* text, uint32_t* codepoints, uint32_t& cpCount, uint32_t maxCount) {
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
-  while (*p) {
-    uint32_t cp = utf8NextCodepoint(&p);
-    if (cp == 0) break;
-    bool found = false;
-    for (uint32_t i = 0; i < cpCount; i++) {
-      if (codepoints[i] == cp) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      if (cpCount >= maxCount) return true;
-      codepoints[cpCount++] = cp;
-    }
-  }
-  return false;
+inline uint32_t readU32(const uint8_t* p) {
+  return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
+
 
 // resetStyleMiniData retention bounds (see the PerStyle comment in the header).
 constexpr size_t MINI_RETAIN_MIN_FREE_HEAP = 40 * 1024;
@@ -102,6 +88,153 @@ bool ensureArrayCapacity(T*& buf, CapT& capacity, const uint32_t needed) {
 
 SdCardFont::~SdCardFont() { freeAll(); }
 
+void SdCardFont::loadThaiShape() {
+  const uint8_t disabledIdentity[] = {1, THAI_SHAPING ? uint8_t{1} : uint8_t{0}, 0};
+  contentHash_ = fnv1a(disabledIdentity, sizeof(disabledIdentity), contentHash_);
+#if THAI_SHAPING
+  char path[sizeof(filePath_) + 2];
+  const char* extension = strrchr(filePath_, '.');
+  if (!extension || strcmp(extension, ".cpfont") != 0) return;
+  const size_t stem = static_cast<size_t>(extension - filePath_);
+  memcpy(path, filePath_, stem);
+  memcpy(path + stem, ".cpshape", 9);
+  if (!Storage.exists(path)) return;
+  const auto load = [&]() -> bool {
+    HalFile companion;
+    if (!Storage.openFileForRead("THAI", path, companion)) return false;
+    const size_t size = companion.size();
+    if (size < 44 || size > ThaiShapeView::MAX_FAMILY_BYTES ||
+        HalMemory::getInternal8BitHeap().freeBytes <= 50 * 1024) return false;
+    std::unique_ptr<uint8_t[], ThaiShapeBufferDeleter> buffer(psramNewArray<uint8_t>(size));
+    if (!buffer || HalMemory::getInternal8BitHeap().freeBytes <= 50 * 1024) return false;
+    uint8_t* bytes = buffer.get();
+    if (companion.read(bytes, size) != static_cast<int>(size)) return false;
+    companion.close();
+    if (memcmp(bytes, "CPSHAPE\0", 8) || readU16(bytes + 8) != 1 || readU16(bytes + 10) != 32 ||
+        readU32(bytes + 24) != size || readU32(bytes + 28) != styleCount_) return false;
+    const uint32_t payloadCRC = static_cast<uint32_t>(mz_crc32(MZ_CRC32_INIT, bytes + 32, size - 32));
+    if (payloadCRC != readU32(bytes + 20)) return false;
+    HalFile font;
+    if (!Storage.openFileForRead("THAI", filePath_, font) || font.size() != readU32(bytes + 12)) return false;
+    const size_t fontSize = font.size();
+    uint32_t metricsCRC = MZ_CRC32_INIT;
+    const auto checksumRange = [&](uint32_t offset, uint32_t count) -> bool {
+      if (offset > fontSize || count > fontSize - offset || !font.seekSet(offset)) return false;
+      uint8_t chunk[256];
+      while (count) {
+        const uint32_t n = std::min<uint32_t>(count, sizeof(chunk));
+        if (font.read(chunk, n) != static_cast<int>(n)) return false;
+        metricsCRC = static_cast<uint32_t>(mz_crc32(metricsCRC, chunk, n));
+        count -= n;
+      }
+      return true;
+    };
+    uint32_t previousEnd = HEADER_SIZE + styleCount_ * STYLE_TOC_ENTRY_SIZE;
+    if (!checksumRange(0, previousEnd)) return false;
+    uint8_t visited = 0;
+    for (uint8_t n = 0; n < styleCount_; ++n) {
+      uint8_t selected = MAX_STYLES;
+      for (uint8_t i = 0; i < MAX_STYLES; ++i) {
+        if (!styles_[i].present || (visited & (1u << i))) continue;
+        if (selected == MAX_STYLES || styles_[i].intervalsFileOffset < styles_[selected].intervalsFileOffset)
+          selected = i;
+      }
+      if (selected == MAX_STYLES) return false;
+      const auto& s = styles_[selected];
+      if (s.intervalsFileOffset < previousEnd || s.bitmapFileOffset < s.intervalsFileOffset ||
+          !checksumRange(s.intervalsFileOffset, s.bitmapFileOffset - s.intervalsFileOffset)) return false;
+      previousEnd = s.bitmapFileOffset;
+      visited |= static_cast<uint8_t>(1u << selected);
+    }
+    if (metricsCRC != readU32(bytes + 16)) return false;
+    ThaiShapeView views[MAX_STYLES];
+    uint8_t seen = 0;
+    uint32_t nextOffset = 32 + styleCount_ * 12;
+    if (nextOffset > size) return false;
+    for (uint8_t i = 0; i < styleCount_; ++i) {
+      const uint8_t* toc = bytes + 32 + i * 12;
+      const uint8_t style = toc[0];
+      const uint32_t offset = readU32(toc + 4), length = readU32(toc + 8);
+      if (style >= MAX_STYLES || !styles_[style].present || (seen & (1u << style)) ||
+          toc[1] || toc[2] || toc[3] || offset != nextOffset || offset > size || length > size - offset)
+        return false;
+      struct CoverageContext { const SdCardFont* font; const PerStyle* style; } context{this, &styles_[style]};
+      const auto covered = [](void* ctx, uint32_t cp) -> bool {
+        const auto& c = *static_cast<CoverageContext*>(ctx);
+        return c.font->findGlobalGlyphIndex(*c.style, cp) >= 0;
+      };
+      if (!views[style].validate(bytes + offset, length, covered, &context)) return false;
+      const auto& h = styles_[style].header;
+      if (views[style].ascender() != h.ascender || views[style].descender() != h.descender ||
+          views[style].lineAdvance() != h.advanceY) return false;
+      seen |= static_cast<uint8_t>(1u << style);
+      nextOffset += length;
+    }
+    if (nextOffset != size) return false;
+    // Publish only after every style passed. Cache eviction cannot change availability.
+    thaiShapeBuffer_ = std::move(buffer);
+    for (uint8_t i = 0; i < MAX_STYLES; ++i) {
+      if (!styles_[i].present) continue;
+      auto& s = styles_[i];
+      s.thaiShape = views[i];
+      s.stubData.thaiShape = s.miniData.thaiShape = &s.thaiShape;
+    }
+    contentHash_ = fnv1a(bytes + 16, 8, contentHash_);
+    const uint8_t active = 1;
+    contentHash_ = fnv1a(&active, 1, contentHash_);
+    return true;
+  };
+  if (!load()) LOG_ERR("THAI", "Companion unavailable (invalid, incompatible or OOM): %s", path);
+#endif
+}
+
+bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count,
+                                      uint32_t limit, uint8_t styleMask, bool shapeText) const {
+  const auto add = [&](uint32_t cp) -> bool {
+    for (uint32_t i = 0; i < count; ++i) if (codepoints[i] == cp) return false;
+    if (count == limit) return true;
+    codepoints[count++] = cp;
+    return false;
+  };
+  uint8_t shapedStyles = 0;
+  if (shapeText) {
+    for (uint8_t i = 0; i < MAX_STYLES; ++i)
+      if ((styleMask & (1u << i)) && styles_[i].thaiShape.valid()) shapedStyles |= static_cast<uint8_t>(1u << i);
+  }
+  if (!shapedStyles) {
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
+    while (*p) {
+      const uint32_t cp = utf8NextCodepoint(&p);
+      if (!cp) break;
+      if (add(cp)) return true;
+    }
+    return false;
+  }
+  const std::string_view source(text);
+  for (uint8_t i = 0; i < MAX_STYLES; ++i) {
+    if (!(styleMask & (1u << i))) continue;
+    size_t offset = 0;
+    while (offset < source.size()) {
+      ThaiGlyphCursor cursor;
+      if ((shapedStyles & (1u << i)) && cursor.begin(source.substr(offset), styles_[i].thaiShape)) {
+        ThaiGlyphPlacement placement;
+        while (cursor.next(placement)) if (add(placement.codepoint)) return true;
+        offset += cursor.consumedBytes();
+      } else {
+        // Unsupported outer clusters remain native as a whole.
+        const size_t end = cursor.consumedBytes() ? offset + cursor.consumedBytes() : offset +
+            thai::detail::decode(source, offset, true).bytes;
+        while (offset < end) {
+          const auto scalar = thai::detail::decode(source, offset, true);
+          if (add(scalar.value)) return true;
+          offset += scalar.bytes;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 // --- Per-style free/cleanup ---
 
 void SdCardFont::freeStyleMiniData(PerStyle& s) {
@@ -120,6 +253,7 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
   s.miniUnderuseRuns = 0;
   freeStyleMiniKern(s);
   memset(&s.miniData, 0, sizeof(s.miniData));
+  s.miniData.thaiShape = s.thaiShape.valid() ? &s.thaiShape : nullptr;
   s.epdFont.data = &s.stubData;
 }
 
@@ -166,6 +300,8 @@ void SdCardFont::freeStyleMiniKern(PerStyle& s) {
   s.miniKernLeftCapacity = 0;
   s.miniKernRightCapacity = 0;
   s.miniKernMatrixCapacity = 0;
+  applyKernLigaturePointers(s, s.stubData);
+  applyKernLigaturePointers(s, s.miniData);
 }
 
 void SdCardFont::freeStyleAll(PerStyle& s) {
@@ -181,6 +317,8 @@ void SdCardFont::freeStyleAll(PerStyle& s) {
   s.intervalsAreBmp16 = false;
   freeStyleKernLigatureData(s);
   s.present = false;
+  s.thaiShape = ThaiShapeView{};
+  s.stubData.thaiShape = s.miniData.thaiShape = nullptr;
 }
 
 // --- Global free/cleanup ---
@@ -202,6 +340,7 @@ void SdCardFont::freeAll() {
   for (uint8_t i = 0; i < MAX_STYLES; i++) {
     freeStyleAll(styles_[i]);
   }
+  thaiShapeBuffer_.reset();
   styleCount_ = 0;
   contentHash_ = 0;
   loaded_ = false;
@@ -347,8 +486,8 @@ static uint8_t miniLookupKernClass(const EpdKernClassEntry* entries, uint16_t co
 bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount) {
   // No freeStyleMiniKern here: it zeroed the capacities, which forced the
   // ensureArrayCapacity calls below to reallocate every page and defeated the
-  // buffer reuse. prewarmStyle is the only caller and the success path
-  // overwrites the contents and all four counts, so keeping the buffers is
+  // buffer reuse. Both layout preparation and prewarm overwrite the contents
+  // and all four counts on success, so keeping the buffers is
   // safe. The early returns zero the counts (buffers kept) so a page with no
   // applicable kern pairs kerns as none instead of through the previous
   // page's tables.
@@ -358,6 +497,11 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
     s.miniKernLeftClassCount = 0;
     s.miniKernRightClassCount = 0;
   };
+  resetMiniKernCounts();
+  const ScopedCleanup publishKern{[this, &s]() {
+    applyKernLigaturePointers(s, s.stubData);
+    applyKernLigaturePointers(s, s.miniData);
+  }};
   if (!s.kernLeftClasses || !s.kernRightClasses || s.header.kernLeftEntryCount == 0 ||
       s.header.kernRightEntryCount == 0) {
     resetMiniKernCounts();
@@ -773,6 +917,7 @@ bool SdCardFont::load(const char* path) {
     applyGlyphMissCallback(i);
   }
 
+  loadThaiShape();
   loaded_ = true;
 
   LOG_DBG("SDCF", "Loaded: %s (v%u, %u styles)", path, CPFONT_VERSION, styleCount_);
@@ -813,12 +958,13 @@ namespace {
 const char* singleTextGetter(const void* ctx, uint32_t) { return static_cast<const char*>(ctx); }
 }  // namespace
 
-int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly, bool loadKernLig, bool accumulate) {
-  return prewarm(&singleTextGetter, utf8Text, 1, styleMask, metadataOnly, loadKernLig, accumulate);
+int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly, bool loadKernLig,
+                        bool accumulate, bool shapeText) {
+  return prewarm(&singleTextGetter, utf8Text, 1, styleMask, metadataOnly, loadKernLig, accumulate, shapeText);
 }
 
 int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, uint8_t styleMask, bool metadataOnly,
-                        bool loadKernLig, bool accumulate) {
+                        bool loadKernLig, bool accumulate, bool shapeText) {
   if (!loaded_ || getter == nullptr) return -1;
   styleMask = resolveStyleMask(styleMask);
   if (styleMask == 0) return 0;
@@ -877,22 +1023,7 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
   for (uint32_t ti = 0; ti < textCount && cpCount < cpBudget; ti++) {
     const char* text = getter(ctx, ti);
     if (text == nullptr) continue;
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
-    while (*p && cpCount < cpBudget) {
-      uint32_t cp = utf8NextCodepoint(&p);
-      if (cp == 0) break;
-
-      bool found = false;
-      for (uint32_t i = 0; i < cpCount; i++) {
-        if (codepoints[i] == cp) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        codepoints[cpCount++] = cp;
-      }
-    }
+    if (collectTextCodepoints(text, codepoints.get(), cpCount, cpBudget, styleMask, shapeText)) break;
   }
 
   // Always include the replacement character
@@ -1014,13 +1145,20 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
       }
     }
     if (covered) {
-      // A kern-wanting request (reader path) can subset-hit a mini that a
-      // kern-free UI prewarm built: top up the kern matrix for the requested
-      // codepoints without re-reading any glyphs.
-      if (!metadataOnly && loadKernLig && s.miniKernLeftClassCount == 0 && s.header.kernLeftEntryCount > 0) {
-        if (loadStyleKernLigatureData(s) && buildMiniKernMatrix(s, codepoints, cpCount)) {
-          applyKernLigaturePointers(s, s.miniData);
+      // Layout can replace kerning independently of resident glyph bitmaps.
+      if (!metadataOnly && loadKernLig && s.header.kernLeftEntryCount > 0 &&
+          (s.thaiShape.valid() || s.miniKernLeftClassCount == 0) && loadStyleKernLigatureData(s)) {
+        bool needsLeft = false, needsRight = false, missing = false;
+        for (uint32_t i = 0; i < cpCount; ++i) {
+          const uint32_t cp = codepoints[i];
+          const bool left = miniLookupKernClass(s.kernLeftClasses, s.header.kernLeftEntryCount, cp) != 0;
+          const bool right = miniLookupKernClass(s.kernRightClasses, s.header.kernRightEntryCount, cp) != 0;
+          needsLeft |= left;
+          needsRight |= right;
+          missing |= left && miniLookupKernClass(s.miniKernLeftClasses, s.miniKernLeftEntryCount, cp) == 0;
+          missing |= right && miniLookupKernClass(s.miniKernRightClasses, s.miniKernRightEntryCount, cp) == 0;
         }
+        if (needsLeft && needsRight && missing) buildMiniKernMatrix(s, codepoints, cpCount);
       }
       return missedInMini;
     }
@@ -1144,7 +1282,9 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   s.miniKernRightEntryCount = 0;
   s.miniKernLeftClassCount = 0;
   s.miniKernRightClassCount = 0;
+  applyKernLigaturePointers(s, s.stubData);
   memset(&s.miniData, 0, sizeof(s.miniData));
+  s.miniData.thaiShape = s.thaiShape.valid() ? &s.thaiShape : nullptr;
   s.epdFont.data = &s.stubData;
 
   if (!ensureArrayCapacity(s.miniIntervals, s.miniIntervalCapacity, validCount)) {
@@ -1341,6 +1481,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   s.miniMetadataOnly = metadataOnly;
   s.miniHysteresisPending = !metadataOnly;  // one hysteresis evaluation per rebuild
   memset(&s.miniData, 0, sizeof(s.miniData));
+  s.miniData.thaiShape = s.thaiShape.valid() ? &s.thaiShape : nullptr;
   s.miniData.bitmap = s.miniBitmap;
   s.miniData.glyph = s.miniGlyphs;
   s.miniData.intervals = s.miniIntervals;
@@ -1451,25 +1592,8 @@ bool SdCardFont::hasAdvanceTable() const {
   return false;
 }
 
-uint16_t SdCardFont::getAdvance(uint32_t codepoint, uint8_t style) const {
-  style &= (MAX_STYLES - 1);
-  if (!advanceTable_[style]) return 0;
-  const AdvanceEntry* table = advanceTable_[style];
-  const uint32_t size = advanceTableSize_[style];
-  // Binary search sorted by codepoint
-  uint32_t lo = 0, hi = size;
-  while (lo < hi) {
-    uint32_t mid = lo + (hi - lo) / 2;
-    if (table[mid].codepoint < codepoint) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-  if (lo < size && table[lo].codepoint == codepoint) {
-    return table[lo].advanceX;
-  }
-  return 0;
+bool SdCardFont::getAdvance(uint32_t codepoint, uint8_t style, uint16_t& outAdvance) const {
+  return advanceTableLookup(resolveStyle(style), codepoint, &outAdvance);
 }
 
 // Given a sorted array of unique codepoints, resolve glyph indices per style,
@@ -1483,7 +1607,7 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
 
     // Stop fetching once the cache is full — further inserts would be dropped
     // by the merge anyway. The renderer fast path tolerates missing entries
-    // (returns 0); the slow path is still correct for those codepoints.
+    // (a false getAdvance result); the slow path resolves those codepoints.
     if (advanceTableSize_[si] >= ADVANCE_CACHE_LIMIT) continue;
 
     // For each codepoint in `codepoints`, skip those already cached, then
@@ -1601,12 +1725,12 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
     const char* p = segments[seg];
     const char* const end = p + segmentLens[seg];
     while (p < end && !hitCap) {
-      hitCap = collectUniqueCodepoints(p, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS);
+      hitCap = collectTextCodepoints(p, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask, true);
       p += strlen(p) + 1;
     }
   }
   if (extraText && !hitCap) {
-    hitCap = collectUniqueCodepoints(extraText, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS);
+    hitCap = collectTextCodepoints(extraText, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask, true);
   }
 
   if (includeSpace && std::none_of(codepoints, codepoints + cpCount, [](uint32_t c) { return c == ' '; }))
@@ -1620,6 +1744,13 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
   }
   std::sort(codepoints, codepoints + cpCount);
   int totalMissed = fetchAdvancesForCodepoints(codepoints, cpCount, styleMask);
+  for (uint8_t si = 0; si < MAX_STYLES; ++si) {
+    auto& s = styles_[si];
+    if (!(styleMask & (1u << si)) || !s.thaiShape.valid()) continue;
+    if (loadStyleKernLigatureData(s)) {
+      buildMiniKernMatrix(s, codepoints, cpCount);
+    }
+  }
   delete[] codepoints;
   stats_.prewarmTotalMs = millis() - startMs;
   return totalMissed;

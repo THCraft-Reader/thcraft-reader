@@ -6,6 +6,11 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Serialization.h>
+#include <ThaiConfig.h>
+#include <ThaiLayoutId.h>
+#if THAI_ENGINE_STATS
+#include <ThaiStats.h>
+#endif
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
@@ -54,7 +59,8 @@ namespace {
 // v47: Word and character spacing in the header (cache validation); cached BlockStyle stores only character spacing.
 // v48: Hangul words wrap at spaces; with hyphenation on they may also split at a line end.
 //      Justification no longer stretches between syllables.
-constexpr uint8_t SECTION_FILE_VERSION = 48;
+// v49: Thai layout identity and transient analysis-unavailable cache invalidation.
+constexpr uint8_t SECTION_FILE_VERSION = 49;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
@@ -76,7 +82,10 @@ constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) + sizeof(uint32_t) +
                                  sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(int8_t) +
-                                 sizeof(uint8_t);
+                                 sizeof(uint8_t) + sizeof(uint32_t);
+static_assert(HEADER_SIZE == 47, "Unexpected section header schema");
+constexpr uint32_t THAI_LAYOUT_ID_OFFSET =
+    HEADER_SIZE - sizeof(uint32_t) * 6 - sizeof(uint16_t);
 }  // namespace
 
 // Out-of-line so the unique_ptr<ChapterHtmlSlimParser> in BuildContext can be
@@ -124,8 +133,9 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
                                    sizeof(spec.viewportWidth) + sizeof(spec.viewportHeight) + sizeof(pageCount) +
                                    sizeof(spec.hyphenationEnabled) + sizeof(spec.embeddedStyle) +
                                    sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) +
-                                   sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent) + sizeof(uint32_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
+                                   sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent) +
+                                   sizeof(spec.thaiLayoutId) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
                 "Header size mismatch");
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.
@@ -142,6 +152,7 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
   serialization::writePod(file, spec.focusReadingEnabled);
   serialization::writePod(file, spec.characterSpacing);
   serialization::writePod(file, spec.wordSpacingPercent);
+  serialization::writePod(file, spec.thaiLayoutId);
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -180,6 +191,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     bool fileFocusReadingEnabled;
     int8_t fileCharacterSpacing;
     uint8_t fileWordSpacingPercent;
+    uint32_t fileThaiLayoutId;
     serialization::readPod(file, fileFontId);
     serialization::readPod(file, fileLineCompression);
     serialization::readPod(file, fileExtraParagraphSpacing);
@@ -192,13 +204,15 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     serialization::readPod(file, fileFocusReadingEnabled);
     serialization::readPod(file, fileCharacterSpacing);
     serialization::readPod(file, fileWordSpacingPercent);
+    serialization::readPod(file, fileThaiLayoutId);
 
     if (spec.fontId != fileFontId || spec.lineCompression != fileLineCompression ||
         spec.extraParagraphSpacing != fileExtraParagraphSpacing || spec.paragraphAlignment != fileParagraphAlignment ||
         spec.viewportWidth != fileViewportWidth || spec.viewportHeight != fileViewportHeight ||
         spec.hyphenationEnabled != fileHyphenationEnabled || spec.embeddedStyle != fileEmbeddedStyle ||
         spec.imageRendering != fileImageRendering || spec.focusReadingEnabled != fileFocusReadingEnabled ||
-        spec.characterSpacing != fileCharacterSpacing || spec.wordSpacingPercent != fileWordSpacingPercent) {
+        spec.characterSpacing != fileCharacterSpacing || spec.wordSpacingPercent != fileWordSpacingPercent ||
+        spec.thaiLayoutId != fileThaiLayoutId) {
       file.close();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();
@@ -386,6 +400,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   // htmlCached == "htmlPath is the live cache" (reused, or just promoted). finalizeBuild/abandonBuild
   // then leave the cached HTML alone; only an un-promoted temp (rename failed) is theirs to clean up.
   ctx->reusedHtml = htmlCached;
+  ctx->thaiLayoutId = spec.thaiLayoutId;
   ctx->htmlPath = htmlPath;
   ctx->tmpHtmlPath = tmpHtmlPath;
   ctx->parsePath = htmlCached ? htmlPath : tmpHtmlPath;
@@ -474,7 +489,13 @@ bool Section::buildSomeMore(const int maxPages) {
   // would otherwise turn one "small" chunk into a blocking rebuild of the whole watermark.
   const int startCount = builtPageCount_;
   for (;;) {
+#if THAI_ENGINE_STATS
+    const uint32_t layoutStart = micros();
+#endif
     const auto status = build_->parser->parseStep();
+#if THAI_ENGINE_STATS
+    thai::recordLayoutMicros(static_cast<uint32_t>(micros() - layoutStart));
+#endif
     if (status == ChapterHtmlSlimParser::ParseStatus::Error) {
       LOG_ERR("SCT", "Parse error during incremental build");
       abandonBuild();
@@ -625,6 +646,15 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
   serialization::writePod(file, paragraphLutOffset);
   serialization::writePod(file, liLutFileOffset);
   serialization::writePod(file, visibleLutFileOffset);
+  // A transient analyzer failure must not poison later healthy opens. Existing
+  // pages remain readable via their LUTs in this Section, including suspended pages.
+  if (build_->parser->thaiAnalysisUnavailable()) {
+    const uint32_t fallbackId = build_->thaiLayoutId | thai::ANALYSIS_UNAVAILABLE_LAYOUT_BIT;
+    if (!file.seek(THAI_LAYOUT_ID_OFFSET) ||
+        file.write(reinterpret_cast<const uint8_t*>(&fallbackId), sizeof(fallbackId)) != sizeof(fallbackId)) {
+      return failCommit();
+    }
+  }
   // ...then commit by overwriting the sentinel version with the real one. Writing the
   // version last makes it the commit point: a crash before here leaves version 0.
   file.seek(0);
@@ -649,7 +679,14 @@ bool Section::finalizeBuild() {
   // Flush the trailing page (emits the last page via the completePageFn into the LUT).
   // A false return means layout dropped content (OOM); committing would persist a
   // section cache with holes in the text, so abandon the build instead.
-  if (!build_->parser->finishParse()) {
+#if THAI_ENGINE_STATS
+  const uint32_t layoutStart = micros();
+#endif
+  const bool finished = build_->parser->finishParse();
+#if THAI_ENGINE_STATS
+  thai::recordLayoutMicros(static_cast<uint32_t>(micros() - layoutStart));
+#endif
+  if (!finished) {
     LOG_ERR("SCT", "Parse finalize failed; abandoning section build");
     abandonBuild();
     return false;

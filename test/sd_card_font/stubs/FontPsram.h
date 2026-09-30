@@ -7,6 +7,10 @@
 #include <new>
 #include <vector>
 
+namespace probe {
+inline std::size_t failFontAllocationBytes = 0;
+}
+
 namespace freeink {
 namespace font {
 
@@ -15,6 +19,11 @@ using PsramVector = std::vector<T>;
 
 template <typename T>
 T* psramNewArray(std::size_t n) {
+  if (probe::failFontAllocationBytes && probe::failFontAllocationBytes % sizeof(T) == 0 &&
+      n == probe::failFontAllocationBytes / sizeof(T)) {
+    probe::failFontAllocationBytes = 0;
+    return nullptr;
+  }
   return new (std::nothrow) T[n ? n : 1];
 }
 

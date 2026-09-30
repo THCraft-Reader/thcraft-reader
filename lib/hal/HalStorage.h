@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Print.h>
+#include <ThaiConfig.h>
 #include <common/FsApiConstants.h>  // for oflag_t
 #include <freertos/semphr.h>
 
@@ -67,6 +68,14 @@ class HalStorage {
   bool removeDir(const char* path);
 
   static HalStorage& getInstance() { return instance; }
+#if THAI_ENGINE_STATS
+  struct ReadStats {
+    uint64_t calls = 0;
+    uint64_t bytes = 0;
+  };
+  // Cumulative HAL requests; snapshots never reset counters shared by tasks.
+  static ReadStats readStats();
+#endif
 
   class StorageLock;  // private class, used internally
 

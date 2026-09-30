@@ -23,5 +23,7 @@ class HalMemory {
   // Default-capability memory includes PSRAM when registered with the allocator.
   static HeapStats getDefaultHeap();
   static HeapStats getInternalHeap();
+  // Byte-addressable internal memory, excluding instruction-only RAM.
+  static HeapStats getInternal8BitHeap();
   static HeapStats getPsramHeap();
 };

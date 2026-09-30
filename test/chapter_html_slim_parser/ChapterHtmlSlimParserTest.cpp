@@ -2,17 +2,14 @@
 #include <GfxRenderer.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
-#define class struct
-#define private public
 #include "Epub/parsers/ChapterHtmlSlimParser.h"
-#undef private
-#undef class
 
 namespace {
 
@@ -115,12 +112,12 @@ TEST_F(ChapterHtmlSlimParserTest, PageImageDeserializeRejectsMissingImageBlock) 
   const auto path = std::filesystem::temp_directory_path() / "crosspoint-missing-image-cache.bin";
   {
     HalFile output;
-    ASSERT_TRUE(output.open(path.c_str(), "wb"));
+    ASSERT_TRUE(output.open(path.string().c_str(), "wb"));
     const int16_t coordinates[] = {0, 0};
     output.write(coordinates, sizeof(coordinates));
   }
   HalFile input;
-  ASSERT_TRUE(input.open(path.c_str(), "rb"));
+  ASSERT_TRUE(input.open(path.string().c_str(), "rb"));
   EXPECT_EQ(PageImage::deserialize(input), nullptr);
 }
 
@@ -142,7 +139,7 @@ TEST_P(ChapterHtmlSlimParserTest, KeepsCssVerticalAlignAndInternalLinkMetadata) 
   EXPECT_NE(static_cast<uint8_t>(style) & static_cast<uint8_t>(expectedStyle), 0u);
 
   ASSERT_EQ(parser.pendingFootnotes.size(), 1u);
-  const FootnoteEntry& footnote = parser.pendingFootnotes.front().second;
+  const FootnoteEntry& footnote = parser.pendingFootnotes.front().entry;
   EXPECT_STREQ(footnote.href, expectedHref);
   ASSERT_EQ(parser.currentTextBlock->wordLinkIds.size(), 1u);
   EXPECT_EQ(parser.currentTextBlock->wordLinkIds.front(), linkId);

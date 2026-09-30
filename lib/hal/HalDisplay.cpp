@@ -1,5 +1,6 @@
 #include <HalDisplay.h>
 #include <HalGPIO.h>
+#include <ThaiStats.h>
 
 // Global HalDisplay instance
 HalDisplay display;
@@ -59,23 +60,57 @@ EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
   }
 }
 
+#if THAI_ENGINE_STATS
+void HalDisplay::beginRefreshStats() {
+  // SDK display operations serialize pending refreshes too. Finish the earlier
+  // measurement first so two requests cannot count the same overlap twice.
+  if (statsRefreshPending) waitRefreshComplete();
+  statsRefreshStartedMs = static_cast<uint32_t>(millis());
+  statsRefreshPending = true;
+}
+
+void HalDisplay::completeRefreshStats() {
+  if (statsRefreshPending && !einkDisplay.isRefreshPending()) {
+    thai::recordRefreshMillis(static_cast<uint32_t>(millis()) - statsRefreshStartedMs);
+    statsRefreshPending = false;
+  }
+}
+#endif
+
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(1);
   }
 
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
 }
 
 void HalDisplay::displayBufferAsync(HalDisplay::RefreshMode mode) {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(1);
   }
 
   einkDisplay.displayBufferAsyncNoShadow(convertRefreshMode(mode));
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
 }
 
-void HalDisplay::waitRefreshComplete() { einkDisplay.waitRefreshComplete(); }
+void HalDisplay::waitRefreshComplete() {
+  einkDisplay.waitRefreshComplete();
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
+}
 
 bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }
 
@@ -86,11 +121,17 @@ HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(GrayscaleMod
 bool HalDisplay::supportsAsyncGrayscaleBase() const { return grayscaleCapabilities().asyncBase; }
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(1);
   }
 
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
 }
 
 void HalDisplay::setInverted(bool inverted) { einkDisplay.setInverted(inverted); }
@@ -108,8 +149,15 @@ uint8_t* HalDisplay::lendFrameBufferStorage(uint32_t* sizeOut) { return einkDisp
 void HalDisplay::returnFrameBufferStorage() { einkDisplay.returnBuildStorage(); }
 
 bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool turnOffScreen) {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
   if (gpio.deviceIsX3() && fallback == HALF_REFRESH) einkDisplay.requestResync();
-  return einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);
+  const bool result = einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
+  return result;
 }
 
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
@@ -117,6 +165,9 @@ void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* m
 }
 
 void HalDisplay::displayGrayscaleBase(RefreshMode fallback, bool turnOffScreen) {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
   // X3: a HALF fallback means the caller wants a clean base (e.g. the sleep
   // cover, a full-screen swap from arbitrary prior content). Without this, the
   // X3 grayscale base takes its gentle differential happy path and the prior
@@ -129,21 +180,55 @@ void HalDisplay::displayGrayscaleBase(RefreshMode fallback, bool turnOffScreen) 
   }
 
   einkDisplay.displayGrayscaleBase(convertRefreshMode(fallback), turnOffScreen);
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
 }
 
-void HalDisplay::preconditionGrayscale() { einkDisplay.preconditionGrayscale(); }
+void HalDisplay::preconditionGrayscale() {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
+  einkDisplay.preconditionGrayscale();
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
+}
 
 void HalDisplay::preconditionGrayscale(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
   einkDisplay.preconditionGrayscale(x, y, w, h);
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
 }
 
 void HalDisplay::copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer) { einkDisplay.copyGrayscaleLsbBuffers(lsbBuffer); }
 
 void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t* msbBuffer) { einkDisplay.copyGrayscaleMsbBuffers(msbBuffer); }
 
-void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) { einkDisplay.cleanupGrayscaleBuffers(bwBuffer); }
+void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
+  // A deferred combined grayscale base may be committed by this operation.
+  einkDisplay.cleanupGrayscaleBuffers(bwBuffer);
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
+}
 
-void HalDisplay::displayGrayBuffer(bool turnOffScreen) { einkDisplay.displayGrayBuffer(turnOffScreen); }
+void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
+#if THAI_ENGINE_STATS
+  beginRefreshStats();
+#endif
+  einkDisplay.displayGrayBuffer(turnOffScreen);
+#if THAI_ENGINE_STATS
+  completeRefreshStats();
+#endif
+}
 
 void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, uint16_t yStart, uint16_t numRows) {
   einkDisplay.writeGrayscalePlaneStrip(lsbPlane ? EInkDisplay::GRAY_PLANE_LSB : EInkDisplay::GRAY_PLANE_MSB, rows,

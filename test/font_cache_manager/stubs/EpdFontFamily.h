@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+class ThaiShapeView;
+
 struct EpdFontData {
   const void* groups = nullptr;
 };
@@ -22,6 +24,7 @@ class EpdFontFamily {
     if ((requested & ITALIC) && styleData[ITALIC]) return styleData[ITALIC];
     return styleData[REGULAR];
   }
+  const ThaiShapeView* getThaiShape(Style = REGULAR) const { return nullptr; }
 
  private:
   const EpdFontData* styleData[4] = {};

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <utility>
 
@@ -68,7 +69,8 @@ class HalStorage {
 
   bool remove(const char* path) { return std::remove(path) == 0; }
   bool rename(const char* from, const char* to) {
-    if (from == failedRenameFrom_ && to == failedRenameTo_) {
+    if (std::filesystem::path(from) == std::filesystem::path(failedRenameFrom_) &&
+        std::filesystem::path(to) == std::filesystem::path(failedRenameTo_)) {
       clearFailures();
       return false;
     }

@@ -1,0 +1,28 @@
+{
+  "block_words": 16,
+  "data_bytes": 367377,
+  "data_crc32": "4b87877d",
+  "decoder_scratch_bytes": 71,
+  "extra": {
+    "duplicates": 0,
+    "lines": 1,
+    "rejected_empty": 0,
+    "rejected_non_thai": 0
+  },
+  "extra_sha256": "24b6b2c79df315cd4f1492fbdca7f4731fdb2c1fb7f967eb527540956f04e13b",
+  "flash_bytes": 382625,
+  "format_version": 1,
+  "maximum_word_codepoints": 70,
+  "offset_bytes": 15248,
+  "offset_count": 3812,
+  "output_sha256": "d4dd017a8deec76a820595c4c5441e1cdc3a0eaac135461816276ae2c016cf34",
+  "rejected_source_entries": 1143,
+  "source": {
+    "duplicates": 1,
+    "lines": 62107,
+    "rejected_empty": 0,
+    "rejected_non_thai": 1143
+  },
+  "source_sha256": "35f65d43ea83b5b981134d5edc3b9afcb64b4ba96146900fc4d312f2940c3265",
+  "word_count": 60964
+}

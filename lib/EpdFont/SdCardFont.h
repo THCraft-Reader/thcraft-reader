@@ -2,10 +2,16 @@
 
 #include <cstdint>
 #include <string>
+#include <memory>
 #include <vector>
 
 #include "EpdFont.h"
 #include "EpdFontData.h"
+#include "ThaiShape.h"
+
+struct ThaiShapeBufferDeleter {
+  void operator()(uint8_t* bytes) const;
+};
 
 // On-disk binary format version for .cpfont files. Defined as a preprocessor
 // macro (rather than a constexpr) so it can be stringified into the SD-fonts
@@ -49,8 +55,9 @@ class SdCardFont {
   // Complete render scans pass accumulate=false: rebuild for this page only,
   // while retaining buffers and allowing a resident subset hit.
   // Returns number of glyphs that couldn't be loaded (0 on full success).
+  // shapeText=false is reserved for already-expanded, deduplicated glyph sets.
   int prewarm(const char* utf8Text, uint8_t styleMask = 0x0F, bool metadataOnly = false, bool loadKernLig = true,
-              bool accumulate = true);
+              bool accumulate = true, bool shapeText = true);
 
   // Multi-string variant: extracts codepoints from `textCount` strings fetched
   // one at a time through `getter` (C-style callback: no std::function bloat,
@@ -63,7 +70,7 @@ class SdCardFont {
   // heap-tight screens. Reader-quality paths keep the default.
   using TextGetter = const char* (*)(const void* ctx, uint32_t index);
   int prewarm(TextGetter getter, const void* ctx, uint32_t textCount, uint8_t styleMask = 0x0F,
-              bool metadataOnly = false, bool loadKernLig = true, bool accumulate = true);
+              bool metadataOnly = false, bool loadKernLig = true, bool accumulate = true, bool shapeText = true);
 
   // Build a compact advance-only table for layout measurement.
   // Extracts ALL unique codepoints from words (no MAX_PAGE_GLYPHS cap),
@@ -79,8 +86,8 @@ class SdCardFont {
                               const char* extraText = nullptr);
 
   // Look up advanceX for a codepoint from the advance table.
-  // Returns the 12.4 fixed-point advance, or 0 if not found.
-  uint16_t getAdvance(uint32_t codepoint, uint8_t style) const;
+  // Returns false if absent; a cached zero-advance mark is a successful lookup.
+  bool getAdvance(uint32_t codepoint, uint8_t style, uint16_t& outAdvance) const;
 
   // Returns true if advance table is populated for at least one style.
   bool hasAdvanceTable() const;
@@ -141,7 +148,7 @@ class SdCardFont {
   void resetStats();
   const Stats& getStats() const { return stats_; }
 
-  // Content hash of the file header + style TOC entries (computed during load).
+  // Header/TOC identity plus shaping flag/state and validated metrics/payload CRCs.
   // Used to generate deterministic font IDs for section cache invalidation.
   uint32_t contentHash() const { return contentHash_; }
 
@@ -164,6 +171,7 @@ class SdCardFont {
   // All per-style data: file offsets, intervals, kern/lig, prewarm cache, EpdFont
   struct PerStyle {
     CpFontHeader header{};
+    ThaiShapeView thaiShape;
 
     // File layout offsets for this style's data sections
     uint32_t intervalsFileOffset = 0;
@@ -272,6 +280,10 @@ class SdCardFont {
 
   PerStyle styles_[MAX_STYLES] = {};
   uint8_t styleCount_ = 0;
+  std::unique_ptr<uint8_t[], ThaiShapeBufferDeleter> thaiShapeBuffer_;
+  void loadThaiShape();
+  bool collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count,
+                             uint32_t limit, uint8_t styleMask, bool shapeText) const;
 
   char filePath_[128] = {};
 

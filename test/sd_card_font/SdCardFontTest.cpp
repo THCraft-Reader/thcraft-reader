@@ -1,6 +1,8 @@
 #include <HalStorage.h>
 #include <SdCardFont.h>
 #include <gtest/gtest.h>
+#include <MinizConfig.h>
+#include <HalMemory.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -48,6 +50,7 @@ void put32(size_t at, uint32_t value) {
 }
 
 void makeFont() {
+  sdFontTestCompanion.clear();
   constexpr size_t GLYPH_OFFSET = 64 + 24;
   constexpr size_t BITMAP_OFFSET = GLYPH_OFFSET + GLYPHS * sizeof(EpdGlyph);
   sdFontTestFile.assign(BITMAP_OFFSET + GLYPHS * BITMAP_BYTES, 0);
@@ -112,6 +115,33 @@ void expectPageBitmaps(SdCardFont& font, uint32_t first, uint32_t count) {
       ASSERT_EQ((cp - FIRST) % 251, data->bitmap[glyph->dataOffset + i]);
     }
   }
+}
+
+void shapePut16(size_t p, uint16_t n) {
+  sdFontTestCompanion[p] = n; sdFontTestCompanion[p + 1] = n >> 8;
+}
+void shapePut32(size_t p, uint32_t n) { shapePut16(p, n); shapePut16(p + 2, n >> 16); }
+void updateShapeCrc() {
+  constexpr size_t metadataEnd = 64 + 24 + GLYPHS * sizeof(EpdGlyph);
+  shapePut32(16, mz_crc32(MZ_CRC32_INIT, sdFontTestFile.data(), metadataEnd));
+  shapePut32(20, mz_crc32(MZ_CRC32_INIT, sdFontTestCompanion.data() + 32, sdFontTestCompanion.size() - 32));
+}
+void makeShape() {
+  constexpr uint32_t base = 28 + ThaiShapeView::DENSE_COUNT * 4;
+  constexpr uint32_t offsets = base + 8;
+  constexpr uint32_t data = offsets + 8;
+  constexpr uint32_t styleSize = data + 1;
+  sdFontTestCompanion.assign(44 + styleSize, 0);
+  std::memcpy(sdFontTestCompanion.data(), "CPSHAPE\0", 8);
+  shapePut16(8, 1); shapePut16(10, 32);
+  shapePut32(12, sdFontTestFile.size()); shapePut32(24, sdFontTestCompanion.size()); shapePut32(28, 1);
+  shapePut32(36, 44); shapePut32(40, styleSize);
+  shapePut16(44, 1); shapePut16(46, 1);
+  shapePut32(48, 28); shapePut32(52, base); shapePut32(56, offsets); shapePut32(60, data);
+  shapePut16(64, 32); shapePut16(68, 32);
+  shapePut16(44 + base, FIRST); shapePut16(44 + base + 2, 32 << 4);
+  shapePut32(44 + offsets, data); shapePut32(48 + offsets, styleSize);
+  updateShapeCrc();
 }
 }  // namespace
 
@@ -211,6 +241,131 @@ TEST(SdCardFontTest, BitmapAllocationRetriesAfterEvictingRebuildableAdvances) {
 
   ASSERT_EQ(0, font.buildAdvanceTable(text.c_str(), 1));
   for (uint32_t cp = FIRST; cp < FIRST + 200; ++cp) {
-    EXPECT_EQ(32 << 4, font.getAdvance(cp, 0));
+    uint16_t advance = 0;
+    ASSERT_TRUE(font.getAdvance(cp, 0, advance));
+    EXPECT_EQ(32 << 4, advance);
   }
+}
+
+TEST(SdCardFontTest, ZeroAdvanceIsCachedWithoutRepeatedStorageFaults) {
+  makeFont();
+  put16(64 + 24 + offsetof(EpdGlyph, advanceX), 0);
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  const auto text = page(FIRST, 1);
+  ASSERT_EQ(0, font.buildAdvanceTable(text.c_str(), 1));
+  uint16_t advance = 123;
+  ASSERT_TRUE(font.getAdvance(FIRST, 0, advance));
+  EXPECT_EQ(0, advance);
+  sdFontTestReads = 0;
+  ASSERT_EQ(0, font.buildAdvanceTable(text.c_str(), 1));
+  EXPECT_EQ(0u, sdFontTestReads);
+  EXPECT_FALSE(font.getAdvance(FIRST + 1, 0, advance));
+}
+
+TEST(SdCardFontTest, CompanionStaysPublishedAcrossAllResidentCacheEvictions) {
+  makeFont(); makeShape();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  const auto* shape = font.getEpdFont()->getThaiShape();
+  ASSERT_NE(nullptr, shape);
+  const auto hash = font.contentHash();
+  ASSERT_EQ(0, font.prewarm(page(FIRST, 4).c_str(), 1));
+  EXPECT_EQ(shape, font.getEpdFont()->getThaiShape());
+  font.clearCache(); font.clearPersistentCache(); font.releaseResidentCaches();
+  EXPECT_EQ(shape, font.getEpdFont()->getThaiShape());
+  EXPECT_EQ(hash, font.contentHash());
+  sdFontTestReads = 0;
+  ThaiGlyphCursor cursor;
+  ASSERT_TRUE(cursor.begin("กี่", *shape));
+  ThaiGlyphPlacement glyph;
+  ASSERT_TRUE(cursor.next(glyph));
+  EXPECT_EQ(FIRST, glyph.codepoint);
+  EXPECT_EQ(0u, sdFontTestReads);
+  sdFontTestCompanion.clear();
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  EXPECT_EQ(nullptr, font.getEpdFont()->getThaiShape());
+  EXPECT_NE(hash, font.contentHash());
+}
+
+TEST(SdCardFontTest, CorruptOrOversizedCompanionCannotFailNativeFontLoad) {
+  makeFont();
+  SdCardFont native;
+  ASSERT_TRUE(native.load("fixture.cpfont"));
+  const auto nativeHash = native.contentHash();
+  for (int scenario = 0; scenario < 9; ++scenario) {
+    SCOPED_TRACE(scenario);
+    makeShape();
+    switch (scenario) {
+      case 0: sdFontTestCompanion.resize(20); break;
+      case 1: shapePut16(8, 2); break;
+      case 2: shapePut32(12, sdFontTestFile.size() + 1); break;
+      case 3: sdFontTestCompanion[16] ^= 1; break;
+      case 4: sdFontTestCompanion.back() ^= 1; break;
+      case 5: sdFontTestCompanion.resize(ThaiShapeView::MAX_FAMILY_BYTES + 1); break;
+      case 6: shapePut16(44 + 28, 2); updateShapeCrc(); break;
+      case 7: shapePut32(56, UINT32_MAX); updateShapeCrc(); break;
+      case 8: shapePut16(44 + 28 + ThaiShapeView::DENSE_COUNT * 4, 1); updateShapeCrc(); break;
+    }
+    SdCardFont font;
+    ASSERT_TRUE(font.load("fixture.cpfont"));
+    EXPECT_EQ(nullptr, font.getEpdFont()->getThaiShape());
+    EXPECT_EQ(nativeHash, font.contentHash());
+    ASSERT_EQ(0, font.prewarm(page(FIRST, 1).c_str(), 1));
+    expectPageBitmaps(font, FIRST, 1);
+  }
+}
+
+TEST(SdCardFontTest, CompanionAllocationFailureKeepsNativeThenHealthyReopenShapes) {
+  makeFont(); makeShape();
+  struct ResetFailure { ~ResetFailure() { failNextArraySize = 0; } } guard;
+  failNextArraySize = sdFontTestCompanion.size();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  EXPECT_EQ(0u, failNextArraySize);
+  EXPECT_EQ(nullptr, font.getEpdFont()->getThaiShape());
+  const auto nativeHash = font.contentHash();
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  ASSERT_NE(nullptr, font.getEpdFont()->getThaiShape());
+  EXPECT_NE(nativeHash, font.contentHash());
+}
+
+TEST(SdCardFontTest, SameSizeNativeMetricsEditChangesActiveFontIdentity) {
+  makeFont(); makeShape();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  ASSERT_NE(nullptr, font.getEpdFont()->getThaiShape());
+  const auto before = font.contentHash();
+  const auto bytes = sdFontTestFile.size();
+  put16(64 + 24 + offsetof(EpdGlyph, advanceX), 17 << 4);
+  updateShapeCrc();  // recipe bytes and their payload CRC do not change
+  ASSERT_EQ(bytes, sdFontTestFile.size());
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  ASSERT_NE(nullptr, font.getEpdFont()->getThaiShape());
+  EXPECT_NE(before, font.contentHash());
+  ASSERT_EQ(0, font.buildAdvanceTable(page(FIRST, 1).c_str(), 1));
+  uint16_t advance = 0;
+  ASSERT_TRUE(font.getAdvance(FIRST, 0, advance));
+  EXPECT_EQ(17 << 4, advance);
+}
+
+TEST(SdCardFontTest, CompanionHeadroomRejectionIsStableUntilFontReload) {
+  makeFont(); makeShape();
+  struct HeadroomGuard {
+    size_t saved = probe::internalHeadroomBytes;
+    ~HeadroomGuard() { probe::internalHeadroomBytes = saved; }
+  } guard;
+  probe::internalHeadroomBytes = 50 * 1024;
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  EXPECT_EQ(nullptr, font.getEpdFont()->getThaiShape());
+  const auto hash = font.contentHash();
+  probe::internalHeadroomBytes = guard.saved;
+  ASSERT_EQ(0, font.prewarm(page(FIRST, 1).c_str(), 1));
+  font.releaseResidentCaches();
+  EXPECT_EQ(nullptr, font.getEpdFont()->getThaiShape());
+  EXPECT_EQ(hash, font.contentHash());
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  EXPECT_NE(nullptr, font.getEpdFont()->getThaiShape());
+  EXPECT_NE(hash, font.contentHash());
 }

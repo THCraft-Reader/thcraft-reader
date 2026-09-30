@@ -1,4 +1,6 @@
-find_package(EXPAT REQUIRED)
+if(NOT TARGET EXPAT::EXPAT)
+  find_package(EXPAT REQUIRED)
+endif()
 
 add_executable(ContentOpfParserTest
   ContentOpfParserTest.cpp

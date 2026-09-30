@@ -12,6 +12,9 @@
 #define SDCard SDCardManager::getInstance()
 
 namespace {
+#if THAI_ENGINE_STATS
+HalStorage::ReadStats readCounters;
+#endif
 #if FREEINK_CAP_USB_MSC
 freeink::UsbMassStorage usbMassStorage;
 #endif
@@ -43,6 +46,13 @@ class HalStorage::StorageLock {
   StorageLock() { xSemaphoreTakeRecursive(HalStorage::getInstance().storageMutex, portMAX_DELAY); }
   ~StorageLock() { xSemaphoreGiveRecursive(HalStorage::getInstance().storageMutex); }
 };
+
+#if THAI_ENGINE_STATS
+HalStorage::ReadStats HalStorage::readStats() {
+  StorageLock lock;
+  return readCounters;
+}
+#endif
 
 void HalStorage::prepareForDeepSleep() {
   StorageLock lock;
@@ -249,8 +259,30 @@ bool HalFile::seekCur(int64_t offset) { HAL_FILE_WRAPPED_CALL(seekCur, offset); 
 bool HalFile::seekSet(size_t offset) { HAL_FILE_WRAPPED_CALL(seekSet, offset); }
 int HalFile::available() const { HAL_FILE_WRAPPED_CALL(available, ); }
 size_t HalFile::position() const { HAL_FILE_WRAPPED_CALL(position, ); }
-int HalFile::read(void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(read, buf, count); }
-int HalFile::read() { HAL_FILE_WRAPPED_CALL(read, ); }
+int HalFile::read(void* buf, size_t count) {
+#if THAI_ENGINE_STATS
+  HalStorage::StorageLock lock;
+  assert(impl != nullptr);
+  const int result = impl->file.read(buf, count);
+  ++readCounters.calls;
+  if (result > 0) readCounters.bytes += static_cast<uint32_t>(result);
+  return result;
+#else
+  HAL_FILE_WRAPPED_CALL(read, buf, count);
+#endif
+}
+int HalFile::read() {
+#if THAI_ENGINE_STATS
+  HalStorage::StorageLock lock;
+  assert(impl != nullptr);
+  const int result = impl->file.read();
+  ++readCounters.calls;
+  if (result >= 0) ++readCounters.bytes;
+  return result;
+#else
+  HAL_FILE_WRAPPED_CALL(read, );
+#endif
+}
 size_t HalFile::write(const uint8_t* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
 size_t HalFile::write(const void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
 size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, b); }

@@ -5,6 +5,8 @@
 #include <SdCardFont.h>
 #include <TtfEpdFont.h>
 #include <Utf8.h>
+#include <ThaiShape.h>
+#include <ThaiConfig.h>
 
 #include <algorithm>
 #include <cstring>
@@ -63,7 +65,8 @@ void FontCacheManager::releaseSdFontCaches() {
 #endif
 }
 
-void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask, bool accumulate) {
+void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask, bool accumulate,
+                                   bool shapeText) {
   // TTF (vector) font prewarm path. This is the single dispatch every draw path
   // funnels through (reader endScanAndPrewarm, the settings preview, UI text),
   // so building here covers them all. accumulate=false means "this is the whole
@@ -84,7 +87,8 @@ void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t st
   // SD card font prewarm path: prewarm all requested styles in one call
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
-    int missed = it->second->prewarm(utf8Text, styleMask, /*metadataOnly=*/false, /*loadKernLig=*/true, accumulate);
+    int missed = it->second->prewarm(utf8Text, styleMask, /*metadataOnly=*/false, /*loadKernLig=*/true,
+                                    accumulate, shapeText);
     if (missed > 0) {
       LOG_DBG("FCM", "prewarmCache(SD): %d glyph(s) not found (styleMask=0x%02X)", missed, styleMask);
     }
@@ -155,11 +159,7 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
 
   const uint8_t resolvedStyle = resolveScanStyle(fontId, style);
   const uint8_t group = fontSlot * 4 + resolvedStyle;
-  const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text);
-  while (*cursor) {
-    const uint32_t codepoint = utf8NextCodepoint(&cursor);
-    if (codepoint == 0) break;
-
+  const auto recordCodepoint = [&](uint32_t codepoint) {
     const uint32_t packed = (static_cast<uint32_t>(fontSlot) << SCAN_FONT_SHIFT) |
                             (static_cast<uint32_t>(resolvedStyle) << SCAN_STYLE_SHIFT) | codepoint;
     bool found = false;
@@ -169,7 +169,7 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
         break;
       }
     }
-    if (found) continue;
+    if (found) return;
 
     if (scanCodepointCount_ >= MAX_SCAN_CODEPOINTS) {
       if (!scanOverflowWarned_) {
@@ -177,11 +177,36 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
                 static_cast<unsigned>(MAX_SCAN_CODEPOINTS));
         scanOverflowWarned_ = true;
       }
-      continue;
+      return;
     }
 
     scanCodepoints_[scanCodepointCount_++] = packed;
     scanGroupCounts_[group]++;
+  };
+
+  const char* cursor = text;
+#if THAI_SHAPING
+  const auto font = fontMap_.find(fontId);
+  const ThaiShapeView* shape = font != fontMap_.end() ? font->second.getThaiShape(style) : nullptr;
+  const char* end = shape ? text + strlen(text) : text;
+  const char* nativeUntil = text;
+#endif
+  while (*cursor) {
+#if THAI_SHAPING
+    if (shape && cursor >= nativeUntil) {
+      ThaiGlyphCursor shaped;
+      if (shaped.begin(std::string_view(cursor, end - cursor), *shape)) {
+        ThaiGlyphPlacement placement;
+        while (shaped.next(placement)) recordCodepoint(placement.codepoint);
+        cursor += shaped.consumedBytes();
+        continue;
+      }
+      nativeUntil = cursor + shaped.consumedBytes();
+    }
+#endif
+    const uint32_t codepoint = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor));
+    if (!codepoint) break;
+    recordCodepoint(codepoint);
   }
 }
 
@@ -227,7 +252,8 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
     const uint8_t fontSlot = static_cast<uint8_t>(group) / 4;
     const uint8_t style = static_cast<uint8_t>(group) & 0x03;
     // This group is the complete glyph set for one font/style in this render.
-    manager_->prewarmCache(manager_->scanFontIds_[fontSlot], utf8Text, 1 << style, /*accumulate=*/false);
+    manager_->prewarmCache(manager_->scanFontIds_[fontSlot], utf8Text, 1 << style, /*accumulate=*/false,
+                           /*shapeText=*/false);
   }
 
   manager_->scanCodepointCount_ = 0;

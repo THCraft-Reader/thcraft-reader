@@ -90,6 +90,28 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 49
+
+The header is now 47 bytes (previously 43), adding little-endian `u32
+thaiLayoutId` immediately after `wordSpacingPercent`. Both finalized and suspended
+section caches compare this identity along with the other render settings.
+`thai::layoutId()` is FNV-1a (seed 2166136261, prime 16777619) over little-endian
+`u32` analyzer version 1, little-endian `u32` dictionary CRC32 (zero when disabled),
+then one byte each for enabled word breaking and dictionary use. Bit 31 is cleared.
+
+Bit 31 marks output produced while optional Thai analysis was unavailable due to
+allocation failure or invalid dictionary data. Commit patches that bit before
+stamping either final or partial version. The current Section can still read its
+pages through the normal LUTs, but a subsequent healthy open rejects that identity
+and rebuilds layout. Deterministic malformed-source fallback does not set this bit.
+Invalidation removes only rendered section data, not extracted HTML, book metadata,
+or reading progress.
+
+An in-progress file has version zero until commit. Suspended files use the derived
+partial version `0xFE - (49 - 28)` = 233, with the same header and LUT schema plus
+two `u32` values (`bytesConsumed`, `totalBytes`) after the visible-offset LUT.
+Older final and partial versions are rejected.
+
 ### Version 48
 
 Version 48 keeps the version 47 serialized layout unchanged. It was bumped
@@ -200,7 +222,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 48
+#define EXPECTED_VERSION 49
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -366,6 +388,7 @@ struct SectionBin {
     bool focusReadingEnabled;
     s8 characterSpacing;
     u8 wordSpacingPercent;
+    u32 thaiLayoutId;
 
     u16 pageCount;
     u32 pageLutOffset;

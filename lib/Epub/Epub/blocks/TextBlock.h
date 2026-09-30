@@ -68,6 +68,9 @@ class TextBlock final : public Block {
   // Layout-only metadata. ChapterHtmlSlimParser moves it into Page::links
   // immediately; cached TextBlocks therefore keep the same compact format.
   std::vector<LinkSpan> linkSpans;
+#ifdef THAI_RENDER_PROBE
+  std::vector<uint32_t> probeVisibleOffsets;
+#endif
 
   TextBlock() = default;  // deserialize() fills the fields directly
   static size_t arenaSize(uint16_t wordCount, bool hasFocus, uint16_t textBytes);
@@ -104,6 +107,10 @@ class TextBlock final : public Block {
   int getRubyShift(int ascender) const { return hasRuby() ? (ascender / 2) : 0; }
   const std::vector<std::string>& getRubyTexts() const { return rubyTexts; }
   std::vector<LinkSpan> takeLinkSpans() { return std::move(linkSpans); }
+#ifdef THAI_RENDER_PROBE
+  void setProbeVisibleOffsets(std::vector<uint32_t> offsets) { probeVisibleOffsets = std::move(offsets); }
+  uint32_t probeVisibleOffset(uint16_t i) const { return probeVisibleOffsets.at(i); }
+#endif
 
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;
   BlockType getType() override { return TEXT_BLOCK; }

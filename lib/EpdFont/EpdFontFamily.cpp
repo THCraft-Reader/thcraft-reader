@@ -24,6 +24,11 @@ void EpdFontFamily::getTextDimensions(const char* string, int* w, int* h, const 
 
 const EpdFontData* EpdFontFamily::getData(const Style style) const { return getFont(style)->data; }
 
+const ThaiShapeView* EpdFontFamily::getThaiShape(const Style style) const {
+  const auto* font = getFont(style);
+  return font ? font->getThaiShape() : nullptr;
+}
+
 const EpdGlyph* EpdFontFamily::getGlyph(const uint32_t cp, const Style style) const {
   return getFont(style)->getGlyph(cp);
 }

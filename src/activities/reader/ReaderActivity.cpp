@@ -5,6 +5,10 @@
 #include <HalStorage.h>
 #include <Memory.h>
 
+#if THAI_ENGINE_STATS
+#include <HalMemory.h>
+#include <ThaiDictionary.h>
+#endif
 #include <algorithm>
 
 #include "CrossPointSettings.h"
@@ -14,6 +18,67 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "XtcReaderActivity.h"
+
+#if THAI_ENGINE_STATS
+void ReaderActivity::beginThaiStatsWindow() {
+  thaiStatsPrevious = thai::statsSnapshot();
+  const auto reads = HalStorage::readStats();
+  thaiSdCallsPrevious = reads.calls;
+  thaiSdBytesPrevious = reads.bytes;
+  thaiWindowStartedMs = static_cast<uint32_t>(millis());
+  thaiMinimumInternal = std::min(thaiMinimumInternal,
+                                 static_cast<uint32_t>(HalMemory::getInternal8BitHeap().freeBytes));
+}
+
+void ReaderActivity::logThaiStatsPhase(const char* phase) {
+  if (!thaiStatsActive) return;
+  const auto stats = thai::statsSnapshot();
+  const auto reads = HalStorage::readStats();
+  const auto internal = HalMemory::getInternal8BitHeap();
+  const auto psram = HalMemory::getPsramHeap();
+  const uint32_t now = static_cast<uint32_t>(millis());
+  thaiMinimumInternal = std::min(thaiMinimumInternal, static_cast<uint32_t>(internal.freeBytes));
+  const unsigned sample = ++thaiSample;
+  // Logging has a 256-byte record cap. Join these bounded records by sample;
+  // all measurements precede logging so transport latency is not timed here.
+  LOG_INF("THAI", "phase=%s sample=%u layout_us=%u segment_us=%u draw_us=%u refresh_ms=%u event_ms=%u open_ms=%u",
+          phase, sample, static_cast<unsigned>(stats.layout_us - thaiStatsPrevious.layout_us),
+          static_cast<unsigned>(stats.segment_us - thaiStatsPrevious.segment_us),
+          static_cast<unsigned>(stats.draw_us - thaiStatsPrevious.draw_us),
+          static_cast<unsigned>(stats.refresh_ms - thaiStatsPrevious.refresh_ms),
+          static_cast<unsigned>(now - thaiWindowStartedMs), static_cast<unsigned>(now - thaiOpenStartedMs));
+  LOG_INF("THAI", "phase=%s sample=%u input_bytes=%u clusters=%u words=%u unknown_clusters=%u max_pending_bytes=%u",
+          phase, sample, static_cast<unsigned>(stats.input_bytes - thaiStatsPrevious.input_bytes),
+          static_cast<unsigned>(stats.clusters - thaiStatsPrevious.clusters),
+          static_cast<unsigned>(stats.words - thaiStatsPrevious.words),
+          static_cast<unsigned>(stats.unknown_clusters - thaiStatsPrevious.unknown_clusters),
+          static_cast<unsigned>(stats.max_pending_bytes));
+  LOG_INF("THAI", "phase=%s sample=%u internal_free=%u internal_largest=%u internal_min_observed=%u internal_min_since_boot=%u",
+          phase, sample, static_cast<unsigned>(internal.freeBytes), static_cast<unsigned>(internal.largestBlockBytes),
+          static_cast<unsigned>(thaiMinimumInternal), static_cast<unsigned>(internal.minFreeBytes));
+  if (psram.totalBytes) {
+    LOG_INF("THAI", "phase=%s sample=%u psram_available=1 psram_free=%u psram_largest=%u", phase, sample,
+            static_cast<unsigned>(psram.freeBytes), static_cast<unsigned>(psram.largestBlockBytes));
+  } else {
+    LOG_INF("THAI", "phase=%s sample=%u psram_available=0 psram_free=null psram_largest=null", phase, sample);
+  }
+  LOG_INF("THAI", "phase=%s sample=%u sd_read_calls=%llu sd_read_bytes=%llu dictionary_id=%u font_id=%u",
+          phase, sample, static_cast<unsigned long long>(reads.calls - thaiSdCallsPrevious),
+          static_cast<unsigned long long>(reads.bytes - thaiSdBytesPrevious),
+          static_cast<unsigned>(thai::dictionaryDataId()), static_cast<unsigned>(SETTINGS.getReaderFontId()));
+  thaiStatsPrevious = stats;
+  thaiSdCallsPrevious = reads.calls;
+  thaiSdBytesPrevious = reads.bytes;
+  thaiWindowStartedMs = now;
+}
+
+ReaderActivity::~ReaderActivity() {
+  // Derived members (including the section/parser) have already been destroyed.
+  // The app intentionally retains globally loaded fonts between reader sessions.
+  logThaiStatsPhase("reader_exit");
+  if (thaiStatsActive) LOG_INF("THAI", "phase=reader_exit scope=after_derived_teardown_global_fonts_retained");
+}
+#endif
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                                std::string bookPath, const bool allowFastInitialRefresh)
@@ -46,6 +111,15 @@ void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }
 
 void ReaderActivity::onEnter() {
   Activity::onEnter();
+#if THAI_ENGINE_STATS
+  thaiStatsActive = true;
+  thaiOpenStartedMs = static_cast<uint32_t>(millis());
+  beginThaiStatsWindow();
+  logThaiStatsPhase("open_start");
+  LOG_INF("THAI", "scope=device_cumulative_snapshot_deltas heap_scope=INTERNAL|8BIT,SPIRAM min_scope=lifecycle_and_turn_samples");
+  LOG_INF("THAI", "segment_scope=nextSegment draw_scope=glyph_loops_excludes_scan_and_batch_prewarm sd_scope=HAL_requests_not_sectors");
+  LOG_INF("THAI", "refresh_scope=HAL_refresh_gray_service_start_to_observed_completion_includes_transfer_settle_async_observation_delay_not_BUSY_edge");
+#endif
 
   // Heap ledger for field crash reports: free vs largest block distinguishes a
   // leak (free falls) from fragmentation (free stable, largest collapses).
@@ -70,6 +144,9 @@ void ReaderActivity::onEnter() {
     finish();
     return;
   }
+#if THAI_ENGINE_STATS
+  logThaiStatsPhase("metadata_ready");
+#endif
 
   requestUpdate();
 }

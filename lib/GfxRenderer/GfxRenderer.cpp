@@ -10,14 +10,32 @@
 #include <SdCardFont.h>
 #include <TtfEpdFont.h>
 #include <Utf8.h>
+#include <ThaiStats.h>
+#include <ThaiShape.h>
+#include <ThaiCluster.h>
 
 #include <algorithm>
+#include <cstring>
 
 #include "../Memory/Memory.h"
 #include "FontCacheManager.h"
 #include "GlyphBitmap.h"
 
 namespace {
+#if THAI_ENGINE_STATS
+// One timer per text draw, never per glyph; scan/prewarm work is outside it.
+class TextDrawTimer {
+ public:
+  explicit TextDrawTimer(bool enabled = true) : enabled(enabled), started(enabled ? micros() : 0) {}
+  ~TextDrawTimer() {
+    if (enabled) thai::recordDrawMicros(static_cast<uint32_t>(micros()) - started);
+  }
+ private:
+  bool enabled;
+  uint32_t started;
+};
+#endif
+
 constexpr int trackingBetween(const uint32_t leftCp, const uint32_t rightCp, const int8_t tracking) {
   const auto isSpace = [](const uint32_t cp) { return cp == ' ' || cp == 0xA0 || cp == 0x3000; };
   return leftCp == 0 || isSpace(leftCp) || isSpace(rightCp) ? 0 : tracking;
@@ -33,15 +51,69 @@ uint8_t resolveSdCardStyle(const SdCardFont& font, const EpdFontFamily::Style st
 
 uint16_t getSdCardSpaceAdvance(SdCardFont& font, const EpdFontFamily::Style style) {
   const uint8_t resolvedStyle = resolveSdCardStyle(font, style);
-  const uint16_t advance = font.getAdvance(' ', resolvedStyle);
-  if (advance != 0) return advance;
+  uint16_t advance = 0;
+  if (font.getAdvance(' ', resolvedStyle, advance)) return advance;
 
-  // Zero means uncached (full table, style not prewarmed, or failed
-  // preparation): read the glyph, as the per-codepoint slow path does.
+  // An uncached entry needs the same glyph lookup as the slow path.
   const EpdFont* epdFont = font.getEpdFont(resolvedStyle);
   const EpdGlyph* glyph = epdFont ? epdFont->getGlyph(' ') : nullptr;
   return glyph ? glyph->advanceX : 0;
 }
+
+#if THAI_SHAPING
+int32_t scaleThaiFP(const int32_t value, const bool scaled) {
+  return !scaled ? value : (value < 0 ? -((-value + 1) / 2) : (value + 1) / 2);
+}
+
+// One placement contract for measurement and both draw directions. The caller
+// retains the native loop, including an exact native span on unsupported input.
+template <typename Visit>
+bool placeThaiCluster(const char*& text, const char* end, const char*& nativeUntil,
+                      const ThaiShapeView* shape, const EpdFontFamily& font,
+                      EpdFontFamily::Style style, SdCardFont* sdFont, int8_t tracking,
+                      int& origin, uint32_t& previous, int32_t& previousAdvance, Visit&& visit) {
+  if (!shape || text < nativeUntil) return false;
+  ThaiGlyphCursor cursor;
+  if (!cursor.begin(std::string_view(text, end - text), *shape)) {
+    nativeUntil = text + cursor.consumedBytes();
+    return false;
+  }
+  const bool scaled = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
+  const uint8_t sdStyle = sdFont ? resolveSdCardStyle(*sdFont, style) : 0;
+  ThaiGlyphPlacement placement;
+  int32_t pen = 0;
+  uint8_t previousFlags = 0;
+  bool first = true;
+  while (cursor.next(placement)) {
+    const uint32_t cp = placement.codepoint;
+    if (first) {
+      if (previous) {
+        origin += fp4::toPixel(previousAdvance + scaleThaiFP(font.getKerning(previous, cp, style), scaled)) +
+                  trackingBetween(previous, cp, tracking);
+      }
+    } else if ((previousFlags & ThaiGlyphPlacement::Native) ||
+               (placement.flags & (ThaiGlyphPlacement::Native | ThaiGlyphPlacement::RecipeStart))) {
+      pen += scaleThaiFP(font.getKerning(previous, cp, style), scaled);
+    }
+    uint16_t advance = placement.advanceFP;
+    if (placement.flags & ThaiGlyphPlacement::Native) {
+      if (!sdFont || !sdFont->getAdvance(cp, sdStyle, advance)) {
+        const EpdGlyph* glyph = font.getGlyph(cp, style);
+        advance = glyph ? glyph->advanceX : 0;
+      }
+    }
+    visit(cp, origin + fp4::toPixel(pen + scaleThaiFP(placement.xOffsetFP, scaled)),
+          fp4::toPixel(scaleThaiFP(placement.yOffsetFP, scaled)));
+    pen += scaleThaiFP(advance, scaled);
+    previous = cp;
+    previousFlags = placement.flags;
+    first = false;
+  }
+  previousAdvance = fp4::toPixel(pen) * 16;
+  text += cursor.consumedBytes();
+  return true;
+}
+#endif
 }  // namespace
 
 namespace {
@@ -454,6 +526,7 @@ enum class TextRotation { None, Rotated90CW };
 //
 // The advance width is also halved in drawText() so layout reserves exactly the right
 // horizontal space for the scaled glyph.
+template <TextRotation rotation = TextRotation::None>
 static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                              const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
                              const bool pixelState, const EpdFontFamily::Style style) {
@@ -471,8 +544,16 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
   const int dstH = (srcH + 1) / 2;
   // Scale the glyph bearing by the same factor so the scaled glyph sits at the correct
   // pixel offset from the (already-shifted) cursor position.
-  const int baseX = cursorX + glyph->left / 2;
-  const int baseY = cursorY - glyph->top / 2;
+  const int baseX = rotation == TextRotation::None ? cursorX + glyph->left / 2
+                                                  : cursorX + fontData->ascender - glyph->top / 2;
+  const int baseY = rotation == TextRotation::None ? cursorY - glyph->top / 2 : cursorY - glyph->left / 2;
+  const auto drawScaledPixel = [&](int dx, int dy) {
+    if constexpr (rotation == TextRotation::None) {
+      renderer.drawPixel(baseX + dx, baseY + dy, pixelState);
+    } else {
+      renderer.drawPixel(baseX + dy, baseY - dx, pixelState);
+    }
+  };
 
   if (fontData->is2Bit) {
     // 2-bit packed format: 4 pixels per byte, MSB first, 2 bits per pixel.
@@ -493,7 +574,7 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
           }
         }
         if (maxRaw >= 2 || coverage >= 2) {
-          renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
+          drawScaledPixel(dstX, dstY);
         }
       }
     }
@@ -515,7 +596,7 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
           }
         }
         if (hasInk) {
-          renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
+          drawScaledPixel(dstX, dstY);
         }
       }
     }
@@ -727,11 +808,34 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     return;
   }
   const auto& font = fontIt->second;
+#if THAI_ENGINE_STATS
+  const TextDrawTimer drawTimer;
+#endif
 
   const char* textCursor = renderedText;
   uint32_t cp;
   uint32_t prevCp = 0;
-  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&textCursor)))) {
+#if THAI_SHAPING
+  const ThaiShapeView* shape = font.getThaiShape(style);
+  if (shape && !thai::containsThai(renderedText)) shape = nullptr;
+  const char* end = shape ? renderedText + strlen(renderedText) : renderedText;
+  const char* nativeUntil = renderedText;
+  const auto sd = sdCardFonts_.find(resolvedFontId);
+  SdCardFont* sdFont = sd != sdCardFonts_.end() ? sd->second : nullptr;
+#endif
+  while (*textCursor) {
+#if THAI_SHAPING
+    if (placeThaiCluster(textCursor, end, nativeUntil, shape, font, style, sdFont, tracking,
+                         lastBaseX, prevCp, prevAdvanceFP, [&](uint32_t shapedCp, int gx, int yOffset) {
+          if (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) {
+            renderCharScaled(*this, renderMode, font, shapedCp, gx, yPos - yOffset, black, style);
+          } else {
+            renderCharImpl<TextRotation::None>(*this, renderMode, font, shapedCp, gx, yPos - yOffset, black, style);
+          }
+        })) continue;
+#endif
+    cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&textCursor));
+    if (!cp) break;
     // RTL vowel marks (Hebrew niqqud, Arabic harakat) ride the combining-mark
     // path: zero-advance overlays on the preceding base glyph (applyBidiVisual
     // emits base-then-marks per UAX#9 L3). anchorFor pins position-sensitive
@@ -757,7 +861,10 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     // identical character pairs always produce the same pixel step regardless of
     // where they fall on the line.
     if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
+      int32_t kernFP = font.getKerning(prevCp, cp, style);
+#if THAI_SHAPING
+      if (shape) kernFP = scaleThaiFP(kernFP, (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0);
+#endif
       lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP) + trackingBetween(prevCp, cp, tracking);
     }
 
@@ -2110,11 +2217,18 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   std::string visual;
   text = resolveVisualText(text, visual, baseDir);
 
+#if THAI_SHAPING
+  const auto shapeFont = fontMap.find(resolvedFontId);
+  const ThaiShapeView* shape = shapeFont != fontMap.end() ? shapeFont->second.getThaiShape(style) : nullptr;
+  const bool shapedText = shape && text && thai::containsThai(text);
+#else
+  const bool shapedText = false;
+#endif
   // Advance table fast-path for SD card fonts during layout.
   // No kerning/ligature lookup — consistent with previous metadataOnly behavior
   // where kern/lig data was not loaded.
   auto sdIt = sdCardFonts_.find(resolvedFontId);
-  if (mode == TextMeasureMode::Layout && sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
+  if (!shapedText && mode == TextMeasureMode::Layout && sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
     int32_t widthFP = 0;
     int trackingPx = 0;
     uint32_t prevCp = 0;
@@ -2131,9 +2245,11 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
       if (BidiUtils::isTransparentMark(cp)) {
         continue;
       }
-      int32_t advFP = sdIt->second->getAdvance(cp, styleIdx);
+      uint16_t cachedAdvance = 0;
+      const bool cached = sdIt->second->getAdvance(cp, styleIdx, cachedAdvance);
+      int32_t advFP = cachedAdvance;
       if (!utf8IsCombiningMark(cp)) {
-        if (advFP == 0) {
+        if (!cached) {
           const EpdGlyph* glyph = font.getGlyph(cp, style);
           advFP = glyph ? glyph->advanceX : 0;
         }
@@ -2156,7 +2272,18 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   int widthPx = 0;
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   const auto& font = fontIt->second;
-  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
+#if THAI_SHAPING
+  const char* end = shapedText ? text + strlen(text) : text;
+  const char* nativeUntil = text;
+  SdCardFont* sdFont = sdIt != sdCardFonts_.end() ? sdIt->second : nullptr;
+#endif
+  while (text && *text) {
+#if THAI_SHAPING
+    if (shapedText && placeThaiCluster(text, end, nativeUntil, shape, font, style, sdFont, tracking,
+                                      widthPx, prevCp, prevAdvanceFP, [](uint32_t, int, int) {})) continue;
+#endif
+    cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text));
+    if (!cp) break;
     // RTL vowel marks (niqqud/harakat) are zero-advance overlays in drawText — no width.
     if (BidiUtils::isTransparentMark(cp)) {
       continue;
@@ -2169,12 +2296,24 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     // Differential rounding: snap (previous advance + current kern) together,
     // matching drawText so measurement and rendering agree exactly.
     if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
+      int32_t kernFP = font.getKerning(prevCp, cp, style);
+#if THAI_SHAPING
+      if (shapedText) kernFP = scaleThaiFP(kernFP, (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0);
+#endif
       widthPx += fp4::toPixel(prevAdvanceFP + kernFP) + trackingBetween(prevCp, cp, tracking);
     }
 
-    const EpdGlyph* glyph = font.getGlyph(cp, style);
-    prevAdvanceFP = glyph ? glyph->advanceX : 0;
+    uint16_t advance = 0;
+#if THAI_SHAPING
+    const bool cached = shapedText && sdFont && sdFont->getAdvance(cp, resolveSdCardStyle(*sdFont, style), advance);
+#else
+    constexpr bool cached = false;
+#endif
+    if (!cached) {
+      const EpdGlyph* glyph = font.getGlyph(cp, style);
+      advance = glyph ? glyph->advanceX : 0;
+    }
+    prevAdvanceFP = advance;
     if ((style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
     }
@@ -2238,6 +2377,13 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   }
 
   const auto& font = fontIt->second;
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) {
+    fontCacheManager_->recordText(text, resolvedFontId, style);
+    return;
+  }
+#if THAI_ENGINE_STATS
+  const TextDrawTimer drawTimer(!fontCacheManager_ || !fontCacheManager_->isScanning());
+#endif
 
   int lastBaseY = y;
   int lastBaseLeft = 0;
@@ -2247,7 +2393,33 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
 
   uint32_t cp;
   uint32_t prevCp = 0;
-  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
+#if THAI_SHAPING
+  const ThaiShapeView* shape = font.getThaiShape(style);
+  if (shape && !thai::containsThai(text)) shape = nullptr;
+  const char* end = shape ? text + strlen(text) : text;
+  const char* nativeUntil = text;
+  const auto sd = sdCardFonts_.find(resolvedFontId);
+  SdCardFont* sdFont = sd != sdCardFonts_.end() ? sd->second : nullptr;
+#endif
+  while (*text) {
+#if THAI_SHAPING
+    int origin = y - lastBaseY;
+    if (placeThaiCluster(text, end, nativeUntil, shape, font, style, sdFont, 0,
+                         origin, prevCp, prevAdvanceFP, [&](uint32_t shapedCp, int gx, int yOffset) {
+          if (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) {
+            renderCharScaled<TextRotation::Rotated90CW>(*this, renderMode, font, shapedCp,
+                                                        x - yOffset, y - gx, black, style);
+          } else {
+            renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, shapedCp,
+                                                     x - yOffset, y - gx, black, style);
+          }
+        })) {
+      lastBaseY = y - origin;
+      continue;
+    }
+#endif
+    cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text));
+    if (!cp) break;
     // RTL vowel marks (Hebrew niqqud, Arabic harakat) ride the combining-mark
     // path: zero-advance overlays on the preceding base glyph (applyBidiVisual
     // emits base-then-marks per UAX#9 L3). anchorFor pins position-sensitive
@@ -2273,7 +2445,10 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
     // Differential rounding: snap (previous advance + current kern) as one unit,
     // subtracting for the rotated coordinate direction.
     if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
+      int32_t kernFP = font.getKerning(prevCp, cp, style);
+#if THAI_SHAPING
+      if (shape) kernFP = scaleThaiFP(kernFP, (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0);
+#endif
       lastBaseY -= fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
     }
 
@@ -2284,7 +2459,16 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
     lastBaseTop = glyph ? glyph->top : 0;
     prevAdvanceFP = glyph ? glyph->advanceX : 0;  // 12.4 fixed-point
 
+#if THAI_SHAPING
+    if (shape && (style & (EpdFontFamily::SUP | EpdFontFamily::SUB))) {
+      prevAdvanceFP = scaleThaiFP(prevAdvanceFP, true);
+      renderCharScaled<TextRotation::Rotated90CW>(*this, renderMode, font, cp, x, lastBaseY, black, style);
+    } else {
+      renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, x, lastBaseY, black, style);
+    }
+#else
     renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, x, lastBaseY, black, style);
+#endif
     prevCp = cp;
   }
 }

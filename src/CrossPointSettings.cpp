@@ -3,6 +3,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <ObfuscationUtils.h>
+#include <ThaiLayoutId.h>
 
 #include <algorithm>
 #include <cstring>
@@ -292,6 +293,7 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.lineCompression = getReaderLineCompression();
   spec.characterSpacing = getCharacterSpacing();
   spec.wordSpacingPercent = wordSpacing;
+  spec.thaiLayoutId = thai::layoutId();
   spec.extraParagraphSpacing = extraParagraphSpacing != 0;
   spec.paragraphAlignment = paragraphAlignment;
   spec.viewportWidth = viewportWidth;

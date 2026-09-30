@@ -6,6 +6,7 @@
 #include <vector>
 
 inline std::vector<uint8_t> sdFontTestFile;
+inline std::vector<uint8_t> sdFontTestCompanion;
 inline size_t sdFontTestReads = 0;
 
 struct SdFontTestEsp {
@@ -20,31 +21,38 @@ class HalFile {
  public:
   bool seekSet(size_t position) {
     position_ = position;
-    return opened_ && position <= sdFontTestFile.size();
+    return opened_ && position <= bytes_->size();
   }
   int read(void* output, size_t count) {
-    if (!opened_ || position_ > sdFontTestFile.size()) return 0;
-    count = std::min(count, sdFontTestFile.size() - position_);
-    std::memcpy(output, sdFontTestFile.data() + position_, count);
+    if (!opened_ || position_ > bytes_->size()) return 0;
+    count = std::min(count, bytes_->size() - position_);
+    std::memcpy(output, bytes_->data() + position_, count);
     position_ += count;
     sdFontTestReads++;
     return static_cast<int>(count);
   }
   void close() { opened_ = false; }
-  void open() {
+  size_t size() const { return bytes_->size(); }
+  void open(const std::vector<uint8_t>* bytes = &sdFontTestFile) {
+    bytes_ = bytes;
     opened_ = true;
     position_ = 0;
   }
 
  private:
+  const std::vector<uint8_t>* bytes_ = &sdFontTestFile;
   size_t position_ = 0;
   bool opened_ = false;
 };
 
 class HalStorage {
  public:
-  bool openFileForRead(const char*, const char*, HalFile& file) {
-    file.open();
+  bool exists(const char* path) const {
+    return std::strstr(path, ".cpshape") ? !sdFontTestCompanion.empty() : !sdFontTestFile.empty();
+  }
+  bool openFileForRead(const char*, const char* path, HalFile& file) {
+    if (!exists(path)) return false;
+    file.open(std::strstr(path, ".cpshape") ? &sdFontTestCompanion : &sdFontTestFile);
     return true;
   }
 };

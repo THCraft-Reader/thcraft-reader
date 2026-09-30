@@ -1,6 +1,7 @@
 #pragma once
 
 #include <EpdFontFamily.h>
+#include <ThaiLineBreaker.h>
 
 #include <deque>
 #include <functional>
@@ -15,6 +16,9 @@
 class GfxRenderer;
 
 class ParsedText {
+#ifdef CROSSPOINT_PARSER_TEST
+ public:
+#endif
   // Word text lives in wordStore (chunked bump arena, NUL-terminated entries);
   // words holds 8-byte handles into it. This replaces the former
   // std::deque<std::string>: per-word string objects, their SSO spills, and
@@ -37,6 +41,10 @@ class ParsedText {
   //   continues=true,  noSpace=true:  breakable zero-width, non-stretching attachment
   std::vector<bool> wordContinues;
   std::vector<bool> wordNoSpaceBefore;
+  // Allocated only after analyzed Thai arrives. Entries rank the boundary before
+  // each token; ordinary non-Thai paragraphs keep the existing flags alone.
+  bool hasThaiTokens = false;
+  std::vector<thai::BreakKind> wordBreakRanks;
   // Focus Reading emphasis: bytes [0, wordFocusBoundary) render bold, the rest at wordStyles.
   // 0 = none. An annotation rather than a token split, so the hyphenator and line breaker still
   // see whole words; TextBlock stores emphasis the same way, so extractLine passes it through.
@@ -76,6 +84,13 @@ class ParsedText {
 
   std::string_view wordAt(const size_t i) const { return wordStore.view(words[i]); }
   bool storeWord(std::string_view text, WordStore::StoredWord& out);
+  void ensureTokenCapacity(size_t additionalTokens);
+  void initializeThaiRanks();
+  void setTokenBoundary(size_t index, thai::BreakKind before);
+  void appendToken(std::string_view token, EpdFontFamily::Style style, bool continues, bool noSpaceBefore,
+                   uint8_t focusBoundary, uint32_t visibleOffset, uint8_t linkId, bool padRuby);
+  void addWordImpl(std::string word, EpdFontFamily::Style style, bool underline, bool attachToPrevious,
+                   uint32_t visibleOffset, uint8_t linkId, const thai::BreakKind* before);
   uint32_t visibleOffsetBaseAt(size_t wordIndex) const;
   uint32_t visibleOffsetAt(size_t wordIndex) const;
   void pushVisibleOffset(uint32_t offset);
@@ -91,6 +106,13 @@ class ParsedText {
   std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
                                                   std::vector<bool>& noSpaceBeforeVec);
+  std::vector<size_t> computeThaiLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
+                                           std::vector<uint16_t>& wordWidths);
+  size_t splitThaiGroup(size_t begin, size_t end, int availableWidth, const GfxRenderer& renderer, int fontId,
+                        std::vector<uint16_t>& wordWidths);
+  bool splitThaiToken(size_t index, size_t offset, thai::BreakKind rank, const GfxRenderer& renderer, int fontId,
+                      std::vector<uint16_t>& wordWidths);
+  int tokenGap(size_t index, const GfxRenderer& renderer, int fontId) const;
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks);
   void extractLine(size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
@@ -113,6 +135,10 @@ class ParsedText {
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint32_t visibleTextOffset = 0, uint8_t linkId = 0);
+  void addWordWithBoundary(std::string word, EpdFontFamily::Style style, bool underline, thai::BreakKind before,
+                           uint32_t visibleOffset, uint8_t linkId);
+  void addAnalyzedToken(std::string_view token, EpdFontFamily::Style style, thai::BreakKind before,
+                        uint32_t visibleOffset, uint8_t linkId);
   uint8_t addLinkTarget(const char* href);
   bool linkTargetMatches(uint8_t linkId, const char* href) const;
   void setRubyForWordAt(size_t index, const std::string& ruby);

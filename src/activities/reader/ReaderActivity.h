@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ThaiStats.h>
 #include <atomic>
 #include <memory>
 #include <string>
@@ -20,6 +21,19 @@ class ReaderActivity : public Activity {
   bool bookRemembered = false;
   void markPageRendered() { pageRendered.store(true, std::memory_order_release); }
   void rememberBookOnceRendered();
+
+#if THAI_ENGINE_STATS
+  thai::StatsSnapshot thaiStatsPrevious{};
+  uint64_t thaiSdCallsPrevious = 0;
+  uint64_t thaiSdBytesPrevious = 0;
+  uint32_t thaiOpenStartedMs = 0;
+  uint32_t thaiWindowStartedMs = 0;
+  uint32_t thaiMinimumInternal = UINT32_MAX;
+  uint32_t thaiSample = 0;
+  bool thaiStatsActive = false;
+  void beginThaiStatsWindow();
+  void logThaiStatsPhase(const char* phase);
+#endif
 
   explicit ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                           std::string bookPath, bool allowFastInitialRefresh);
@@ -48,7 +62,11 @@ class ReaderActivity : public Activity {
   void disableFastInitialRefresh();
 
  public:
+#if THAI_ENGINE_STATS
+  ~ReaderActivity() override;
+#else
   ~ReaderActivity() override = default;
+#endif
 
   static std::unique_ptr<ReaderActivity> create(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                 std::string path, bool allowFastInitialRefresh);

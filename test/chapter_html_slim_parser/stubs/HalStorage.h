@@ -65,4 +65,5 @@ class HalStorage {
 #define Storage HalStorage::getInstance()
 
 inline uint32_t millis() { return 0; }
+inline uint32_t micros() { return 0; }
 inline void delay(uint32_t) {}

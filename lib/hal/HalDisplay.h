@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <BoardConfig.h>
 #include <EInkDisplay.h>
+#include <ThaiConfig.h>
 
 class HalDisplay {
  public:
@@ -128,6 +129,14 @@ class HalDisplay {
 
  private:
   EInkDisplay einkDisplay;
+#if THAI_ENGINE_STATS
+  // Display access is serialized by the application's RenderLock. Aggregate
+  // counters live in ThaiStats; only the in-flight HAL request lives here.
+  bool statsRefreshPending = false;
+  uint32_t statsRefreshStartedMs = 0;
+  void beginRefreshStats();
+  void completeRefreshStats();
+#endif
 };
 
 extern HalDisplay display;

@@ -27,6 +27,7 @@ target_include_directories(KoreanLineBreakingTest PRIVATE
 
 target_link_libraries(KoreanLineBreakingTest PRIVATE
   crosspoint_test_common
+  crosspoint_thai
   GTest::gtest_main
 )
 

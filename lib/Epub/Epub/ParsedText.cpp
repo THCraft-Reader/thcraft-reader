@@ -5,6 +5,9 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Utf8.h>
+#include <ThaiCharClass.h>
+#include <ThaiCluster.h>
+#include <ThaiSegmenter.h>
 
 #include <algorithm>
 #include <cmath>
@@ -323,6 +326,42 @@ uint16_t measureFocusWordWidth(const GfxRenderer& renderer, const int fontId, co
   return measureFocusPrefixAdvance(renderer, fontId, word, style, focusBoundary, characterSpacing) + suffixWidth;
 }
 
+// The renderer's C API needs a terminator for a non-owning prefix. Production
+// dictionary-sized tokens use bounded scratch. Larger caller-supplied tokens
+// are measured one complete cluster at a time, never copied to a heap string.
+uint16_t measureThaiPrefix(const GfxRenderer& renderer, const int fontId, const std::string_view prefix,
+                          const EpdFontFamily::Style style, const uint8_t focusBoundary,
+                          const int8_t tracking, const uint8_t spacing) {
+  char terminated[thai::MAX_DICTIONARY_WORD_CODEPOINTS * 3 + 1];
+  if (prefix.size() < sizeof(terminated)) {
+    memcpy(terminated, prefix.data(), prefix.size());
+    terminated[prefix.size()] = '\0';
+    return measureFocusWordWidth(renderer, fontId, std::string_view(terminated, prefix.size()), style,
+                                 focusBoundary, tracking, spacing);
+  }
+  size_t offset = 0;
+  thai::Cluster cluster{};
+  int width = 0;
+  uint32_t previous = 0;
+  auto previousStyle = style;
+  while (thai::nextCluster(prefix, offset, cluster, true)) {
+    const auto part = prefix.substr(cluster.begin, cluster.end - cluster.begin);
+    if (!cluster.valid || part.size() >= sizeof(terminated)) return std::numeric_limits<uint16_t>::max();
+    memcpy(terminated, part.data(), part.size());
+    terminated[part.size()] = '\0';
+    const uint8_t focus = focusBoundary > cluster.begin
+                              ? static_cast<uint8_t>(std::min<size_t>(focusBoundary - cluster.begin, part.size())) : 0;
+    if (previous) {
+      width += renderer.getKerning(fontId, previous, firstCodepoint(part), previousStyle, tracking);
+    }
+    width += measureFocusWordWidth(renderer, fontId, std::string_view(terminated, part.size()), style,
+                                   focus, tracking, spacing);
+    previous = lastCodepoint(part);
+    previousStyle = focus == part.size() ? static_cast<EpdFontFamily::Style>(style | EpdFontFamily::BOLD) : style;
+  }
+  return static_cast<uint16_t>(width);
+}
+
 // Focus boundaries for the two halves of a token split at `splitOffset`.
 uint8_t focusBoundaryBefore(const uint8_t focusBoundary, const size_t splitOffset) {
   return static_cast<uint8_t>(std::min<size_t>(focusBoundary, splitOffset));
@@ -362,6 +401,14 @@ bool isWordCharacter(uint32_t cp) {
   return true;
 }
 
+
+thai::BreakKind rankForBoundary(const bool continues, const bool noSpaceBefore,
+                               const EpdFontFamily::Style style) {
+  if ((style & EpdFontFamily::RUBY_CONTINUE) != 0 || !TokenBoundary::allowsBreak(continues, noSpaceBefore)) {
+    return thai::BreakKind::Prohibited;
+  }
+  return noSpaceBefore ? thai::BreakKind::Word : thai::BreakKind::Space;
+}
 }  // namespace
 
 uint32_t ParsedText::visibleOffsetBaseAt(const size_t wordIndex) const {
@@ -440,16 +487,85 @@ bool ParsedText::storeWord(const std::string_view text, WordStore::StoredWord& o
   return false;
 }
 
+void ParsedText::ensureTokenCapacity(const size_t additionalTokens) {
+  if (additionalTokens == 0) return;
+  const size_t requiredSize = words.size() + additionalTokens;
+  size_t newCapacity = std::max<size_t>(16, wordStyles.capacity());
+  while (newCapacity < requiredSize) newCapacity *= 2;
+  if (wordStyles.capacity() < requiredSize) {
+    wordStyles.reserve(newCapacity);
+    wordContinues.reserve(newCapacity);
+    wordNoSpaceBefore.reserve(newCapacity);
+    wordFocusBoundary.reserve(newCapacity);
+    wordLinkIds.reserve(newCapacity);
+    wordVisibleOffsetDeltas.reserve(newCapacity);
+  }
+  if (hasThaiTokens && wordBreakRanks.capacity() < requiredSize) wordBreakRanks.reserve(newCapacity);
+}
+
+void ParsedText::initializeThaiRanks() {
+  if (hasThaiTokens) return;
+  hasThaiTokens = true;
+  wordBreakRanks.reserve(wordStyles.capacity());
+  for (size_t i = 0; i < words.size(); ++i) {
+    wordBreakRanks.push_back(rankForBoundary(wordContinues[i], wordNoSpaceBefore[i], wordStyles[i]));
+  }
+}
+
+void ParsedText::setTokenBoundary(const size_t index, thai::BreakKind before) {
+  if ((wordStyles[index] & EpdFontFamily::RUBY_CONTINUE) != 0) before = thai::BreakKind::Prohibited;
+  wordContinues[index] = before != thai::BreakKind::Space;
+  wordNoSpaceBefore[index] = before != thai::BreakKind::Space && before != thai::BreakKind::Prohibited;
+  if (hasThaiTokens) wordBreakRanks[index] = before;
+}
+
+void ParsedText::appendToken(const std::string_view token, const EpdFontFamily::Style style,
+                             const bool continues, const bool noSpaceBefore, const uint8_t focusBoundary,
+                             const uint32_t visibleOffset, const uint8_t linkId, const bool padRuby) {
+  // The arena append is the fallible step. On failure, no parallel array changes.
+  WordStore::StoredWord stored;
+  if (!storeWord(token, stored)) return;
+  ensureTokenCapacity(1);
+  words.push_back(stored);
+  wordStyles.push_back(style);
+  wordContinues.push_back(continues);
+  wordNoSpaceBefore.push_back(noSpaceBefore);
+  wordFocusBoundary.push_back(focusBoundary);
+  wordLinkIds.push_back(linkId);
+  pushVisibleOffset(visibleOffset);
+  if (hasThaiTokens) wordBreakRanks.push_back(rankForBoundary(continues, noSpaceBefore, style));
+  if (padRuby && !rubyTexts.empty()) rubyTexts.resize(words.size());
+}
+
+void ParsedText::addAnalyzedToken(const std::string_view token, const EpdFontFamily::Style style,
+                                  const thai::BreakKind before, const uint32_t visibleOffset, const uint8_t linkId) {
+  if (token.empty()) return;
+  const size_t index = words.size();
+  appendToken(token, style, before != thai::BreakKind::Space,
+              before != thai::BreakKind::Space && before != thai::BreakKind::Prohibited,
+              0, visibleOffset, linkId, true);
+  if (words.size() == index) return;
+  initializeThaiRanks();
+  setTokenBoundary(index, before);
+}
+
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
                          const bool attachToPrevious, const uint32_t visibleTextOffset, const uint8_t linkId) {
+  addWordImpl(std::move(word), fontStyle, underline, attachToPrevious, visibleTextOffset, linkId, nullptr);
+}
+
+void ParsedText::addWordWithBoundary(std::string word, const EpdFontFamily::Style style, const bool underline,
+                                     const thai::BreakKind before, const uint32_t visibleOffset, const uint8_t linkId) {
+  addWordImpl(std::move(word), style, underline, before != thai::BreakKind::Space, visibleOffset, linkId, &before);
+}
+
+void ParsedText::addWordImpl(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
+                             const bool attachToPrevious, const uint32_t visibleTextOffset, const uint8_t linkId,
+                             const thai::BreakKind* before) {
   if (word.empty()) return;
 
-  // The device fonts carry no combining-mark positioning, so EPUB text stored in NFD
-  // (a base letter followed by separate combining accents -- common for Vietnamese,
-  // and used for many EPUB <h1> chapter headings) renders with the marks detached or
-  // misplaced. Compose to NFC here, the single funnel every word passes through, so a
-  // precomposed glyph is used instead. This runs once per word at layout time (the
-  // result is cached in the section file) and is a cheap no-op for mark-free text.
+  // Preserve the existing NFC path for generic text (not analyzed Thai).
+  // Composition runs once at ingestion; cached pages retain the resulting glyphs.
   word = utf8ComposeNfc(word);
 
   EpdFontFamily::Style baseStyle = fontStyle;
@@ -459,29 +575,20 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   const bool wordStartsRtl = !hasRtlWord && mayContainRtlBytes(word.c_str()) &&
                              BidiUtils::startsWithRtl(word.c_str(), RTL_PER_WORD_PROBE_DEPTH);
 
-  // All token pushes funnel through here: the arena append is the only
-  // fallible step, and a failed append drops the token without touching the
-  // parallel arrays (they must stay in lockstep with words).
-  const auto pushStyledToken = [&](std::string_view token, const EpdFontFamily::Style style, const bool continues,
-                                   const bool noSpaceBefore, const uint8_t focusBoundary, const uint32_t tokenOffset,
-                                   const bool padRuby) {
-    WordStore::StoredWord stored;
-    if (!storeWord(token, stored)) return;
-    words.push_back(stored);
-    wordStyles.push_back(style);
-    wordContinues.push_back(continues);
-    wordNoSpaceBefore.push_back(noSpaceBefore);
-    wordFocusBoundary.push_back(focusBoundary);
-    wordLinkIds.push_back(linkId);
-    pushVisibleOffset(tokenOffset);
-    if (padRuby && !rubyTexts.empty()) {
-      rubyTexts.push_back("");
-    }
+  bool firstEmittedToken = true;
+  const auto emitToken = [&](std::string_view token, const EpdFontFamily::Style style, const bool continues,
+                             const bool noSpaceBefore, const uint8_t focusBoundary, const uint32_t tokenOffset,
+                             const bool padRuby) {
+    const size_t index = words.size();
+    appendToken(token, style, continues, noSpaceBefore, focusBoundary, tokenOffset, linkId, padRuby);
+    if (words.size() == index) return;
+    if (firstEmittedToken && before) setTokenBoundary(index, *before);
+    firstEmittedToken = false;
   };
 
   const auto pushToken = [&](std::string_view token, const bool continues, const bool noSpaceBefore,
                              const uint8_t focusBoundary, const uint32_t tokenOffset) {
-    pushStyledToken(token, baseStyle, continues, noSpaceBefore, focusBoundary, tokenOffset, true);
+    emitToken(token, baseStyle, continues, noSpaceBefore, focusBoundary, tokenOffset, true);
   };
 
   bool effectiveAttachToPrevious = attachToPrevious;
@@ -496,28 +603,6 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     effectiveNoSpaceBefore = true;
   }
 
-  // Bulk-reserve the per-token parallel arrays before a burst of pushes so they
-  // don't repeatedly double. Only the std::vector arrays are reserved: words and
-  // rubyTexts are std::deque (chunked growth, no reserve()/capacity() and no large
-  // contiguous reallocation to avoid). wordStyles' capacity gauges them all since
-  // pushToken() keeps every array in lockstep.
-  const auto ensureTokenCapacity = [&](const size_t additionalTokens) {
-    if (additionalTokens == 0) return;
-    const size_t requiredSize = words.size() + additionalTokens;
-    if (wordStyles.capacity() >= requiredSize) return;
-
-    size_t newCapacity = wordStyles.capacity() < 16 ? 16 : wordStyles.capacity();
-    while (newCapacity < requiredSize) {
-      newCapacity *= 2;
-    }
-
-    wordStyles.reserve(newCapacity);
-    wordContinues.reserve(newCapacity);
-    wordNoSpaceBefore.reserve(newCapacity);
-    wordFocusBoundary.reserve(newCapacity);
-    wordLinkIds.reserve(newCapacity);
-    wordVisibleOffsetDeltas.reserve(newCapacity);
-  };
 
   if (auto breakOffsets = cjkCharacterBreakByteOffsets(word); !breakOffsets.empty()) {
     // CJK-heavy paragraphs can push hundreds of tiny tokens quickly when CSS toggles
@@ -580,7 +665,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     }
     if (!isWord) {
       // Punctuation and Numbers stay regular
-      pushStyledToken(segment, baseStyle, attach, noSpaceBefore, /*focusBoundary=*/0, segmentOffset, false);
+      emitToken(segment, baseStyle, attach, noSpaceBefore, /*focusBoundary=*/0, segmentOffset, false);
     } else {
       size_t charCount = 0;
       const unsigned char* countPtr = reinterpret_cast<const unsigned char*>(segment.data());
@@ -598,7 +683,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
 
       if (targetBoldChars >= charCount) {
         // Whole segment is bold - no suffix split needed
-        pushStyledToken(segment, static_cast<EpdFontFamily::Style>(baseStyle | EpdFontFamily::BOLD), attach,
+        emitToken(segment, static_cast<EpdFontFamily::Style>(baseStyle | EpdFontFamily::BOLD), attach,
                         noSpaceBefore, /*focusBoundary=*/0, segmentOffset, false);
       } else {
         countPtr = reinterpret_cast<const unsigned char*>(segment.data());
@@ -609,7 +694,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
 
         // One token carrying the emphasis as a byte boundary, so the word stays whole for the
         // hyphenator and the line breaker. The renderer applies BOLD to bytes [0, splitByteOffset).
-        pushStyledToken(segment, baseStyle, attach, noSpaceBefore,
+        emitToken(segment, baseStyle, attach, noSpaceBefore,
                         static_cast<uint8_t>(std::min<size_t>(splitByteOffset, 255)), segmentOffset, false);
       }
     }
@@ -701,6 +786,7 @@ void ParsedText::setRubyGroupAt(size_t startIndex, size_t count, const std::stri
         static_cast<EpdFontFamily::Style>(static_cast<uint8_t>(wordStyles[idx]) | EpdFontFamily::RUBY_CONTINUE);
     wordContinues[idx] = true;       // Prevent page breaker from splitting the Group Ruby!
     wordNoSpaceBefore[idx] = false;  // Ensure allowsBreak returns false!
+    if (hasThaiTokens) wordBreakRanks[idx] = thai::BreakKind::Prohibited;
   }
 }
 
@@ -787,7 +873,9 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   auto wordWidths = calculateWordWidths(renderer, fontId);
 
   std::vector<size_t> lineBreakIndices;
-  if (hyphenationEnabled) {
+  if (hasThaiTokens) {
+    lineBreakIndices = computeThaiLineBreaks(renderer, fontId, pageWidth, wordWidths);
+  } else if (hyphenationEnabled) {
     // Use greedy layout that can split words mid-loop when a hyphenated prefix fits.
     lineBreakIndices =
         computeHyphenatedLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore);
@@ -813,6 +901,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     wordNoSpaceBefore.erase(wordNoSpaceBefore.begin(), wordNoSpaceBefore.begin() + consumed);
     wordFocusBoundary.erase(wordFocusBoundary.begin(), wordFocusBoundary.begin() + consumed);
     wordLinkIds.erase(wordLinkIds.begin(), wordLinkIds.begin() + consumed);
+    if (hasThaiTokens) wordBreakRanks.erase(wordBreakRanks.begin(), wordBreakRanks.begin() + consumed);
     eraseVisibleOffsetPrefix(consumed);
     if (!rubyTexts.empty()) {
       const size_t rtConsumed = std::min(consumed, rubyTexts.size());
@@ -1005,6 +1094,197 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
   }
 
   return wordWidths;
+}
+
+int ParsedText::tokenGap(const size_t index, const GfxRenderer& renderer, const int fontId) const {
+  if (wordContinues[index]) {
+    return renderer.getKerning(fontId, lastCodepoint(wordAt(index - 1)), firstCodepoint(wordAt(index)),
+                               wordStyles[index - 1], blockStyle.characterSpacing);
+  }
+  if (wordNoSpaceBefore[index]) return blockStyle.characterSpacing;
+  return scaleSpace(renderer.getSpaceAdvance(fontId, lastCodepoint(wordAt(index - 1)), firstCodepoint(wordAt(index)),
+                                             wordStyles[index - 1]), wordSpacingPercent);
+}
+
+bool ParsedText::splitThaiToken(const size_t index, const size_t offset, const thai::BreakKind rank,
+                               const GfxRenderer& renderer, const int fontId, std::vector<uint16_t>& widths) {
+  const auto text = wordAt(index);
+  if (!offset || offset >= text.size()) return false;
+  const auto prefix = text.substr(0, offset);
+  WordStore::StoredWord stored;
+  // Only the committed prefix is copied into the existing arena. The suffix
+  // retains the original entry's release obligation; no 200-byte parser limit.
+  if (!wordStore.append(prefix.data(), prefix.size(), stored)) return false;
+  const auto suffix = WordStore::suffix(words[index], offset);
+  const auto style = wordStyles[index];
+  const auto focus = wordFocusBoundary[index];
+  const uint32_t visible = visibleOffsetAt(index) + countCodepoints(prefix);
+  ensureTokenCapacity(1);
+  words[index] = stored;
+  words.insert(words.begin() + index + 1, suffix);
+  wordStyles.insert(wordStyles.begin() + index + 1, style);
+  wordContinues.insert(wordContinues.begin() + index + 1, true);
+  wordNoSpaceBefore.insert(wordNoSpaceBefore.begin() + index + 1, true);
+  wordBreakRanks.insert(wordBreakRanks.begin() + index + 1, rank);
+  wordFocusBoundary[index] = focusBoundaryBefore(focus, offset);
+  wordFocusBoundary.insert(wordFocusBoundary.begin() + index + 1, focusBoundaryAfter(focus, offset));
+  wordLinkIds.insert(wordLinkIds.begin() + index + 1, wordLinkIds[index]);
+  insertVisibleOffset(index + 1, visible);
+  if (!rubyTexts.empty()) rubyTexts.insert(rubyTexts.begin() + index + 1, "");
+  widths[index] = measureFocusWordWidth(renderer, fontId, wordAt(index), style, wordFocusBoundary[index],
+                                        blockStyle.characterSpacing, wordSpacingPercent);
+  widths.insert(widths.begin() + index + 1,
+                measureFocusWordWidth(renderer, fontId, wordAt(index + 1), style, wordFocusBoundary[index + 1],
+                                      blockStyle.characterSpacing, wordSpacingPercent));
+  return true;
+}
+
+size_t ParsedText::splitThaiGroup(const size_t begin, const size_t end, const int availableWidth,
+                                const GfxRenderer& renderer, const int fontId, std::vector<uint16_t>& widths) {
+  // Ruby and NBSP attachment groups are atomic even when wider than the page.
+  for (size_t i = begin; i < end; ++i) {
+    if ((i < rubyTexts.size() && !rubyTexts[i].empty()) ||
+        (wordStyles[i] & EpdFontFamily::RUBY_CONTINUE) || wordAt(i).find(' ') != std::string_view::npos) return end;
+  }
+
+  size_t chosenToken = end, chosenOffset = 0, chosenBytes = 0;
+  size_t firstToken = end, firstOffset = 0;
+  size_t bytesBefore = 0;
+  int widthBefore = 0;
+  for (size_t i = begin; i < end; ++i) {
+    const auto text = wordAt(i);
+    if (i > begin) widthBefore += tokenGap(i, renderer, fontId);
+    // Punctuation units (notably ฯลฯ and ...) must never be split internally.
+    const bool thaiToken = thai::containsThai(text) && !thai::punctuationUnitBytes(text, 0, true);
+    size_t offset = 0;
+    thai::Cluster cluster{};
+    while (thaiToken && thai::nextCluster(text, offset, cluster, true)) {
+      if (!cluster.valid) break;  // malformed source keeps its legacy fallback intact
+      const bool internal = offset < text.size();
+      const bool boundary = !internal && i + 1 < end;
+      if (!internal && !boundary) continue;
+      const uint32_t left = lastCodepoint(text.substr(0, offset));
+      const uint32_t right = internal ? firstCodepoint(text.substr(offset)) : firstCodepoint(wordAt(i + 1));
+      if (thai::prohibitsBreak(left, right)) continue;
+      if (boundary && !TokenBoundary::allowsBreak(wordContinues[i + 1], wordNoSpaceBefore[i + 1]) &&
+          !thai::containsThai(wordAt(i + 1))) continue;
+      const int width = widthBefore + (internal
+          ? measureThaiPrefix(renderer, fontId, text.substr(0, offset), wordStyles[i],
+                                  focusBoundaryBefore(wordFocusBoundary[i], offset),
+                                  blockStyle.characterSpacing, wordSpacingPercent)
+          : widths[i]);
+      if (firstToken == end) {
+        firstToken = i;
+        firstOffset = offset;
+      }
+      if (width <= availableWidth) {
+        chosenToken = i;
+        chosenOffset = offset;
+        chosenBytes = bytesBefore + offset;
+      } else {
+        // One complete overwide cluster still makes progress; never cut inside.
+        break;
+      }
+    }
+    widthBefore += widths[i];
+    bytesBefore += text.size();
+    if (widthBefore > availableWidth && firstToken != end) break;
+  }
+
+  thai::BreakKind rank = thai::BreakKind::Emergency;
+  if (chosenToken != end) {
+    // A dictionary word is at most 70 Thai scalars. Only an overwide group
+    // reaches here; this bounded stack view also covers words split by markup.
+    char compound[thai::MAX_DICTIONARY_WORD_CODEPOINTS * 3];
+    size_t length = 0;
+    bool complete = true;
+    for (size_t i = begin; i < end; ++i) {
+      const auto text = wordAt(i);
+      if (text.size() > sizeof(compound) - length) { complete = false; break; }
+      memcpy(compound + length, text.data(), text.size());
+      length += text.size();
+    }
+    if (complete) {
+      const thai::ThaiDictionary dictionary;
+      const size_t split = thai::dictionarySplit(std::string_view(compound, length), chosenBytes, dictionary);
+      if (split) {
+        size_t remaining = split;
+        for (size_t i = begin; i < end; ++i) {
+          if (remaining <= wordAt(i).size()) {
+            chosenToken = i;
+            chosenOffset = remaining;
+            rank = thai::BreakKind::Word;
+            break;
+          }
+          remaining -= wordAt(i).size();
+        }
+      }
+    }
+  } else {
+    chosenToken = firstToken;
+    chosenOffset = firstOffset;
+  }
+  if (chosenToken == end) return end;  // indivisible overwide attachment
+  if (chosenOffset == wordAt(chosenToken).size()) {
+    setTokenBoundary(chosenToken + 1, rank);
+    return chosenToken + 1;
+  }
+  return splitThaiToken(chosenToken, chosenOffset, rank, renderer, fontId, widths) ? chosenToken + 1 : end;
+}
+
+std::vector<size_t> ParsedText::computeThaiLineBreaks(const GfxRenderer& renderer, const int fontId,
+                                                   const int pageWidth, std::vector<uint16_t>& widths) {
+  std::vector<size_t> breaks;
+  size_t start = 0;
+  while (start < words.size()) {
+    const int available = pageWidth - resolveFirstLineIndent(start == 0, renderer, fontId);
+    int width = calculateRubyExtraStartOffset(start, words.size(), renderer, fontId);
+    size_t candidates[3] = {};
+    size_t i = start;
+    for (; i < words.size(); ++i) {
+      if (i > start) width += tokenGap(i, renderer, fontId);
+      width += widths[i];
+      const size_t next = i + 1;
+      const bool legal = next == words.size() ||
+          (wordBreakRanks[next] != thai::BreakKind::Prohibited &&
+           TokenBoundary::allowsBreak(wordContinues[next], wordNoSpaceBefore[next]));
+      const int edge = calculateRubyExtraEndOffset(start, next, renderer, fontId);
+      if (width + edge <= available) {
+        if (next == words.size()) { i = next; break; }
+        const auto rank = static_cast<uint8_t>(wordBreakRanks[next]);
+        if (legal && rank < 3) candidates[rank] = next;
+        continue;
+      }
+      size_t chosen = 0;
+      for (const size_t candidate : candidates) {
+        if (candidate) { chosen = candidate; break; }
+      }
+      if (chosen) { i = chosen; break; }
+      // No whole word/run fits. Finish protected attachments before looking for
+      // dictionary or cluster cuts. A full streaming window is not a word end.
+      size_t end = next;
+      while (end < words.size() &&
+             (wordBreakRanks[end] == thai::BreakKind::Prohibited ||
+              !TokenBoundary::allowsBreak(wordContinues[end], wordNoSpaceBefore[end]))) ++end;
+      bool containsThai = false;
+      for (size_t k = start; k < end; ++k) containsThai |= thai::containsThai(wordAt(k));
+      if (containsThai) {
+        i = splitThaiGroup(start, end, available - calculateRubyExtraStartOffset(start, end, renderer, fontId),
+                           renderer, fontId, widths);
+      } else if (end == start + 1 &&
+                 (start >= rubyTexts.size() || rubyTexts[start].empty()) &&
+                 (wordStyles[start] & EpdFontFamily::RUBY_CONTINUE) == 0 &&
+                 hyphenateWordAtIndex(start, available, renderer, fontId, widths, true)) {
+        i = start + 1;
+      } else {
+        i = end;
+      }
+      break;
+    }
+    breaks.push_back(i);
+    start = i;
+  }
+  return breaks;
 }
 
 std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
@@ -1224,6 +1504,14 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   if (availableWidth <= 0 || wordIndex >= words.size()) {
     return false;
   }
+  // Thai never enters codepoint fallback or inserted-hyphen generation, even
+  // when a caller requests generic hyphenation.
+  if (hasThaiTokens && thai::containsThai(wordAt(wordIndex))) {
+    if (!allowFallbackBreaks) return false;
+    const size_t oldSize = words.size();
+    splitThaiGroup(wordIndex, wordIndex + 1, availableWidth, renderer, fontId, wordWidths);
+    return words.size() != oldSize;
+  }
 
   // Stable copy: Hyphenator and the prefix measurements below want std::string
   // semantics. Bounded by one word.
@@ -1302,6 +1590,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
     return false;
   }
   const WordStore::StoredWord remainderStored = WordStore::suffix(words[wordIndex], chosenOffset);
+  ensureTokenCapacity(1);
   words[wordIndex] = prefixStored;
 
   // Insert the remainder word (with matching style and continuation flag) directly after the prefix.
@@ -1349,6 +1638,10 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // wordContinues[wordIndex] is intentionally left unchanged — the prefix keeps its original attachment.
   wordContinues.insert(wordContinues.begin() + wordIndex + 1, false);
   wordNoSpaceBefore.insert(wordNoSpaceBefore.begin() + wordIndex + 1, false);
+  if (hasThaiTokens) {
+    wordBreakRanks.insert(wordBreakRanks.begin() + wordIndex + 1,
+                          rankForBoundary(false, false, style));
+  }
 
   // Update cached widths to reflect the new prefix/remainder pairing.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
@@ -1722,6 +2015,14 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     }
   }
 
+#ifdef THAI_RENDER_PROBE
+  std::vector<uint32_t> probeVisibleOffsets;
+  probeVisibleOffsets.reserve(lineWordCount);
+  for (size_t i = 0; i < lineWordCount; ++i) {
+    probeVisibleOffsets.push_back(visibleOffsetAt(lastBreakAt + (willReorder ? visualOrderScratch[i] : i)));
+  }
+#endif
+
   if (!lineHasFocusSplit) {
     // TextBlock flattens the vectors into its arena; they stay owned here and die at return.
     auto block = makeUniqueNoThrow<TextBlock>(lineWords, lineXPos, lineWordStyles, std::vector<uint8_t>{},
@@ -1735,6 +2036,9 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       droppedWords = true;
       return;
     }
+#ifdef THAI_RENDER_PROBE
+    block->setProbeVisibleOffsets(std::move(probeVisibleOffsets));
+#endif
     processLine(std::move(block), lineVisibleOffset);
     return;
   }
@@ -1760,5 +2064,8 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     droppedWords = true;  // see the non-focus branch above
     return;
   }
+#ifdef THAI_RENDER_PROBE
+  block->setProbeVisibleOffsets(std::move(probeVisibleOffsets));
+#endif
   processLine(std::move(block), lineVisibleOffset);
 }

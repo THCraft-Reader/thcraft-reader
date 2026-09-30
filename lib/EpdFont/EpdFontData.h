@@ -4,6 +4,8 @@
 #pragma once
 #include <cstdint>
 
+class ThaiShapeView;
+
 /// Font metrics use "fixed-point 4" (4 fractional bits, i.e. 1/16-pixel
 /// resolution).  Both the 12.4 glyph advances (uint16_t) and the 4.4 kern
 /// values (int8_t) share the same 4 fractional bits, so they can be freely
@@ -173,7 +175,7 @@ typedef struct {
 EPD_PACKED_END
 
 /// Data stored for FONT AS A WHOLE
-typedef struct {
+typedef struct EpdFontData {
   const uint8_t* bitmap;                ///< Glyph bitmaps, concatenated
   const EpdGlyph* glyph;                ///< Glyph array
   const EpdUnicodeInterval* intervals;  ///< Valid unicode intervals for this font
@@ -255,4 +257,7 @@ typedef struct {
   /// none). Shares glyphMissCtx. nullptr for built-in and SD fonts, whose
   /// kerning is baked into the tables above (all fonts zero-init this).
   int8_t (*kernHandler)(void* ctx, uint32_t leftCp, uint32_t rightCp);
+
+  /// Optional immutable Thai positioning metadata; not part of serialized CPFont records.
+  const ThaiShapeView* thaiShape = nullptr;
 } EpdFontData;

@@ -1,0 +1,24 @@
+ThaiCluster.cpp contains a modified C++ port of the ordered Thai Character
+Cluster grammar from PyThaiNLP:
+https://github.com/PyThaiNLP/pythainlp/blob/4be114097e0cb1d9cfe044691f2aa79bc294925e/pythainlp/tokenize/tcc.py
+Pinned revision: 4be114097e0cb1d9cfe044691f2aa79bc294925e
+
+SPDX-FileCopyrightText: 2016-2026 PyThaiNLP Project
+SPDX-License-Identifier: Apache-2.0
+The complete license is supplied in LICENSE-TCC.
+
+Original credits:
+  TCC: Jakkrit TeCho
+  Grammar: Wittawat Jitkrittum
+    https://github.com/wittawatj/jtcc/blob/master/TCC.g
+  Python code: Korakot Chaovavanich
+TCC rules proposed by Theeramunkong et al. 2000:
+https://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.59.2548
+
+Modifications: finite allocation-free C++ predicates instead of Python regular
+expressions; end-bounded UTF-8 decoding and streaming undecidability; a preceding
+เ + base + ื + optional tone + อ + optional ะ correction; coalescing dependent
+signs, retaining orphan signs with the following cluster, and bounded malformed
+run fallback. Upstream alternative order, optional-group greediness, lookahead,
+and the literal vertical bar in the upstream suffix character class are retained.
+No Python runtime or general regular-expression engine is used on the device.

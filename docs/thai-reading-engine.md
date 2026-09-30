@@ -1,0 +1,274 @@
+# Thai reading engine
+
+## Baseline and scope
+
+Architecture inspected on `develop`, CrossPoint 1.6.5, revision
+`d1509d0735bd0b7832c6765e2aa83e1f0c008eff`. This milestone preserves CPFont v4
+and the existing bitmap renderer. The acceptance baseline must be captured before
+Thai analysis or glyph-placement changes. Host pixel evidence does not establish
+X4 Pro display, latency, internal-heap or PSRAM acceptance.
+
+## Existing pipeline
+
+EPUB extraction produces chapter XHTML. Expat callbacks in
+`lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp:1560` feed a 201-byte generic
+word buffer (`ChapterHtmlSlimParser.h:24–39`). `ParsedText::addWord`
+(`ParsedText.cpp:443–453`) applies NFC before tokenization. ParsedText owns
+WordStore text, parallel style/source/link fields, width measurement and line
+selection. Completed lines become TextBlock/Page objects, serialized by Section
+(`Section.cpp:95–114`). Page renders its elements (`Page.cpp:131–133`);
+TextBlock calls GfxRenderer (`blocks/TextBlock.cpp:136`). GfxRenderer measures
+and draws through EpdFontFamily/EpdFont, with SdCardFont supplying CPFont metrics
+and cached bitmap data (`GfxRenderer.cpp:683,2100,2220`).
+
+CJK tokenization permits selected character boundaries and protects punctuation
+(`ParsedText.cpp:69–220`). Hangul preserves source spaces and optionally splits
+at a line end; it is not an invisible justification gap. Arabic contextual
+joining and visual reordering occur through MiniBidi (`BidiUtils.cpp:136–140`),
+not through a general OpenType engine. Vietnamese/Latin decomposed marks use NFC
+where supported. Existing mark positioning is real: EpdFont centers/anchors
+combining marks and preserves selected native heights
+(`EpdFont.cpp:47–58`, `EpdFontData.h:33–109`). Thai signs are not included in the
+generic combining predicate (`Utf8.h:99–104`). Their native zero advances and
+negative bearings must be judged from actual CPFont output, not from the absence
+of a Thai-specific branch.
+
+CPFont v4 stores per-glyph bitmap dimensions/bearings and unsigned 12.4 advances;
+kerning uses signed 4.4 values. Measurement and drawing use differential rounding
+(`EpdFontData.h:7–30,125–139`). SdCardFont keeps bounded page glyph caches (512
+codepoints) and persistent per-style advance caches (768 entries)
+(`SdCardFont.h:23,297–310`). Pair kerning adjusts adjacent pen positions; it is
+not contextual shaping, mark substitution or stacked-mark attachment. Font
+identity currently hashes the header/style TOC (`SdCardFont.h:144–146`).
+
+## Thai analysis contract
+
+Thai cannot be added to `utf8IsCjkBreakable`: breaks require orthographic clusters
+and dictionary context, and Thai dictionary gaps must not stretch during
+justification. Reuse TokenBoundary's two bits (`TokenBoundary.h:7–19`): ordinary
+space `(false,false)`, breakable zero-space attachment `(true,true)`, protected
+attachment `(true,false)`. A separate lazy rank chooses space, word, punctuation,
+then emergency opportunities without replacing these spacing invariants.
+
+Analysis belongs in the shared `lib/ThaiText` library. The parser's bounded
+stream retains 768 UTF-8 bytes plus at most 256 eight-byte source/style/link
+records (at most 3 KiB including scalar state). It is allocated lazily once per
+Thai-bearing parser, not on the small task stack or for English-only books.
+Finite 32-codepoint cluster lookahead and a 70-codepoint dictionary maximum
+bound retention. Inline markup must not split a cluster; marks adopt their
+base's style/link. Real block/ruby/table/whitespace transitions finalize pending
+text. Malformed pathological mark runs retain their bytes through the documented
+legacy fallback; they do not enlarge the analysis window.
+
+The allocation-free cluster primitives implement the ordered pinned TCC grammar
+with the explicit `เ + base + ื + tone? + อ + ะ?` correction. Thirteen analyzer
+tests pass, covering every byte split, nonterminated/malformed UTF-8, grammar
+priority and 1,000 repeated signs. A standalone native smoke run emits
+`เรื่อ|ง`, `เพื่อ`, `นํ้า` and `ป|ระ|เท|ศ|ไท|ย`; these are orthographic clusters,
+not dictionary tokens. Parser integration passes 19 streaming/transition tests
+and 11 token-storage tests, including deferred linked footnotes, ruby/table
+transfers, 64 KiB unknown input, allocation failure and resumed analysis after
+pathological signs. The complete host suite passes 459 enabled tests after this
+cutover. Production probe smoke output retains `กี่` as one bold token across
+`<b>ก</b>ี่`, and records population tokens at source offsets 0, 9, 11 and 18
+without inserted spaces (`build/thai/parser-smoke/`).
+
+Dictionary data is immutable flash data, generated offline from pinned
+[PyThaiNLP CC0 words](https://github.com/PyThaiNLP/pythainlp/blob/4be114097e0cb1d9cfe044691f2aa79bc294925e/pythainlp/corpus/words_th.txt)
+plus a reviewed `ประเทศไทย` supplement. Sixteen-word prefix-compressed blocks
+use Thai single-byte symbols and uint32 offsets; lookup uses a 71-byte decoder
+scratch buffer, no startup copy, mutable global LRU or SD lookup. This follows
+the generated constexpr-data convention in `docs/hyphenation-trie-format.md:39–46`,
+not Liang hyphenation semantics. Production longest matching includes the
+compound `จำนวนมาก`; a legal dictionary-prefix/suffix split permits
+`จำนวน|มาก` when the compound must wrap.
+
+Generated data: 60,964 words, maximum 70 codepoints; 367,377 encoded bytes plus
+15,248 offset bytes = 382,625 array bytes, CRC32 `4b87877d`. Eight dictionary,
+seventeen segmenter and seven generator tests pass. A standalone production
+segmenter emits `ประเทศไทย|มี|ประชากร|จำนวนมาก`; the proper-prefix splitter emits
+`จำนวน|มาก`. Invalid dictionary views retain cluster-safe emergency output.
+
+Native Windows/MSVC host lookup comparison (10 iterations, 121,928 common
+queries per iteration; background visual capture active, not target timings):
+
+| Representation | Array bytes | Decoder scratch | Lookups/s |
+| --- | ---: | ---: | ---: |
+| Indexed UTF-8 | 1,736,889 | 0 | 902,247 |
+| Indexed Thai symbols | 782,179 | 71 | 794,389 |
+| Prefix-compressed blocks | 382,625 | 71 | 585,348 |
+
+All three return the same matched-byte checksum (28,648,860). The generated
+flash accessor has no initialization scan/copy; validating an injected compressed
+view took 1,348.2 microseconds in this host run. These figures quantify the
+storage/lookup tradeoff, not ESP32 speed or heap savings.
+
+Thai-bearing blocks use ranked greedy selection: Space, Word, Punctuation, then
+cluster emergency only when an otherwise empty effective line cannot fit the
+word/run. Style attachments, ruby, NBSP and punctuation remain protected.
+Prefix commits reuse WordStore suffix ownership; no unbounded prefix string is
+built. The extra persistent layout metadata is one rank byte per token in
+Thai-bearing blocks, plus vector capacity; non-Thai rank vectors stay empty.
+
+Section version 49 uses a 47-byte header, including `thaiLayoutId` immediately
+after word spacing. Both final and suspended layouts compare its analyzer,
+dictionary and behavior identity. Commits with transient analysis failure set
+bit 31; current pages stay readable, but a healthy reopen reflows those sections.
+Ten final/partial cache tests pass, including failure → healthy reopen and
+preservation of progress, metadata and extracted HTML.
+
+All 487 host tests pass after ranked layout/cache integration. Actual CPFont
+smoke output at a measured 231-pixel width starts line two with intact
+`โรงพยาบาล`; at the measured 89-pixel **layout** width it splits `จำนวน|มาก`.
+The native glyph-only path measures that prefix at 88 pixels; this existing
+SD layout/drawing rounding distinction is recorded rather than hidden by an
+arbitrary viewport. Active companion placement must unify those modes.
+Injected Thai-state allocation failure logs once and renders all population
+text through the native fallback (`build/thai/wrap-smoke/`).
+
+`THAI_ENGINE_STATS` compiles out by default. Enabled counters use cumulative
+snapshots, never shared resets. A production host smoke measured 78 analyzed
+bytes, 18 clusters, four dictionary words, zero unknown clusters and a 78-byte
+pending high-water. Its 74 HAL reads/3,251 returned bytes cover font load,
+XHTML, prewarm and diagnostic drawing, not physical sectors. Host allocations
+exclude libc/Expat and are sampled before font teardown; device heap fields are
+null. Device records use INTERNAL|8BIT free/largest/minimum separately from
+PSRAM. `refresh_ms` spans HAL refresh/gray-service request through observed
+completion, including transfer/settle and deferred observation delay—not an
+exact BUSY-edge waveform measurement. Reader-exit samples follow parser teardown;
+global loaded fonts remain resident under the existing application policy.
+
+## Native CPFont visual gate
+
+**Failed native gate; companion positioning is required.** The production
+probe's Noto Sans Thai 16pt normal glyph sheet at tracking 0 shows merged
+tone/vowel marks in `กี่` and tall-consonant cases, and colliding descender/lower
+vowels in `ญู` and `ฐุ`. The same frozen source face rendered through desktop
+HarfBuzz/FreeType separates those marks. Evidence:
+`build/thai/native-smoke/stacked-comparison.png` (native left, reference right),
+`comparison-000-2x.png`, `report.json`, and `reference-000.json`.
+This is visible positional/substitution failure, not an antialiasing-only
+difference or missing coverage.
+
+All twelve pinned Thai CPFonts and matching references have been generated;
+source hashes and package versions are in `build/thai/assets/manifest.json`.
+The immutable fallback IDs supplied for Google Fonts are Git blob IDs, not tree
+revisions; preparation verifies decoded Git blob bytes against the required
+SHA-256. The baseline executable is preserved under
+`build/thai/baseline-firmware/ThaiRenderProbe.exe`. The complete matrix must finish
+before final baseline/candidate acceptance.
+
+CPFont v4 stays unchanged. Native files without companions remain valid; no
+device HarfBuzz, FreeType or OpenType parser is introduced by this milestone.
+
+## Optional positioning
+
+The opt-in converter bakes 3,772 finite contexts per style into unchanged CPFont v4
+glyph records and a `.cpshape` companion. Unencoded alternates use deterministic
+unused BMP PUA slots; native Unicode records remain intact. The device consumes
+an allocation-free outer-cluster cursor in bounds, measurement, normal drawing,
+rotated drawing and source-ordered glyph prewarming. Both measurement modes use
+the same signed 12.4 pen/offset rounding; tracking occurs only between outer
+clusters. Unsupported clusters remain wholly native.
+
+Companion v1 is little-endian: 32-byte `CPSHAPE\\0` header, 12-byte style TOC entries,
+28-byte style headers, 3,772 dense base/suffix ID pairs, eight-byte glyph records
+and counted suffix sequences. CRC32 protects the payload and binds recipes to
+CPFont header/TOC, intervals, glyph metadata, kerning and ligatures in file order
+(excluding bitmaps). Counts, offsets, glyph coverage and metrics are checked before
+publishing any style. Limits are 96 KiB/style and 384 KiB/family.
+
+One RAII-owned family payload prefers PSRAM and is accepted only with more than
+50 KiB byte-addressable internal headroom. Cache eviction retains it; font
+destruction releases it. Missing, corrupt, incompatible or OOM companions keep
+the native font usable, with availability fixed for that load. Font identity
+includes native metrics CRC, accepted payload CRC, version and active/disabled
+state. Layout/render mini-kerning coverage is checked independently of resident
+glyphs, and both descriptors are republished after rebuild/failure.
+
+Observed regular companion file sizes across 12/14/16/18 pt:
+
+| Family | Minimum bytes | Maximum bytes |
+| --- | ---: | ---: |
+| Noto Sans Thai | 51,173 | 56,846 |
+| Noto Serif Thai | 50,203 | 53,005 |
+| Sarabun | 25,983 | 27,941 |
+
+Seven offline baker tests pass, including every-key HarfBuzz oracle checks,
+determinism, original bitmap preservation and byte-identical conversion without
+the option. All 499 host tests pass, including real paired-font prewarm/eviction,
+corrupt/OOM/headroom fallback and same-size native metric identity changes.
+Actual Noto Sans Thai 16pt glyph sheets match reference ink exactly for all
+18 supplied rows after applying the specified 12.4/outer-cluster rounding.
+Sarabun 16pt and superscript/subscript smoke output also match reference ink;
+Serif 16pt retains 200 differing ink pixels in two word rows without broken marks.
+Native no-companion output remains pixel-identical across the three saved
+baseline glyph pages. Enlarged inspected output is under `build/thai/shaped-smoke/`.
+
+Prepare paired test assets with:
+
+```text
+python scripts/prepare_thai_test_assets.py --output build/thai/assets-shaped --thai-shaping --probe build/test/thai_render/ThaiRenderProbe.exe
+```
+
+The reference uses production analyzer cluster spans, desktop HarfBuzz/FreeType,
+the converter's quantization and the prescribed cluster rounding. Comparisons
+match glyph-sheet source rows across metric-driven repagination, not unrelated
+pages with the same page number. Exact desktop typography is not required.
+
+## Acceptance evidence
+
+The baseline host build passes 389 enabled tests. Two desired Thai regressions
+were exercised and fail before implementation: hospital-word wrapping and
+base-style inheritance across `<b>ก</b>ี่`. The deterministic corpus EPUB hash is
+`1a88daa0d00a6f215ed00d6b1b1d45ddc02a679c71b44f488fb68b6bda2dba7f`.
+The saved X4 Pro baseline firmware builds successfully: 5,663,898 app bytes of
+6,553,600, with a 5,668,912-byte binary. No X4 Pro was enumerated by
+`pio device list`; device measurements are unverified. Final acceptance was stopped
+at the user's request. Device acceptance requires a physical X4 Pro with
+identical SD/font/refresh/prewarm settings: 20 cold opens, 20 warm reopens, at
+least 50 turns and five open/turn/exit cycles. Report median/p95 and sample counts;
+cold/first-page limit is baseline × 1.10 + 5 ms, warm/control limit baseline ×
+1.05 + 5 ms. Internal free heap must remain above 50 KiB. Host allocation and
+HAL-request counts must be labelled separately from target heap and physical SD
+sectors. Physical refresh is timed separately from software layout/draw.
+
+## Published X4 Pro snapshot
+
+The existing build and installable font pack are included in
+[`Releases/x4pro-thai/`](../Releases/x4pro-thai/):
+
+- `firmware.bin`: X4 Pro application image, 6,074,640 bytes.
+- `firmware.factory.bin`: X4 Pro merged factory image, 6,140,176 bytes.
+- `THCraft-Thai-Fonts.zip`: font pack, 1,462,472 bytes, including licenses and
+  installation instructions.
+- `SHA256SUMS`: SHA-256 checksums for the three artifacts.
+
+These images target **X4 Pro only**, not ESP32-C3 devices. Use the application
+image for firmware updates; the factory image is a separate merged flash image,
+not an interchangeable update file.
+
+Extract the font pack's `fonts` directory to the SD root, restart, and select
+`THCraft-NotoSansThai` as the reader family. Keep matching `.cpfont` and
+`.cpshape` files together. The 8/10/12 pt files provide size-matched UI fallback;
+14/16/18 pt files provide additional reader sizes. See
+[SD card fonts](sd-card-fonts.md) for details.
+
+Publication status:
+
+- The latest `pio run -e x4pro` succeeded. Reported application usage:
+  6,069,622 / 6,553,600 flash bytes and 101,864 / 327,680 static RAM bytes.
+  Static RAM is not a runtime free-heap measurement.
+- The last full host test run passed 499 tests; subsequent host probe/adapter
+  changes were not followed by another full-suite run. The UI fallback probe
+  subsequently passed all three packaged families with zero failures.
+- The full native baseline capture was stopped at 155,662 / 419,840 runs
+  (37.1%), containing 301,264 pages. The full candidate matrix was not run.
+- The C3 `default` build could not complete because the local RISC-V toolchain
+  installation was incomplete. No C3 firmware is included.
+- Final formatting, device visual acceptance, latency and runtime heap/leak
+  gates remain unverified. This snapshot is not a completed Milestone 1
+  acceptance claim.
+
+No rebuild or further test run was performed for publication; the artifacts are
+copies of the previously generated files.

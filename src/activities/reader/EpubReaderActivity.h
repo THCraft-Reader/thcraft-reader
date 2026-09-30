@@ -48,6 +48,11 @@ class EpubReaderActivity final : public ReaderActivity {
   int idlePrewarmSpine = -1;
   int idlePrewarmPage = -1;
   unsigned long lastRenderCompleteMs = 0;
+#if THAI_ENGINE_STATS
+  int thaiLastRenderedSpine = -1;
+  int thaiLastRenderedPage = -1;
+  bool thaiTurnWindow = false;
+#endif
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
   bool recentsEntryRemoved = false;

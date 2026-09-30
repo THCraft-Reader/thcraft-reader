@@ -57,6 +57,56 @@ the manual SD card copy method below.
 
 3. Insert the SD card and power on your CrossPoint reader
 
+### Thai paired-font pack (offline build)
+
+With the verified local assets from `scripts/prepare_thai_test_assets.py` already
+available, build the installable pack without downloading anything:
+
+```sh
+python scripts/package_thai_fonts.py
+```
+
+The desktop converter requires `freetype-py`, `fonttools` and `uharfbuzz`. Optional
+arguments are `--assets DIR` (default `build/thai/assets`), `--output DIR` (default
+`build/thai/font-pack`) and `--zip PATH` (default
+`build/thai/THCraft-Thai-Fonts.zip`). Missing assets, manifest/hash mismatches or
+incomplete font/companion pairs stop packaging; no system font is substituted.
+
+The archive contains regular-face **THCraft-NotoSansThai**,
+**THCraft-NotoSerifThai** and **THCraft-Sarabun**, each at **8, 10, 12, 14, 16 and
+18 pt**, converted at 150 DPI. Thai positioning is baked into same-basename
+`.cpfont`/`.cpshape` pairs; Latin and punctuation coverage uses the explicitly
+verified Noto Sans source during conversion. Each family includes its source OFL
+copyright/license notice and `NotoSans-OFL.txt` for that fallback. Source TTFs
+remain desktop inputs, not firmware or installation assets. `build-report.json`
+and `reports/` live outside `fonts/` and record source/output hashes, sizes,
+converter identity and companion style counts.
+
+To install:
+
+1. Extract the archive's **`fonts` folder to the SD card root**, merging with any
+   existing folder. Keep your original fonts and books.
+2. Keep every `.cpfont` beside its matching `.cpshape`, including **all six sizes**
+   for each family you install. For example:
+   `fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpfont` and
+   `fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpshape`.
+   The 8/10/12 pt pairs support missing Thai glyphs in the UI, including small
+   reader status titles and file-browser names; the 12/14/16/18 pt pairs support
+   reader sizes. A reader-size pair alone does not supply the small UI sizes.
+3. Reinsert the card, **restart**, then choose **Settings > Reader > Font Family >
+   THCraft-NotoSansThai**. **16 pt** is the recommended starting reading size.
+   The other two families can be selected the same way.
+4. **Do not delete reading progress or book caches.** If the same THCraft family
+   already exists under `/.fonts/`, update that copy too: the hidden-root copy
+   takes priority over `/fonts/` when family names collide.
+
+This is the **CPFont bitmap path**, not the direct TTF/OTF/TTC path described
+below. Copying only a TTF does not install the baked Thai positioning recipes.
+Use firmware with CPSHAPE support and retain both files of every pair. Older
+firmware can read CPFont but ignores the positioning companion. The pack includes
+only a regular face; existing reader style fallback still applies. Packaging
+success does not establish physical-device rendering or performance acceptance.
+
 ### Direct TTF/OTF/TTC fonts
 
 If CrossPoint enables external RAM on your device, copy a `.ttf`, `.otf`, or
@@ -171,6 +221,28 @@ To make `.cpfont` files for any device, convert your TrueType/OpenType fonts:
       --name MyFont \
       --output-dir ./MyFont/
 
+### Thai bitmap positioning
+
+Thai wrapping is automatic; no language setting is required. For fonts whose native
+bitmaps collide or misplace Thai marks, bake optional positioning alongside CPFont:
+
+    pip install uharfbuzz
+    python3 lib/EpdFont/scripts/fontconvert_sdcard.py \
+      --regular MyThaiFont-Regular.ttf \
+      --intervals ascii,punctuation,thai \
+      --size 16 --thai-shaping \
+      --output MyThaiFont_16.cpfont
+
+Copy **both** `MyThaiFont_16.cpfont` and `MyThaiFont_16.cpshape` into the same font
+folder on the SD card. The `.cpshape.json` report is desktop provenance, not needed
+by the reader. Use manual SD copying for the companion file.
+
+CPFont stays version 4, including its original Unicode glyphs. Older firmware can
+still use the font without positioning. Missing, incompatible, corrupt or
+memory-constrained companions fall back to native rendering; no desktop shaping
+library runs on the device. Reload the font after replacing a companion.
+Omitting `--thai-shaping` keeps ordinary converter output unchanged.
+
 ### Available Unicode interval presets
 
 | Preset | Coverage |
@@ -190,6 +262,7 @@ To make `.cpfont` files for any device, convert your TrueType/OpenType fonts:
 | `punctuation` | General punctuation (U+2000–U+206F) |
 | `cjk` | CJK Unified Ideographs + Hiragana + Katakana + Fullwidth |
 | `hangul` | Korean Hangul syllables + Jamo + Compatibility Jamo |
+| `thai` | Thai block U+0E00–U+0E7F |
 | `cherokee` | Cherokee (historic + supplement block) |
 | `tifinagh` | Tifinagh |
 | `symbols` | Math, currency, arrows, box-drawing, misc symbols, dingbats |
