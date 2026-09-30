@@ -23,6 +23,7 @@
 #include "components/icons/cover.h"
 #include "components/icons/headerIcons.h"
 #include "fontIds.h"
+#include "images/Mascot.h"
 
 freeink::ui::BitmapRef BaseTheme::checkboxIcon(const bool checked) {
   return freeink::ui::bitmapFromIcon(checked ? icon_checkbox_on_32 : icon_checkbox_off_32);
@@ -56,6 +57,35 @@ void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int 
 }
 
 }  // namespace
+
+void BaseTheme::drawMascotScreen(const GfxRenderer& renderer, const char* status, const char* version) {
+  int top, right, bottom, left;
+  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+  const Rect bounds(left, top, renderer.getScreenWidth() - left - right, renderer.getScreenHeight() - top - bottom);
+  constexpr int GAP = 10;
+  const int titleHeight = renderer.getTextHeight(UI_10_FONT_ID);
+  const int statusHeight = renderer.getTextHeight(SMALL_FONT_ID);
+  const int footerHeight = version ? statusHeight + GAP : 0;
+  const int blockHeight = MASCOT_HEIGHT + GAP + titleHeight + GAP + statusHeight;
+  const int x = bounds.x + (bounds.width - MASCOT_WIDTH) / 2;
+  const int y = bounds.y + (bounds.height - footerHeight - blockHeight) / 2;
+
+  // Plot in logical coordinates so the pre-dithered artwork stays upright without a rotated buffer.
+  for (int row = 0; row < MASCOT_HEIGHT; ++row) {
+    for (int col = 0; col < MASCOT_WIDTH; ++col) {
+      const uint8_t byte = MASCOT_BITMAP[row * (MASCOT_WIDTH / 8) + col / 8];
+      if ((byte & (0x80 >> (col & 7))) == 0) {
+        renderer.drawPixel(x + col, y + row, true);
+      }
+    }
+  }
+  const int titleY = y + MASCOT_HEIGHT + GAP;
+  UITheme::drawCenteredText(renderer, bounds, UI_10_FONT_ID, titleY, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
+  UITheme::drawCenteredText(renderer, bounds, SMALL_FONT_ID, titleY + titleHeight + GAP, status);
+  if (version) {
+    UITheme::drawCenteredText(renderer, bounds, SMALL_FONT_ID, bounds.y + bounds.height - statusHeight, version);
+  }
+}
 
 void BaseTheme::drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight) {
   // Top line

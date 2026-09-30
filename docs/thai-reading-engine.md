@@ -304,8 +304,8 @@ sectors. Physical refresh is timed separately from software layout/draw.
 The existing build and installable font pack are included in
 [`Releases/x4pro-thai/`](../Releases/x4pro-thai/):
 
-- `firmware.bin`: X4 Pro application image, 6,074,640 bytes.
-- `firmware.factory.bin`: X4 Pro merged factory image, 6,140,176 bytes.
+- `firmware.bin`: X4 Pro application image, 6,081,296 bytes.
+- `firmware.factory.bin`: X4 Pro merged factory image, 6,146,832 bytes.
 - `THCraft-Thai-Fonts.zip`: font pack, 9,202,302 bytes, including licenses and
   installation instructions.
 - `SHA256SUMS`: SHA-256 checksums for the three artifacts.
@@ -323,7 +323,7 @@ Extract the font pack's `fonts` directory to the SD root, restart, and select
 Publication status:
 
 - The latest `pio run -e x4pro` succeeded. Reported application usage:
-  6,069,622 / 6,553,600 flash bytes and 101,864 / 327,680 static RAM bytes.
+  6,076,286 / 6,553,600 flash bytes and 101,864 / 327,680 static RAM bytes.
   Static RAM is not a runtime free-heap measurement.
 - The last full host test run passed 499 tests; subsequent host probe/adapter
   changes were not followed by another full-suite run. The UI fallback probe
@@ -332,11 +332,18 @@ Publication status:
   (37.1%), containing 301,264 pages. The full candidate matrix was not run.
 - The C3 `default` build could not complete because the local RISC-V toolchain
   installation was incomplete. No C3 firmware is included.
-- Final formatting, device visual acceptance, latency and runtime heap/leak
-  gates remain unverified. This snapshot is not a completed Milestone 1
-  acceptance claim.
+- Device visual acceptance, latency and runtime heap/leak gates remain unverified.
+  This snapshot is not a completed Milestone 1 acceptance claim.
 
-The firmware images remain copies of the previously generated files.
+The firmware images were rebuilt with the THCraft mascot on boot and default
+light/dark sleep screens. The 224×336 pre-dithered bitmap uses 9,408 flash bytes
+and no image heap buffer. A host smoke executed the theme's mascot drawing method
+and renderer coordinate transform in 32 combinations of panel size, orientation,
+boot/sleep status and inversion, checking pixel count and layout bounds. Visual
+previews used substitute host fonts, not the device font rasterizer.
+The built ESP32-S3 application contains exactly one mascot bitmap; the factory
+image's bootloader, partition table and application match the build outputs.
+`SHA256SUMS` covers both refreshed images and the unchanged font archive.
 
 ### Font coverage refresh
 
@@ -357,6 +364,6 @@ Verification of the regenerated archive:
   sheets, plus 16 pt reader layout and rotated sheets for each family. Mixed
   Thai/IPA/symbol/Arabic reader pages were visually inspected.
 
-These are host checks, not physical-device heap or display acceptance. The
-firmware binaries are unchanged; install the updated `.cpfont` and `.cpshape`
-pairs together as described in [SD card fonts](sd-card-fonts.md).
+These are host checks, not physical-device heap or display acceptance. The font
+coverage refresh itself required no firmware changes; install the updated
+`.cpfont` and `.cpshape` pairs together as described in [SD card fonts](sd-card-fonts.md).
