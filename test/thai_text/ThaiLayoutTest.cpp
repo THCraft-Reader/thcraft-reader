@@ -30,10 +30,13 @@ void configure(ParsedText& text, CssTextAlign align = CssTextAlign::Left) {
 Lines layout(ParsedText& text, uint16_t width, bool final = true, int8_t tracking = 0, uint8_t spacing = 100) {
   GfxRenderer renderer;
   Lines lines;
-  text.layoutAndExtractLines(renderer, 0, width, [&](std::unique_ptr<TextBlock> block, uint32_t offset) {
-    EXPECT_TRUE(block->valid());
-    lines.push_back({std::move(block), offset});
-  }, final, tracking, spacing);
+  text.layoutAndExtractLines(
+      renderer, 0, width,
+      [&](std::unique_ptr<TextBlock> block, uint32_t offset) {
+        EXPECT_TRUE(block->valid());
+        lines.push_back({std::move(block), offset});
+      },
+      final, tracking, spacing);
   return lines;
 }
 std::vector<std::string> strings(const Lines& lines) {
@@ -41,8 +44,8 @@ std::vector<std::string> strings(const Lines& lines) {
   for (const auto& line : lines) result.push_back(line.text());
   return result;
 }
-void add(ParsedText& text, std::string_view word, Kind rank, uint32_t offset = 0,
-         EpdFontFamily::Style style = regular, uint8_t link = 0) {
+void add(ParsedText& text, std::string_view word, Kind rank, uint32_t offset = 0, EpdFontFamily::Style style = regular,
+         uint8_t link = 0) {
   text.addAnalyzedToken(word, style, rank, offset, link);
 }
 void analyze(ParsedText& text, const std::string& source) {
@@ -52,37 +55,55 @@ void analyze(ParsedText& text, const std::string& source) {
   thai::Segment segment{};
   while (thai::nextSegment(source, offset, segment, true, dictionary)) {
     ASSERT_TRUE(segment.valid);
-    const Kind rank = previous == Kind::Prohibited || segment.before == Kind::Prohibited
-                          ? Kind::Prohibited : previous;
+    const Kind rank = previous == Kind::Prohibited || segment.before == Kind::Prohibited ? Kind::Prohibited : previous;
     add(text, std::string_view(source).substr(segment.begin, segment.end - segment.begin), rank);
     previous = segment.after;
   }
   ASSERT_EQ(offset, source.size());
 }
 
-TEST(ThaiLayoutTest, RealSpaceOutranksLaterDictionaryBoundary) {
-  ParsedText text(false);
-  configure(text);
-  add(text, "ก", Kind::Space);
-  add(text, "ข", Kind::Space);
-  add(text, "ค", Kind::Word);
-  add(text, "ง", Kind::Word);
-  EXPECT_EQ(strings(layout(text, 28)), (std::vector<std::string>{"ก", "ขคง"}));
-}
-
-TEST(ThaiLayoutTest, DictionaryOutranksPunctuationAndPunctuationOutranksEmergency) {
-  for (const Kind priority : {Kind::Word, Kind::Punctuation}) {
-    ParsedText text(false);
-    configure(text);
-    add(text, "ก", Kind::Space);
-    add(text, "ข", priority);
-    add(text, "ค", priority == Kind::Word ? Kind::Punctuation : Kind::Emergency);
-    add(text, "ง", Kind::Emergency);
-    EXPECT_EQ(strings(layout(text, 24)), (std::vector<std::string>{"ก", "ขคง"}));
+TEST(ThaiLayoutTest, SourceSpaceDoesNotLeaveRoomForAnotherWholeThaiWord) {
+  GfxRenderer renderer;
+  const int space = renderer.getSpaceWidth(0, regular);
+  const int width = renderer.getTextAdvanceX(0, "ภาษาไทยมีประชากร", regular) + space;
+  for (const auto alignment : {CssTextAlign::Left, CssTextAlign::Justify}) {
+    for (const bool hyphenation : {false, true}) {
+      ParsedText text(false, hyphenation);
+      configure(text, alignment);
+      add(text, "ภาษาไทย", Kind::Space, 0);
+      add(text, "มี", Kind::Space, 8);
+      add(text, "ประชากร", Kind::Word, 10);
+      add(text, "จำนวนมาก", Kind::Word, 17);
+      const auto lines = layout(text, width);
+      EXPECT_EQ(strings(lines), (std::vector<std::string>{"ภาษาไทยมีประชากร", "จำนวนมาก"}));
+      ASSERT_EQ(lines.size(), 2u);
+      EXPECT_EQ(lines[1].offset, 17u);
+      EXPECT_EQ(lines[0].block->wordXpos(1), renderer.getTextAdvanceX(0, "ภาษาไทย", regular) + space);
+      EXPECT_EQ(lines[0].block->wordXpos(2), renderer.getTextAdvanceX(0, "ภาษาไทยมี", regular) + space);
+    }
   }
 }
 
-TEST(ThaiLayoutTest, RightmostBoundaryWithinWinningRank) {
+TEST(ThaiLayoutTest, ClosingPunctuationCanFinishLineAfterEarlierWordBoundary) {
+  ParsedText text(false);
+  configure(text);
+  analyze(text, "มีคนไทย...มาก");
+  GfxRenderer renderer;
+  const int width = renderer.getTextAdvanceX(0, "มีคนไทย...", regular);
+  EXPECT_EQ(strings(layout(text, width)), (std::vector<std::string>{"มีคนไทย...", "มาก"}));
+}
+
+TEST(ThaiLayoutTest, WholeWordBoundaryPreventsEmergencyCutToFillLine) {
+  ParsedText text(false);
+  configure(text);
+  add(text, "ก", Kind::Space);
+  add(text, "ข", Kind::Word);
+  add(text, "ค", Kind::Emergency);
+  add(text, "ง", Kind::Emergency);
+  EXPECT_EQ(strings(layout(text, 24)), (std::vector<std::string>{"ก", "ขคง"}));
+}
+
+TEST(ThaiLayoutTest, RightmostFittingWordBoundary) {
   ParsedText text(false);
   configure(text);
   for (const char* word : {"ก", "ข", "ค", "ง"}) add(text, word, Kind::Word);
@@ -125,8 +146,7 @@ TEST(ThaiLayoutTest, FittingStyledWordMovesWholeInsteadOfBreakingAtMarkup) {
 
 TEST(ThaiLayoutTest, EveryViewportPreservesAllMarkedClustersAndMakesProgress) {
   GfxRenderer renderer;
-  for (const char* cluster : {"ก่", "ก้", "ก๊", "ก๋", "กิ", "กี", "กึ", "กื", "กุ", "กู", "กี่", "กุ่",
-                              "น้ำ", "นํ้า", "เรื่อ", "เพื่อ"}) {
+  for (const char* cluster : {"ก่", "ก้", "ก๊", "ก๋", "กิ", "กี", "กึ", "กื", "กุ", "กู", "กี่", "กุ่", "น้ำ", "นํ้า", "เรื่อ", "เพื่อ"}) {
     const std::string source = std::string(cluster) + "ก";
     const int full = renderer.getTextAdvanceX(0, source.c_str(), regular);
     for (bool hyphenation : {false, true}) {
@@ -192,9 +212,8 @@ TEST(ThaiLayoutTest, ClosingUnitsStayLeftAndOpeningQuoteStaysRight) {
         EXPECT_EQ(output, source);
         for (const std::string unit : {"ฯลฯ", "..."}) {
           if (source.find(unit) != std::string::npos) {
-            EXPECT_TRUE(std::any_of(lines.begin(), lines.end(), [&](const Line& line) {
-              return line.text().find(unit) != std::string::npos;
-            }));
+            EXPECT_TRUE(std::any_of(lines.begin(), lines.end(),
+                                    [&](const Line& line) { return line.text().find(unit) != std::string::npos; }));
           }
         }
       }

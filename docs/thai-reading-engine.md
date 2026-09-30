@@ -47,8 +47,9 @@ Thai cannot be added to `utf8IsCjkBreakable`: breaks require orthographic cluste
 and dictionary context, and Thai dictionary gaps must not stretch during
 justification. Reuse TokenBoundary's two bits (`TokenBoundary.h:7–19`): ordinary
 space `(false,false)`, breakable zero-space attachment `(true,true)`, protected
-attachment `(true,false)`. A separate lazy rank chooses space, word, punctuation,
-then emergency opportunities without replacing these spacing invariants.
+attachment `(true,false)`. A separate lazy break kind distinguishes ordinary
+space/word/punctuation opportunities from emergency and prohibited boundaries
+without replacing these spacing invariants.
 
 Analysis belongs in the shared `lib/ThaiText` library. The parser's bounded
 stream retains 768 UTF-8 bytes plus at most 256 eight-byte source/style/link
@@ -108,9 +109,9 @@ This repairs local greedy dead ends, not linguistic ambiguity in fully known
 multi-character words, and cannot invent missing dictionary entries. The
 pre-change greedy tokenizer selected `ยิ่ง|ได้มา|ก|เท่าไหร่`, stranding unknown
 `ก`; hybrid segmentation emits `ยิ่ง|ได้|มาก|เท่าไหร่`. Style fragments inside
-`มาก` remain attached rather than becoming word breaks. Analyzer identity version
-2 invalidates old rendered layouts without changing the section format or reading
-progress.
+`มาก` remain attached rather than becoming word breaks. Analyzer and line-breaking
+identity version 3 invalidates old rendered layouts without changing the section
+format or reading progress.
 
 Hybrid benchmark: macOS arm64, Apple C++ Release (`-O3 -DNDEBUG`), median of three
 500-iteration runs. Times below are microseconds per corpus pass in parser-like
@@ -169,9 +170,12 @@ flash accessor has no initialization scan/copy; validating an injected compresse
 view took 1,348.2 microseconds in this host run. These figures quantify the
 storage/lookup tradeoff, not ESP32 speed or heap savings.
 
-Thai-bearing blocks use ranked greedy selection: Space, Word, Punctuation, then
-cluster emergency only when an otherwise empty effective line cannot fit the
-word/run. Style attachments, ruby, NBSP and punctuation remain protected.
+Thai-bearing blocks use the furthest fitting legal space, dictionary-word or
+punctuation boundary. A source space does not take priority over a later word
+boundary: Thai phrase spacing must not force a short line when more whole words
+fit. Cluster emergency splitting applies only when an otherwise empty effective
+line cannot fit the word/run. Style attachments, ruby, NBSP and punctuation remain
+protected; dictionary boundaries do not become visible or stretchable spaces.
 Prefix commits reuse WordStore suffix ownership; no unbounded prefix string is
 built. The extra persistent layout metadata is one rank byte per token in
 Thai-bearing blocks, plus vector capacity; non-Thai rank vectors stay empty.

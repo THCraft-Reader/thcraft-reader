@@ -12,7 +12,7 @@ uint32_t layoutId() {
   const auto littleEndianWord = [&byte](uint32_t value) {
     for (unsigned shift = 0; shift < 32; shift += 8) byte(static_cast<uint8_t>(value >> shift));
   };
-  littleEndianWord(2);  // Analyzer contract version.
+  littleEndianWord(3);  // Analyzer and line-breaking contract version.
 #if THAI_DICTIONARY
   littleEndianWord(dictionaryDataId());
 #else
