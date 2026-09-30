@@ -79,7 +79,7 @@ class BakedStyle:
     counts: dict = field(default_factory=dict)
 
 
-def bake_style(fontfile, size, fallback_fontfile=None):
+def bake_style(fontfile, size, fallback_fontfiles=()):
     import freetype
     from fontTools.ttLib import TTFont
     try:
@@ -96,7 +96,7 @@ def bake_style(fontfile, size, fallback_fontfile=None):
         for table in font["cmap"].tables:
             if table.isUnicode():
                 occupied.update(table.cmap)
-    if fallback_fontfile:
+    for fallback_fontfile in fallback_fontfiles:
         with TTFont(fallback_fontfile) as font:
             for table in font["cmap"].tables:
                 if table.isUnicode():
@@ -302,7 +302,8 @@ def write_report(path, companion, models, sources, fallbacks, size, force_autohi
                  "glyph_mapping": [{"glyph_id": gid, "codepoint": cp,
                                      "alternate": cp in model.alternates}
                                     for gid, cp in sorted(model.codepoints.items())]}
-        if style in fallbacks:
-            entry["fallback_sha256"] = hashlib.sha256(Path(fallbacks[style]).read_bytes()).hexdigest()
+        entry["fallback_sha256s"] = [
+            hashlib.sha256(Path(fontfile).read_bytes()).hexdigest()
+            for fontfile in fallbacks.get(style, ())]
         report["styles"][str(style)] = entry
     Path(path).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -18,7 +18,9 @@ import tempfile
 import zipfile
 import zlib
 
-from prepare_thai_test_assets import CONVERTER, FALLBACK_SHA256, FONTS, ROOT
+from prepare_thai_test_assets import (
+    ARABIC_FALLBACK_SHA256, CONVERTER, FALLBACK_SHA256, FONTS, PACK_FALLBACK_FONTS, ROOT,
+)
 
 SIZES = (8, 10, 12, 14, 16, 18)
 FAMILIES = {
@@ -26,7 +28,7 @@ FAMILIES = {
     "noto-serif-thai": "THCraft-NotoSerifThai",
     "sarabun": "THCraft-Sarabun",
 }
-INTERVALS = "ascii,punctuation,thai"
+INTERVALS = "latin-ext,ipa-chars,greek,(0x0300-0x036F),punctuation,symbols,thai,arabic"
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 INSTALL = """THCraft Thai paired bitmap fonts
 
@@ -46,7 +48,9 @@ It is not a direct TTF/OTF/TTC installation: copying the source TTF alone does
 not install these paired bitmap recipes. Use firmware with Thai CPSHAPE support;
 older firmware can read the CPFont but will not apply the companion positioning.
 The fonts contain a regular face; existing reader style fallback still applies.
-OFL.txt and NotoSans-OFL.txt retain source and Latin/punctuation fallback notices.
+OFL.txt and the named fallback OFL files retain all source copyright notices.
+Coverage includes IPA, arrows, mathematical/decorative symbols, and Arabic
+letters and contextual presentation forms, in addition to Thai and Latin.
 Build reports are desktop provenance, not required files on the SD card.
 """
 
@@ -77,16 +81,29 @@ def checked_license(path: Path) -> None:
         raise ValueError(f"Missing OFL 1.1 or copyright notice: {path}")
 
 
-def load_sources(assets: Path) -> tuple[dict, list[dict], Path, Path]:
+def load_sources(assets: Path) -> tuple[list[dict], list[dict]]:
     manifest = json.loads((assets / "manifest.json").read_text(encoding="utf-8"))
     if manifest["schema_version"] != 1 or manifest["dpi"] != 150:
         raise ValueError("Expected the Thai asset manifest schema 1 at 150 DPI")
     fallback_record = manifest["fallback"]
     if fallback_record["sha256"] != FALLBACK_SHA256:
         raise ValueError("Manifest fallback does not match the pinned Noto Sans source")
-    fallback = verified_file(assets, fallback_record["path"], FALLBACK_SHA256)
+    verified_file(assets, fallback_record["path"], FALLBACK_SHA256)
     fallback_license = verified_file(assets, fallback_record["license"], fallback_record["license_sha256"])
     checked_license(fallback_license)
+    fallbacks = [{"name": "NotoSans", **fallback_record}]
+    records = manifest.get("pack_fallbacks", [])
+    expected_fallbacks = [(name, expected, blob) for name, _, _, expected, blob in PACK_FALLBACK_FONTS]
+    expected_fallbacks.append(("NotoSansArabic", ARABIC_FALLBACK_SHA256, None))
+    if [record["name"] for record in records] != [name for name, _, _ in expected_fallbacks]:
+        raise ValueError("Missing or reordered pack fallbacks; rerun prepare_thai_test_assets.py")
+    for record, (name, expected, blob) in zip(records, expected_fallbacks):
+        if record["source_sha256"] != expected or record["source_git_blob"] != blob:
+            raise ValueError(f"Manifest fallback does not match the pinned {name} source")
+        verified_file(assets, record["source"], expected)
+        verified_file(assets, record["path"], record["sha256"])
+        checked_license(verified_file(assets, record["license"], record["license_sha256"]))
+        fallbacks.append(record)
     sources = []
     fields = ("source", "source_sha256", "source_git_blob", "regular", "regular_sha256",
               "frozen_axes", "license", "license_sha256")
@@ -107,10 +124,10 @@ def load_sources(assets: Path) -> tuple[dict, list[dict], Path, Path]:
             verified_file(assets, record[path_field], record[hash_field])
         checked_license(assets / record["license"])
         sources.append({"family": FAMILIES[key], **record})
-    return manifest, sources, fallback, fallback_license
+    return sources, fallbacks
 
 
-def validate_pair(cpfont: Path, source: dict, size: int) -> tuple[dict, int]:
+def validate_pair(cpfont: Path, source: dict, size: int, fallbacks: list[dict]) -> tuple[dict, int]:
     companion = cpfont.with_suffix(".cpshape")
     report_path = companion.with_suffix(".cpshape.json")
     for path in (cpfont, companion, report_path):
@@ -137,7 +154,7 @@ def validate_pair(cpfont: Path, source: dict, size: int) -> tuple[dict, int]:
             or report["metrics_crc32"] != metrics_crc or report["payload_crc32"] != payload_crc
             or set(report["styles"]) != {"0"}
             or report["styles"]["0"]["source_sha256"] != source["regular_sha256"]
-            or report["styles"]["0"]["fallback_sha256"] != FALLBACK_SHA256):
+            or report["styles"]["0"]["fallback_sha256s"] != [record["sha256"] for record in fallbacks]):
         raise ValueError(f"Converter provenance does not match the requested font pair: {cpfont}")
     # Keep desktop reports reproducible across checkout and staging directory paths.
     report["styles"]["0"]["source"] = source["regular"]
@@ -164,7 +181,7 @@ def package(assets: Path, output: Path, archive: Path) -> None:
         raise ValueError("--output and --assets must be separate, non-nested directories")
     if archive.is_relative_to(output) or archive.is_relative_to(assets):
         raise ValueError("--zip must be outside --output and --assets")
-    manifest, sources, fallback, fallback_license = load_sources(assets)
+    sources, fallbacks = load_sources(assets)
     output.parent.mkdir(parents=True, exist_ok=True)
     archive.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="thai-font-pack-", dir=output.parent) as temporary:
@@ -176,14 +193,17 @@ def package(assets: Path, output: Path, archive: Path) -> None:
             family_dir = stage / "fonts" / family
             family_dir.mkdir(parents=True)
             shutil.copyfile(assets / source["license"], family_dir / "OFL.txt")
-            shutil.copyfile(fallback_license, family_dir / "NotoSans-OFL.txt")
+            for fallback in fallbacks:
+                shutil.copyfile(assets / fallback["license"], family_dir / f"{fallback['name']}-OFL.txt")
             for size in SIZES:
                 cpfont = family_dir / f"{family}_{size}.cpfont"
-                subprocess.run([sys.executable, str(CONVERTER), "--regular", str(assets / source["regular"]),
-                                "--fallback-regular", str(fallback), "--intervals", INTERVALS,
-                                "--size", str(size), "--thai-shaping", "--output", str(cpfont)],
-                               cwd=ROOT, check=True)
-                report, styles = validate_pair(cpfont, source, size)
+                command = [sys.executable, str(CONVERTER), "--regular", str(assets / source["regular"]),
+                           "--intervals", INTERVALS, "--size", str(size), "--thai-shaping",
+                           "--output", str(cpfont)]
+                for fallback in fallbacks:
+                    command.extend(["--fallback-regular", str(assets / fallback["path"])])
+                subprocess.run(command, cwd=ROOT, check=True)
+                report, styles = validate_pair(cpfont, source, size, fallbacks)
                 report_path = stage / "reports" / f"{family}_{size}.cpshape.json"
                 save_json(report_path, report)
                 cpfont.with_suffix(".cpshape.json").unlink()
@@ -193,9 +213,9 @@ def package(assets: Path, output: Path, archive: Path) -> None:
                               "report": report_path.relative_to(stage).as_posix()})
         (stage / "INSTALL.txt").write_text(INSTALL, encoding="utf-8", newline="\n")
         save_json(stage / "build-report.json", {
-            "schema_version": 1, "dpi": 150, "sizes": list(SIZES), "intervals": INTERVALS,
+            "schema_version": 2, "dpi": 150, "sizes": list(SIZES), "intervals": INTERVALS,
             "thai_shaping": True, "style": "regular", "source_manifest_sha256": digest(assets / "manifest.json"),
-            "sources": sources, "fallback": manifest["fallback"],
+            "sources": sources, "fallbacks": fallbacks,
             "converter_sha256": digest(CONVERTER),
             "shaping_converter_sha256": digest(CONVERTER.with_name("thai_shape.py")),
             "packager_sha256": digest(Path(__file__)), "pairs": pairs,

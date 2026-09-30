@@ -136,6 +136,109 @@ class BakerBoundsTest(unittest.TestCase):
         subprocess.run([sys.executable, "-c", command], cwd=ROOT / "lib/EpdFont/scripts", check=True)
 
 
+class FallbackChainTest(unittest.TestCase):
+    """Synthetic outlines keep fallback precedence independent of installed fonts."""
+
+    @staticmethod
+    def make_font(path, codepoints, width, thai_alternate=False):
+        # Match the converter's load order: macOS wheels bundle incompatible
+        # HarfBuzz symbols, and feaLib imports uharfbuzz transitively.
+        import freetype
+        from fontTools.fontBuilder import FontBuilder
+        from fontTools.pens.ttGlyphPen import TTGlyphPen
+        from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+
+        cmap = {cp: f"uni{cp:04X}" for cp in codepoints}
+        names = [".notdef", *cmap.values()]
+        if thai_alternate:
+            names.append("thai.alt")
+        builder = FontBuilder(1000, isTTF=True)
+        builder.setupGlyphOrder(names)
+        builder.setupCharacterMap(cmap)
+        glyphs = {}
+        for name in names:
+            pen = TTGlyphPen(None)
+            pen.moveTo((0, 0))
+            pen.lineTo((width, 0))
+            pen.lineTo((width, 600))
+            pen.lineTo((0, 600))
+            pen.closePath()
+            glyphs[name] = pen.glyph()
+        builder.setupGlyf(glyphs)
+        builder.setupHorizontalMetrics({name: (width + 100, 0) for name in names})
+        builder.setupHorizontalHeader(ascent=800, descent=-200)
+        builder.setupNameTable({"familyName": path.stem, "styleName": "Regular",
+                                "fullName": path.stem, "psName": path.stem})
+        builder.setupOS2(sTypoAscender=800, sTypoDescender=-200,
+                         usWinAscent=800, usWinDescent=200)
+        builder.setupPost()
+        builder.setupMaxp()
+        if thai_alternate:
+            addOpenTypeFeaturesFromString(builder.font,
+                "languagesystem thai dflt; feature ccmp { sub uni0E01 by thai.alt; } ccmp;")
+        builder.font["head"].created = builder.font["head"].modified = 3400000000
+        builder.save(path)
+
+    def test_cli_primary_and_ordered_fallback_rasters(self):
+        with tempfile.TemporaryDirectory(prefix="fallback-chain-") as temp:
+            root = Path(temp)
+            fonts = [root / f"face{index}.ttf" for index in range(3)]
+            for path, codepoints, width in zip(fonts, ([65], [65, 66], [65, 66, 67]),
+                                               (200, 400, 600)):
+                self.make_font(path, codepoints, width)
+            references = []
+            for index, font in enumerate(fonts):
+                output = root / f"reference{index}.cpfont"
+                converter.generate_cpfont_multistyle({0: str(font)}, 16, [(65, 67)], str(output))
+                references.append(cpfont_sections(output.read_bytes())[1][0])
+            self.assertNotEqual(references[0][0][65], references[1][0][65])
+            self.assertNotEqual(references[1][0][66], references[2][0][66])
+            for fallbacks in ([fonts[1]], fonts[1:], [fonts[2], fonts[1]]):
+                with self.subTest(fallbacks=fallbacks):
+                    output = root / "chain.cpfont"
+                    command = [sys.executable, str(ROOT / "lib/EpdFont/scripts/fontconvert_sdcard.py"),
+                               "--regular", str(fonts[0]), "--intervals", "ascii",
+                               "--size", "16", "--output", str(output)]
+                    for font in fallbacks:
+                        command.extend(["--fallback-regular", str(font)])
+                    subprocess.run(command, check=True, capture_output=True)
+                    glyphs, metrics = cpfont_sections(output.read_bytes())[1][0]
+                    self.assertEqual(metrics, references[0][1])
+                    self.assertEqual(glyphs[65], references[0][0][65])
+                    first = fonts.index(fallbacks[0])
+                    self.assertEqual(glyphs[66], references[first][0][66])
+                    if fonts[2] in fallbacks:
+                        self.assertEqual(glyphs[67], references[2][0][67])
+                    else:
+                        self.assertNotIn(67, glyphs)
+
+    def test_later_fallback_reserves_pua_and_records_provenance(self):
+        with tempfile.TemporaryDirectory(prefix="fallback-shaping-") as temp:
+            root = Path(temp)
+            primary, first, second = [root / f"{name}.ttf" for name in ("thai", "first", "second")]
+            self.make_font(primary, range(0xE01, 0xE5C), 200, thai_alternate=True)
+            self.make_font(first, [0xE000], 400)
+            self.make_font(second, [0xE001], 600)
+            native = baker.bake_style(primary, 16)
+            model = baker.bake_style(primary, 16, [first, second])
+            self.assertEqual(set(native.alternates), {0xE000})
+            self.assertEqual(set(model.alternates), {0xE002})
+            self.assertEqual(model.oracle, native.oracle)
+            output = root / "shaped.cpfont"
+            converter.generate_cpfont_multistyle(
+                {0: str(primary)}, 16, [(0xE01, 0xE5B), (0xE000, 0xE002)], str(output),
+                fallback_style_fonts={0: [str(first), str(second)]}, thai_shaping=True)
+            glyphs, _ = cpfont_sections(output.read_bytes())[1][0]
+            for cp, font in ((0xE000, first), (0xE001, second)):
+                reference = root / "reference.cpfont"
+                converter.generate_cpfont_multistyle({0: str(font)}, 16, [(cp, cp)], str(reference))
+                self.assertEqual(glyphs[cp], cpfont_sections(reference.read_bytes())[1][0][0][cp])
+            report = json.loads(output.with_suffix(".cpshape.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["styles"]["0"]["fallback_sha256s"],
+                             [hashlib.sha256(font.read_bytes()).hexdigest() for font in (first, second)])
+            self.assertNotIn("fallback_sha256", report["styles"]["0"])
+
+
 class RealFontBakerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -206,7 +309,7 @@ class RealFontBakerTest(unittest.TestCase):
                        for recipe in recipes]
             expected = oracle(source, size)
             self.assertEqual(decoded, expected)
-            model = baker.bake_style(source, size, self.fallback)
+            model = baker.bake_style(source, size, [self.fallback])
             self.assertEqual(model.oracle, expected)
             glyphs, cp_metrics = styles[sid]
             self.assertEqual(metrics, cp_metrics)
@@ -228,7 +331,7 @@ class RealFontBakerTest(unittest.TestCase):
                     source = ASSETS / fixture["regular"]
                     size = fixture["point_size"]
                     output = Path(temp) / (fixture["id"] + ".cpfont")
-                    kwargs = dict(fallback_style_fonts={0: str(self.fallback)})
+                    kwargs = dict(fallback_style_fonts={0: [str(self.fallback)]})
                     converter.generate_cpfont_multistyle({0: str(source)}, size, intervals, str(output), **kwargs)
                     native = output.read_bytes()
                     self.assertEqual(hashlib.sha256(native).hexdigest(), fixture["cpfont_sha256"])
@@ -241,6 +344,30 @@ class RealFontBakerTest(unittest.TestCase):
                     for cp, record in native_styles[0][0].items():
                         self.assertEqual(shaped_styles[0][0][cp], record)
 
+    def test_pack_covers_ipa_arrows_symbols_and_arabic_forms(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from package_thai_fonts import INTERVALS, load_sources
+
+        sources, fallbacks = load_sources(ASSETS)
+        paths = [str(ASSETS / record["path"]) for record in fallbacks]
+        required = set(range(0x0250, 0x0300)) | set(range(0x2190, 0x2300))
+        required.update(map(ord, "æðŋβθχ★☆✓✗♪♫Ⅳمرحبا١٢٣َُِّ"))
+        # The reader emits contextual forms and collapsed Lam-Alef ligatures.
+        required.update((0xFE8F, 0xFE91, 0xFE96, 0xFEF4, 0xFEDB, 0xFE98,
+                         0xFE8E, 0xFEF5, 0xFEF6, 0xFEF7, 0xFEF8,
+                         0xFEF9, 0xFEFA, 0xFEFB, 0xFEFC))
+        with tempfile.TemporaryDirectory(prefix="thai-pack-coverage-") as temp:
+            for source in sources:
+                with self.subTest(family=source["family"]):
+                    output = Path(temp) / (source["family"] + ".cpfont")
+                    converter.generate_cpfont_multistyle(
+                        {0: str(ASSETS / source["regular"])}, 16,
+                        converter.resolve_intervals(INTERVALS), str(output),
+                        fallback_style_fonts={0: paths}, thai_shaping=True)
+                    _, styles = cpfont_sections(output.read_bytes())
+                    missing = required - styles[0][0].keys()
+                    self.assertEqual(sorted(missing), [], "Missing packaged Unicode glyphs")
+
     def test_multistyle_deterministic_pair(self):
         fixture = self.fonts[0]
         source = ASSETS / fixture["regular"]
@@ -250,7 +377,7 @@ class RealFontBakerTest(unittest.TestCase):
             outputs = [Path(temp) / (name + ".cpfont") for name in ("first", "second")]
             for output in outputs:
                 converter.generate_cpfont_multistyle(sources, 16, intervals, str(output),
-                                                    fallback_style_fonts={sid: str(self.fallback) for sid in sources},
+                                                    fallback_style_fonts={sid: [str(self.fallback)] for sid in sources},
                                                     thai_shaping=True)
             self.assertEqual(outputs[0].read_bytes(), outputs[1].read_bytes())
             self.assertEqual(outputs[0].with_suffix(".cpshape").read_bytes(),

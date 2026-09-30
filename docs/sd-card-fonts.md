@@ -59,15 +59,16 @@ the manual SD card copy method below.
 
 ### Thai paired-font pack (offline build)
 
-With the verified local assets from `scripts/prepare_thai_test_assets.py` already
-available, build the installable pack without downloading anything:
+Prepare the hash-verified desktop sources once (downloads the pinned Thai and
+symbol fonts), then package them offline:
 
 ```sh
+python scripts/prepare_thai_test_assets.py
 python scripts/package_thai_fonts.py
 ```
 
-The desktop converter requires `freetype-py`, `fonttools` and `uharfbuzz`. Optional
-arguments are `--assets DIR` (default `build/thai/assets`), `--output DIR` (default
+Preparation requires `freetype-py`, `fonttools`, `uharfbuzz` and `Pillow`.
+Optional packager arguments are `--assets DIR` (default `build/thai/assets`), `--output DIR` (default
 `build/thai/font-pack`) and `--zip PATH` (default
 `build/thai/THCraft-Thai-Fonts.zip`). Missing assets, manifest/hash mismatches or
 incomplete font/companion pairs stop packaging; no system font is substituted.
@@ -75,11 +76,20 @@ incomplete font/companion pairs stop packaging; no system font is substituted.
 The archive contains regular-face **THCraft-NotoSansThai**,
 **THCraft-NotoSerifThai** and **THCraft-Sarabun**, each at **8, 10, 12, 14, 16 and
 18 pt**, converted at 150 DPI. Thai positioning is baked into same-basename
-`.cpfont`/`.cpshape` pairs; Latin and punctuation coverage uses the explicitly
-verified Noto Sans source during conversion. Each family includes its source OFL
-copyright/license notice and `NotoSans-OFL.txt` for that fallback. Source TTFs
-remain desktop inputs, not firmware or installation assets. `build-report.json`
-and `reports/` live outside `fonts/` and record source/output hashes, sizes,
+`.cpfont`/`.cpshape` pairs. Coverage includes Latin, Greek letters used in phonetic
+transcription, IPA Extensions and Spacing Modifier Letters (U+0250–U+02FF),
+combining diacritics, arrows, mathematical/decorative symbols, and Arabic.
+Arabic includes contextual presentation forms and Lam-Alef ligatures for the
+firmware's existing RTL shaper, not just isolated base letters.
+
+Fallback priority is the selected Thai face, then the verified **Noto Sans**,
+**Noto Sans Symbols**, **Noto Sans Symbols 2**, **Noto Sans Math**, and
+**Noto Sans Arabic** faces. Only glyphs present in these sources are included;
+this is not a complete Unicode or emoji font. Existing Thai/Latin bitmaps and
+line metrics are retained. Each family includes its source `OFL.txt` and a named
+OFL copyright/license notice for every fallback. Source TTFs remain desktop
+inputs, not firmware or installation assets. `build-report.json` (schema 2) and
+`reports/` live outside `fonts/` and record ordered source hashes, output sizes,
 converter identity and companion style counts.
 
 To install:
@@ -99,6 +109,10 @@ To install:
 4. **Do not delete reading progress or book caches.** If the same THCraft family
    already exists under `/.fonts/`, update that copy too: the hidden-root copy
    takes priority over `/fonts/` when family names collide.
+5. Open a book containing IPA (for example `/ˈθɪŋk/`), arrows (`← → ⇒`),
+   symbols (`∞ ≠ ✓ ★`), and Arabic (`مرحبا بالعالم`). Check the selected family
+   and size for missing boxes and Arabic joining. Updating the font pack does
+   not require flashing new firmware; copy both members of every pair.
 
 This is the **CPFont bitmap path**, not the direct TTF/OTF/TTC path described
 below. Copying only a TTF does not install the baked Thai positioning recipes.
@@ -220,6 +234,14 @@ To make `.cpfont` files for any device, convert your TrueType/OpenType fonts:
       --sizes 12,14,16,18 \
       --name MyFont \
       --output-dir ./MyFont/
+
+Missing glyphs can come from explicit per-style fallback files. Repeat
+`--fallback-regular FILE` (or `--fallback-bold`, `--fallback-italic`,
+`--fallback-bolditalic`) in priority order. The primary face always wins;
+otherwise the first fallback containing that codepoint is used. The requested
+`--intervals` must include the character as well. Thai shaping reports record
+the ordered `fallback_sha256s` and reserve alternate-glyph codepoints across
+all fallback faces.
 
 ### Thai bitmap positioning
 

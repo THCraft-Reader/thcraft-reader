@@ -240,7 +240,7 @@ The existing build and installable font pack are included in
 
 - `firmware.bin`: X4 Pro application image, 6,074,640 bytes.
 - `firmware.factory.bin`: X4 Pro merged factory image, 6,140,176 bytes.
-- `THCraft-Thai-Fonts.zip`: font pack, 1,462,472 bytes, including licenses and
+- `THCraft-Thai-Fonts.zip`: font pack, 9,202,302 bytes, including licenses and
   installation instructions.
 - `SHA256SUMS`: SHA-256 checksums for the three artifacts.
 
@@ -270,5 +270,27 @@ Publication status:
   gates remain unverified. This snapshot is not a completed Milestone 1
   acceptance claim.
 
-No rebuild or further test run was performed for publication; the artifacts are
-copies of the previously generated files.
+The firmware images remain copies of the previously generated files.
+
+### Font coverage refresh
+
+The paired font archive now includes IPA/modifier letters, arrows, mathematical
+and decorative symbols, and Arabic (including contextual presentation forms).
+The converter uses ordered, hash-verified Noto fallbacks without replacing glyphs
+already present in the Thai source. All three families retain all six sizes.
+
+Verification of the regenerated archive:
+
+- All 18 pairs retain every previous glyph bitmap and line metric.
+- Each pair includes all 176 IPA/modifier codepoints (U+0250–U+02FF), 112 arrows
+  (U+2190–U+21FF), 256 mathematical operators (U+2200–U+22FF), and 1,166 Arabic
+  glyphs from the bundled Noto Sans Arabic source.
+- The font baker suite passes all 10 tests, including fallback precedence,
+  later-fallback PUA collisions, Thai shaping oracles, and multilingual coverage.
+- The production host renderer completed 24 smoke runs: all family/size glyph
+  sheets, plus 16 pt reader layout and rotated sheets for each family. Mixed
+  Thai/IPA/symbol/Arabic reader pages were visually inspected.
+
+These are host checks, not physical-device heap or display acceptance. The
+firmware binaries are unchanged; install the updated `.cpfont` and `.cpshape`
+pairs together as described in [SD card fonts](sd-card-fonts.md).

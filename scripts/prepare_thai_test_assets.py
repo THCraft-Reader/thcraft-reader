@@ -37,6 +37,18 @@ FONTS = (
      "226d4f368fbc0457990ddef2692679badfd2c1a4e89e5ac4d43c10ba7743b2f1",
      "161c9ac9a14e26dba0b9be14496fae451e5c2e24"),
 )
+PACK_FALLBACK_FONTS = (
+    ("NotoSansSymbols", "notosanssymbols", "NotoSansSymbols%5Bwght%5D.ttf",
+     "f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7",
+     "a0061bfbcbbec27bf2b280fc8c49ea42cf7cb7ab"),
+    ("NotoSansSymbols2", "notosanssymbols2", "NotoSansSymbols2-Regular.ttf",
+     "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21",
+     "caf89dd0e60e23ac39ce18da823095959d409437"),
+    ("NotoSansMath", "notosansmath", "NotoSansMath-Regular.ttf",
+     "3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d",
+     "7e505c9bad286732f4d6daf0165e6b6cbbe57079"),
+)
+ARABIC_FALLBACK_SHA256 = "252629ca0e87b6233851249b8cbf7b43445211a8caf199f1b306a19202251508"
 SHEET_TEXT = (
     "ก่ ก้ ก๊ ก๋", "กิ กี กึ กื", "กุ กู", "กี่ กุ่",
     "เก่ง น้ำ ตั้ง เรื่อง อ่าน", "ผู้หญิง ประเทศไทย โรงพยาบาล หนังสือ ภาษาไทย",
@@ -126,6 +138,34 @@ def freeze(source: Path, target: Path) -> dict:
     font.save(target)
     font.close()
     return axes
+
+
+def prepare_pack_fallbacks(output: Path) -> list[dict]:
+    records = []
+    for name, family, filename, expected, blob in (*PACK_FALLBACK_FONTS,
+            ("NotoSansArabic", "NotoSansArabic", "NotoSansArabic-Regular.ttf",
+             ARABIC_FALLBACK_SHA256, None)):
+        directory = output / "sources" / family
+        directory.mkdir(parents=True, exist_ok=True)
+        source = directory / "original.ttf"
+        license_path = directory / "OFL.txt"
+        if blob:
+            fetch_verified(source, family, filename, expected, blob)
+            fetch_license(license_path, family)
+        else:
+            bundled = FALLBACK.parent.parent / family / filename
+            if digest(bundled) != expected:
+                raise RuntimeError(f"Checked-in fallback hash mismatch: {bundled}")
+            shutil.copyfile(bundled, source)
+            shutil.copyfile(bundled.parent / "OFL.txt", license_path)
+        regular = directory / "regular.ttf"
+        axes = freeze(source, regular)
+        records.append({"name": name, "source": source.relative_to(output).as_posix(),
+                        "source_sha256": expected, "source_git_blob": blob,
+                        "path": regular.relative_to(output).as_posix(), "sha256": digest(regular),
+                        "frozen_axes": axes, "license": license_path.relative_to(output).as_posix(),
+                        "license_sha256": digest(license_path)})
+    return records
 
 
 def cmap_for(path: Path) -> set[int]:
@@ -400,6 +440,7 @@ def prepare(output: Path, thai_shaping: bool = False, probe: Path | None = None)
                 "fallback": {"path": fallback.relative_to(output).as_posix(),
                              "sha256": FALLBACK_SHA256, "license": "sources/noto-sans-fallback/OFL.txt",
                              "license_sha256": digest(fallback_dir / "OFL.txt")},
+                "pack_fallbacks": prepare_pack_fallbacks(output),
                 "reference": {"load_flags": "FT_LOAD_RENDER (native hinting)",
                               "quantization": "coverage//64 -> {255,170,85,0}",
                               "positioning": ("HB 26.6 quantized to 12.4; completed Thai outer-cluster advance rounded once"
