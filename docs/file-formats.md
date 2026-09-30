@@ -96,8 +96,10 @@ The header is now 47 bytes (previously 43), adding little-endian `u32
 thaiLayoutId` immediately after `wordSpacingPercent`. Both finalized and suspended
 section caches compare this identity along with the other render settings.
 `thai::layoutId()` is FNV-1a (seed 2166136261, prime 16777619) over little-endian
-`u32` analyzer version 1, little-endian `u32` dictionary CRC32 (zero when disabled),
+`u32` analyzer version 2, little-endian `u32` dictionary CRC32 (zero when disabled),
 then one byte each for enabled word breaking and dictionary use. Bit 31 is cleared.
+Analyzer version 2 adds bounded hybrid word segmentation; version-1 identities
+reflow automatically without changing the binary header or reading progress.
 
 Bit 31 marks output produced while optional Thai analysis was unavailable due to
 allocation failure or invalid dictionary data. Commit patches that bit before

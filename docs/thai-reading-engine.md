@@ -54,11 +54,13 @@ Analysis belongs in the shared `lib/ThaiText` library. The parser's bounded
 stream retains 768 UTF-8 bytes plus at most 256 eight-byte source/style/link
 records (at most 3 KiB including scalar state). It is allocated lazily once per
 Thai-bearing parser, not on the small task stack or for English-only books.
-Finite 32-codepoint cluster lookahead and a 70-codepoint dictionary maximum
-bound retention. Inline markup must not split a cluster; marks adopt their
-base's style/link. Real block/ruby/table/whitespace transitions finalize pending
-text. Malformed pathological mark runs retain their bytes through the documented
-legacy fallback; they do not enlarge the analysis window.
+The 24-codepoint repair window, 70-codepoint dictionary maximum and 32-codepoint
+cluster lookahead require at most 126 Thai codepoints (378 bytes) before a
+streaming decision; parser buffer capacities are unchanged. Inline markup must
+not split a cluster; marks adopt their base's style/link. Real
+block/ruby/table/whitespace transitions finalize pending text. Malformed
+pathological mark runs retain their bytes through the documented legacy
+fallback; they do not enlarge the analysis window.
 
 The allocation-free cluster primitives implement the ordered pinned TCC grammar
 with the explicit `เ + base + ื + tone? + อ + ะ?` correction. Thirteen analyzer
@@ -88,6 +90,70 @@ Generated data: 60,964 words, maximum 70 codepoints; 367,377 encoded bytes plus
 seventeen segmenter and seven generator tests pass. A standalone production
 segmenter emits `ประเทศไทย|มี|ประชากร|จำนวนมาก`; the proper-prefix splitter emits
 `จำนวน|มาก`. Invalid dictionary views retain cluster-safe emergency output.
+
+Word segmentation uses greedy longest matching with local DP repair. Before
+committing a word, it examines complete greedy segments within the next 24
+Thai codepoints. Unknown clusters or known one-codepoint words trigger DP over
+that bounded window; clean spans keep greedy matching. Repair stops before
+punctuation, digits, non-Thai or malformed input, and never cuts a greedy word
+at the window edge. Candidate dictionary ends must remain original TCC boundaries.
+Paths minimize unknown codepoints, then known one-codepoint words, then segment
+count. Exact ties prefer longer first words; the greedy choice changes only for
+a strictly better score. The DP arrays occupy 75 stack bytes with no heap
+allocation, mutable shared scratch or recursion. A dictionary miss at the current
+position emits the existing emergency cluster directly, since there is no
+alternative known first edge.
+
+This repairs local greedy dead ends, not linguistic ambiguity in fully known
+multi-character words, and cannot invent missing dictionary entries. The
+pre-change greedy tokenizer selected `ยิ่ง|ได้มา|ก|เท่าไหร่`, stranding unknown
+`ก`; hybrid segmentation emits `ยิ่ง|ได้|มาก|เท่าไหร่`. Style fragments inside
+`มาก` remain attached rather than becoming word breaks. Analyzer identity version
+2 invalidates old rendered layouts without changing the section format or reading
+progress.
+
+Hybrid benchmark: macOS arm64, Apple C++ Release (`-O3 -DNDEBUG`), median of three
+500-iteration runs. Times below are microseconds per corpus pass in parser-like
+scalar-stream mode, not per word or ESP32 timings. The executable also measures
+whole-input mode and checks whole/stream boundary checksums. The ambiguity and
+unknown corpora use a tiny real compressed dictionary; other rows use production
+data. Repeated sentences include their trailing separator.
+
+| Corpus per pass | Greedy µs | Hybrid µs | Ratio |
+| --- | ---: | ---: | ---: |
+| Clean known prose, 8 sentences | 82.64 | 121.36 | 1.47× |
+| Requested phrase, 16 repetitions | 93.07 | 433.36 | 4.66× |
+| Compound-heavy, 8 repetitions | 69.61 | 88.64 | 1.27× |
+| Greedy dead-end fixture, 32 repetitions | 21.49 | 55.79 | 2.60× |
+| Unknown run, 384 codepoints | 578.19 | 650.58 | 1.13× |
+| Mixed Thai/Latin, 8 repetitions | 35.87 | 40.25 | 1.12× |
+
+All timed loops recorded zero standard C++ allocations (direct libc allocation is
+not intercepted). Unknown codepoints per requested phrase and per ambiguity
+fixture fell from one to zero; clean, compound, unknown and mixed corpus
+checksums were unchanged. The unknown-run pending high-water increased from 306
+to 378 bytes within the existing buffer. An isolated ESP32-C3 `-Os -fstack-usage`
+compile reports a 256-byte `nextSegment` frame including inlined repair; this
+excludes nested dictionary/cluster call frames.
+
+To reproduce against the saved greedy revision without retaining a second
+production tokenizer:
+
+```sh
+git show 375d223eb9fed7d36ca89aca65f688a2bd77844a:lib/ThaiText/ThaiSegmenter.cpp > /tmp/ThaiSegmenter-greedy.cpp
+cmake -S test -B build/test -DTHAI_SEGMENTER_BASELINE_SOURCE=/tmp/ThaiSegmenter-greedy.cpp
+cmake --build build/test --target ThaiSegmenterBenchmark
+build/test/thai_text/ThaiSegmenterBenchmark 500
+cmake -S test -B build/test -DTHAI_SEGMENTER_BASELINE_SOURCE=
+rm /tmp/ThaiSegmenter-greedy.cpp
+```
+
+Verification: 104 Thai host tests and 10 final/partial cache tests pass; `default`
+(ESP32-C3) and `x4pro` firmware builds succeed. A production parser/layout/render
+smoke at a 96-pixel logical width keeps `มาก` on one line, including a style change
+between `มา` and `ก`, with eight known words and zero unknown clusters across two
+copies of the phrase. Device page-turn latency and heap high-water remain hardware
+checks; reopen an existing book after flashing to exercise automatic reflow.
 
 Native Windows/MSVC host lookup comparison (10 iterations, 121,928 common
 queries per iteration; background visual capture active, not target timings):

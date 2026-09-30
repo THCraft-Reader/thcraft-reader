@@ -1,0 +1,772 @@
+{
+  "schema_version": 2,
+  "dpi": 150,
+  "sizes": [
+    8,
+    10,
+    12,
+    14,
+    16,
+    18
+  ],
+  "intervals": "latin-ext,ipa-chars,greek,(0x0300-0x036F),punctuation,symbols,thai,arabic",
+  "thai_shaping": true,
+  "style": "regular",
+  "source_manifest_sha256": "4fbb801eeeac5c3104515dee33636279091664eef4884979d4fcb1101eafc5c7",
+  "sources": [
+    {
+      "family": "THCraft-NotoSansThai",
+      "source": "sources/noto-sans-thai/original.ttf",
+      "source_sha256": "5a1c559bb539583c8a1fd99d1c5b9491e5e14478c9cd2bd0970d5c3096cc9ef8",
+      "source_git_blob": "34b48ab6f74867dbfce19410a2f452abef34e3ff",
+      "regular": "sources/noto-sans-thai/regular.ttf",
+      "regular_sha256": "942dd2e3431533e8dc081c26fcb6861813c02436d63e005385bb6fc3e260bba4",
+      "frozen_axes": {
+        "wght": 400,
+        "wdth": 100
+      },
+      "license": "sources/noto-sans-thai/OFL.txt",
+      "license_sha256": "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0"
+    },
+    {
+      "family": "THCraft-NotoSerifThai",
+      "source": "sources/noto-serif-thai/original.ttf",
+      "source_sha256": "34a7ad11647c845303aabdde639059806c56b84719e5d2ceb28eb038711bdf53",
+      "source_git_blob": "ef511270e21b250f7befe58b33bb3b44edf58369",
+      "regular": "sources/noto-serif-thai/regular.ttf",
+      "regular_sha256": "25ccc2677e9a8ecb944406dd049e56b614c2a2bd00084cef20602982dfb75007",
+      "frozen_axes": {
+        "wght": 400,
+        "wdth": 100
+      },
+      "license": "sources/noto-serif-thai/OFL.txt",
+      "license_sha256": "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0"
+    },
+    {
+      "family": "THCraft-Sarabun",
+      "source": "sources/sarabun/original.ttf",
+      "source_sha256": "226d4f368fbc0457990ddef2692679badfd2c1a4e89e5ac4d43c10ba7743b2f1",
+      "source_git_blob": "161c9ac9a14e26dba0b9be14496fae451e5c2e24",
+      "regular": "sources/sarabun/regular.ttf",
+      "regular_sha256": "49388090ef0806618c1a8977f60be3fc04d9e8643963487188fb1543c851a348",
+      "frozen_axes": {},
+      "license": "sources/sarabun/OFL.txt",
+      "license_sha256": "b26cae1321380296ba8311b632a397d5eac11b47197f9d0aa0b9310f1531ad60"
+    }
+  ],
+  "fallbacks": [
+    {
+      "name": "NotoSans",
+      "path": "sources/noto-sans-fallback/NotoSans-Regular.ttf",
+      "sha256": "fe8c022f48d8dd29f17b744d16f9346f4357e16f7d4f7be58b000ae7c291b614",
+      "license": "sources/noto-sans-fallback/OFL.txt",
+      "license_sha256": "be2f3f8727ac2e18b714ad1c4336d4ddb3f3adbeb9a7f70bfab74d21f4d2b3fb"
+    },
+    {
+      "name": "NotoSansSymbols",
+      "source": "sources/notosanssymbols/original.ttf",
+      "source_sha256": "f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7",
+      "source_git_blob": "a0061bfbcbbec27bf2b280fc8c49ea42cf7cb7ab",
+      "path": "sources/notosanssymbols/regular.ttf",
+      "sha256": "927fb997aa26e723b0004a734e954a5e7422d2513852187b91fd623db3ac6af1",
+      "frozen_axes": {
+        "wght": 400
+      },
+      "license": "sources/notosanssymbols/OFL.txt",
+      "license_sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "name": "NotoSansSymbols2",
+      "source": "sources/notosanssymbols2/original.ttf",
+      "source_sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21",
+      "source_git_blob": "caf89dd0e60e23ac39ce18da823095959d409437",
+      "path": "sources/notosanssymbols2/regular.ttf",
+      "sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21",
+      "frozen_axes": {},
+      "license": "sources/notosanssymbols2/OFL.txt",
+      "license_sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "name": "NotoSansMath",
+      "source": "sources/notosansmath/original.ttf",
+      "source_sha256": "3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d",
+      "source_git_blob": "7e505c9bad286732f4d6daf0165e6b6cbbe57079",
+      "path": "sources/notosansmath/regular.ttf",
+      "sha256": "3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d",
+      "frozen_axes": {},
+      "license": "sources/notosansmath/OFL.txt",
+      "license_sha256": "403a95275b469061b7d4371c328e0ada3bc7d63328abe2e88aad5cd243b2fe21"
+    },
+    {
+      "name": "NotoSansArabic",
+      "source": "sources/NotoSansArabic/original.ttf",
+      "source_sha256": "252629ca0e87b6233851249b8cbf7b43445211a8caf199f1b306a19202251508",
+      "source_git_blob": null,
+      "path": "sources/NotoSansArabic/regular.ttf",
+      "sha256": "d07fe99860e6042dd6a775632e17e4e09416c172d544bc485aed2aedbbb72697",
+      "frozen_axes": {},
+      "license": "sources/NotoSansArabic/OFL.txt",
+      "license_sha256": "a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af"
+    }
+  ],
+  "converter_sha256": "021b4f8a57f1527938b31f5e5e2a541695c1ba7c4237a7a0e087a1f497bf5929",
+  "shaping_converter_sha256": "58f342128f189147c10fe4885319e29f2b8ac4d4259cdba5d53d58e111eb1451",
+  "packager_sha256": "8bad2d34632fa05214d7373acf62e42fff8396107079b72a1b7ae3e91cd010f2",
+  "pairs": [
+    {
+      "family": "THCraft-NotoSansThai",
+      "point_size": 8,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpfont",
+        "bytes": 212553,
+        "sha256": "bb5cb77e674dea567122e894f489a26155fd12a28dbc6f0109102c8b27255ba8"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpshape",
+        "bytes": 48502,
+        "sha256": "4965343f9fa058fca3a0933a460ccc27d6d8dc5ef38b116dd2b9d01ac7e78d32"
+      },
+      "report": "reports/THCraft-NotoSansThai_8.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSansThai",
+      "point_size": 10,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_10.cpfont",
+        "bytes": 284379,
+        "sha256": "bce170f1ef5d87c6cfde18d0565a53097ef78d47e013107204dcb0f1a06df363"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_10.cpshape",
+        "bytes": 51648,
+        "sha256": "33d5191b3826322a65032c0dd219e89385c7437b51c1bdb6944313b4a87c87d9"
+      },
+      "report": "reports/THCraft-NotoSansThai_10.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSansThai",
+      "point_size": 12,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_12.cpfont",
+        "bytes": 374352,
+        "sha256": "aed4f8b3f89f639d608114fdf5a3dc4786099590d45747f39a22a23328c01ca2"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_12.cpshape",
+        "bytes": 51173,
+        "sha256": "591d583c99e1762ac245e099762d9d0d4815f319922c1eeb6d935146f297c003"
+      },
+      "report": "reports/THCraft-NotoSansThai_12.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSansThai",
+      "point_size": 14,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_14.cpfont",
+        "bytes": 481196,
+        "sha256": "dea81cbacd74bb2ce73771247f70ac20143175cb115d8631ed3f5ec23dec89d9"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_14.cpshape",
+        "bytes": 55581,
+        "sha256": "d41ae754d70c7d40b1b013e59bb9f0633ccff3b687b7dcc90e62615595da9a74"
+      },
+      "report": "reports/THCraft-NotoSansThai_14.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSansThai",
+      "point_size": 16,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_16.cpfont",
+        "bytes": 601044,
+        "sha256": "c8361f34a2b2dff378bbc87148377653feb8d241e3d22231af2b6514253e996c"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_16.cpshape",
+        "bytes": 56846,
+        "sha256": "1f171ff352fd5852c81759726ad7424015f2ab35f5e2742d4a020af4189d5dba"
+      },
+      "report": "reports/THCraft-NotoSansThai_16.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSansThai",
+      "point_size": 18,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_18.cpfont",
+        "bytes": 742340,
+        "sha256": "8871b30228238aeb2b523c3e1aa5a4fe920862bb7ee4377066f414c121ba9654"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_18.cpshape",
+        "bytes": 56544,
+        "sha256": "1a09bb40cc7ac347e3e9aaeb5864279f6bc02974e04a8d55ee43da28ede6c886"
+      },
+      "report": "reports/THCraft-NotoSansThai_18.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSerifThai",
+      "point_size": 8,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_8.cpfont",
+        "bytes": 214071,
+        "sha256": "ad350009c07c048e099cf733d1b4211bbea3451ff1d5f68e061af21736183856"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_8.cpshape",
+        "bytes": 48369,
+        "sha256": "16e2a0b39569033e0d399fd71447ac25c8cc63cd3fd751cbc30f85441d260ac4"
+      },
+      "report": "reports/THCraft-NotoSerifThai_8.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSerifThai",
+      "point_size": 10,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_10.cpfont",
+        "bytes": 286074,
+        "sha256": "390bbb47ff4c6533913c569c767828e6ca3d8199947478c2d1dbe7506fe3db69"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_10.cpshape",
+        "bytes": 51342,
+        "sha256": "6543f6e4fb77de6652d83bc6f1728453b5b4fc0f2be4d4719fcabdf8a7f5228a"
+      },
+      "report": "reports/THCraft-NotoSerifThai_10.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSerifThai",
+      "point_size": 12,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_12.cpfont",
+        "bytes": 377274,
+        "sha256": "0781b1458d757e6b42a4c7e875b45fc0dd2a65369d2979c56a663c1c7260fea8"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_12.cpshape",
+        "bytes": 50203,
+        "sha256": "c67c8f8fa4308b5b3f3e765116c768e93c11e0d63f9efbb02c0a388abe13a19f"
+      },
+      "report": "reports/THCraft-NotoSerifThai_12.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSerifThai",
+      "point_size": 14,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_14.cpfont",
+        "bytes": 484470,
+        "sha256": "e57b9b2c7e1ef4833c1c1bad71b90ba3807603ba942b887a8dd2173e54e1ad80"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_14.cpshape",
+        "bytes": 52228,
+        "sha256": "9c2d4fc332b26c156b71d8e703066c997b58c2dada0abc2f68cfdcf48fd14704"
+      },
+      "report": "reports/THCraft-NotoSerifThai_14.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSerifThai",
+      "point_size": 16,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_16.cpfont",
+        "bytes": 605526,
+        "sha256": "5515cafc13b22f53d63bdc68704a034c739cf528b195683784775d1d2c341361"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_16.cpshape",
+        "bytes": 52802,
+        "sha256": "e8856811d992353a513671536793271609efb02a25c22ede5f41e6c8742f6588"
+      },
+      "report": "reports/THCraft-NotoSerifThai_16.cpshape.json"
+    },
+    {
+      "family": "THCraft-NotoSerifThai",
+      "point_size": 18,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_18.cpfont",
+        "bytes": 747410,
+        "sha256": "981a30e9ef1a325549305edf4260aa9bf93db0ab9eb73b3b2b21d3486bb71946"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_18.cpshape",
+        "bytes": 53005,
+        "sha256": "d28445200fac5cc941bfd2e6e8e9724a705b7f3ac22c2959480e5325368867a3"
+      },
+      "report": "reports/THCraft-NotoSerifThai_18.cpshape.json"
+    },
+    {
+      "family": "THCraft-Sarabun",
+      "point_size": 8,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_8.cpfont",
+        "bytes": 214962,
+        "sha256": "8bb81bd98d954baa3b3c6c800b08bed551977142855d71609baba79b617d879a"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_8.cpshape",
+        "bytes": 27750,
+        "sha256": "cacd2c62d3e212f1be071b86a604f9963107f7fb04f82d2e7c1ec6d227b288c9"
+      },
+      "report": "reports/THCraft-Sarabun_8.cpshape.json"
+    },
+    {
+      "family": "THCraft-Sarabun",
+      "point_size": 10,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_10.cpfont",
+        "bytes": 284380,
+        "sha256": "56c659e650773c41954ac342e3f1dce7a33c14d11887c4f75fd84c1697ce8428"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_10.cpshape",
+        "bytes": 26363,
+        "sha256": "5641ba6a274fcfdbc089026098642448acd77b06c68c086c05dac80020acdbd3"
+      },
+      "report": "reports/THCraft-Sarabun_10.cpshape.json"
+    },
+    {
+      "family": "THCraft-Sarabun",
+      "point_size": 12,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_12.cpfont",
+        "bytes": 373649,
+        "sha256": "ad9587da0f68b64992dc334e0a4948e77a2f88ba1d957746e8acc2569b497801"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_12.cpshape",
+        "bytes": 26363,
+        "sha256": "2399e1ff0e699172edf40d87c2857bc68334f6d36e06e4f51d5aa59e3b5179d3"
+      },
+      "report": "reports/THCraft-Sarabun_12.cpshape.json"
+    },
+    {
+      "family": "THCraft-Sarabun",
+      "point_size": 14,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_14.cpfont",
+        "bytes": 477855,
+        "sha256": "711aa3b7b2c1df56f5ea44de7ca4cb51e3ab5f0ff89b8da3a405a9bd6de19451"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_14.cpshape",
+        "bytes": 27941,
+        "sha256": "2a2d92e5d7b16f98b99dc2b6fcbbadd9c497565b7c14e6440d656fb028f42cb0"
+      },
+      "report": "reports/THCraft-Sarabun_14.cpshape.json"
+    },
+    {
+      "family": "THCraft-Sarabun",
+      "point_size": 16,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_16.cpfont",
+        "bytes": 595467,
+        "sha256": "6eba55e56992f6d6150b69944b47c5b4f7351d3f03053d25bab4d8e00be52832"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_16.cpshape",
+        "bytes": 25983,
+        "sha256": "22f8fe461ad63bbf4c66252b6a9ae691a0df3938c8cb6973b5610e11fa95c20c"
+      },
+      "report": "reports/THCraft-Sarabun_16.cpshape.json"
+    },
+    {
+      "family": "THCraft-Sarabun",
+      "point_size": 18,
+      "companion_style_count": 1,
+      "cpfont": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_18.cpfont",
+        "bytes": 734984,
+        "sha256": "72292bc5dd980d0400c30e03acbe0c26e34ad19e13898274a52acba922a73714"
+      },
+      "cpshape": {
+        "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_18.cpshape",
+        "bytes": 25983,
+        "sha256": "b945663ef550d1999c72f93dedb95d689988be0601887b76bb01fa41476f8def"
+      },
+      "report": "reports/THCraft-Sarabun_18.cpshape.json"
+    }
+  ],
+  "files": [
+    {
+      "path": "INSTALL.txt",
+      "bytes": 1472,
+      "sha256": "0b86862347f121609d75e9edeeef7889dbbdd60eeb757c130256f16ae32adc1f"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/NotoSans-OFL.txt",
+      "bytes": 4489,
+      "sha256": "be2f3f8727ac2e18b714ad1c4336d4ddb3f3adbeb9a7f70bfab74d21f4d2b3fb"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/NotoSansArabic-OFL.txt",
+      "bytes": 4382,
+      "sha256": "a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/NotoSansMath-OFL.txt",
+      "bytes": 4380,
+      "sha256": "403a95275b469061b7d4371c328e0ada3bc7d63328abe2e88aad5cd243b2fe21"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/NotoSansSymbols-OFL.txt",
+      "bytes": 4383,
+      "sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/NotoSansSymbols2-OFL.txt",
+      "bytes": 4383,
+      "sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/OFL.txt",
+      "bytes": 4380,
+      "sha256": "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_10.cpfont",
+      "bytes": 284379,
+      "sha256": "bce170f1ef5d87c6cfde18d0565a53097ef78d47e013107204dcb0f1a06df363"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_10.cpshape",
+      "bytes": 51648,
+      "sha256": "33d5191b3826322a65032c0dd219e89385c7437b51c1bdb6944313b4a87c87d9"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_12.cpfont",
+      "bytes": 374352,
+      "sha256": "aed4f8b3f89f639d608114fdf5a3dc4786099590d45747f39a22a23328c01ca2"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_12.cpshape",
+      "bytes": 51173,
+      "sha256": "591d583c99e1762ac245e099762d9d0d4815f319922c1eeb6d935146f297c003"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_14.cpfont",
+      "bytes": 481196,
+      "sha256": "dea81cbacd74bb2ce73771247f70ac20143175cb115d8631ed3f5ec23dec89d9"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_14.cpshape",
+      "bytes": 55581,
+      "sha256": "d41ae754d70c7d40b1b013e59bb9f0633ccff3b687b7dcc90e62615595da9a74"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_16.cpfont",
+      "bytes": 601044,
+      "sha256": "c8361f34a2b2dff378bbc87148377653feb8d241e3d22231af2b6514253e996c"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_16.cpshape",
+      "bytes": 56846,
+      "sha256": "1f171ff352fd5852c81759726ad7424015f2ab35f5e2742d4a020af4189d5dba"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_18.cpfont",
+      "bytes": 742340,
+      "sha256": "8871b30228238aeb2b523c3e1aa5a4fe920862bb7ee4377066f414c121ba9654"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_18.cpshape",
+      "bytes": 56544,
+      "sha256": "1a09bb40cc7ac347e3e9aaeb5864279f6bc02974e04a8d55ee43da28ede6c886"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpfont",
+      "bytes": 212553,
+      "sha256": "bb5cb77e674dea567122e894f489a26155fd12a28dbc6f0109102c8b27255ba8"
+    },
+    {
+      "path": "fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpshape",
+      "bytes": 48502,
+      "sha256": "4965343f9fa058fca3a0933a460ccc27d6d8dc5ef38b116dd2b9d01ac7e78d32"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/NotoSans-OFL.txt",
+      "bytes": 4489,
+      "sha256": "be2f3f8727ac2e18b714ad1c4336d4ddb3f3adbeb9a7f70bfab74d21f4d2b3fb"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/NotoSansArabic-OFL.txt",
+      "bytes": 4382,
+      "sha256": "a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/NotoSansMath-OFL.txt",
+      "bytes": 4380,
+      "sha256": "403a95275b469061b7d4371c328e0ada3bc7d63328abe2e88aad5cd243b2fe21"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/NotoSansSymbols-OFL.txt",
+      "bytes": 4383,
+      "sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/NotoSansSymbols2-OFL.txt",
+      "bytes": 4383,
+      "sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/OFL.txt",
+      "bytes": 4380,
+      "sha256": "2e98fd23a52d253db8612cd5942c8f2ff4111b21d2367050fdca91d8ccc374a0"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_10.cpfont",
+      "bytes": 286074,
+      "sha256": "390bbb47ff4c6533913c569c767828e6ca3d8199947478c2d1dbe7506fe3db69"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_10.cpshape",
+      "bytes": 51342,
+      "sha256": "6543f6e4fb77de6652d83bc6f1728453b5b4fc0f2be4d4719fcabdf8a7f5228a"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_12.cpfont",
+      "bytes": 377274,
+      "sha256": "0781b1458d757e6b42a4c7e875b45fc0dd2a65369d2979c56a663c1c7260fea8"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_12.cpshape",
+      "bytes": 50203,
+      "sha256": "c67c8f8fa4308b5b3f3e765116c768e93c11e0d63f9efbb02c0a388abe13a19f"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_14.cpfont",
+      "bytes": 484470,
+      "sha256": "e57b9b2c7e1ef4833c1c1bad71b90ba3807603ba942b887a8dd2173e54e1ad80"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_14.cpshape",
+      "bytes": 52228,
+      "sha256": "9c2d4fc332b26c156b71d8e703066c997b58c2dada0abc2f68cfdcf48fd14704"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_16.cpfont",
+      "bytes": 605526,
+      "sha256": "5515cafc13b22f53d63bdc68704a034c739cf528b195683784775d1d2c341361"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_16.cpshape",
+      "bytes": 52802,
+      "sha256": "e8856811d992353a513671536793271609efb02a25c22ede5f41e6c8742f6588"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_18.cpfont",
+      "bytes": 747410,
+      "sha256": "981a30e9ef1a325549305edf4260aa9bf93db0ab9eb73b3b2b21d3486bb71946"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_18.cpshape",
+      "bytes": 53005,
+      "sha256": "d28445200fac5cc941bfd2e6e8e9724a705b7f3ac22c2959480e5325368867a3"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_8.cpfont",
+      "bytes": 214071,
+      "sha256": "ad350009c07c048e099cf733d1b4211bbea3451ff1d5f68e061af21736183856"
+    },
+    {
+      "path": "fonts/THCraft-NotoSerifThai/THCraft-NotoSerifThai_8.cpshape",
+      "bytes": 48369,
+      "sha256": "16e2a0b39569033e0d399fd71447ac25c8cc63cd3fd751cbc30f85441d260ac4"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/NotoSans-OFL.txt",
+      "bytes": 4489,
+      "sha256": "be2f3f8727ac2e18b714ad1c4336d4ddb3f3adbeb9a7f70bfab74d21f4d2b3fb"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/NotoSansArabic-OFL.txt",
+      "bytes": 4382,
+      "sha256": "a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/NotoSansMath-OFL.txt",
+      "bytes": 4380,
+      "sha256": "403a95275b469061b7d4371c328e0ada3bc7d63328abe2e88aad5cd243b2fe21"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/NotoSansSymbols-OFL.txt",
+      "bytes": 4383,
+      "sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/NotoSansSymbols2-OFL.txt",
+      "bytes": 4383,
+      "sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/OFL.txt",
+      "bytes": 4387,
+      "sha256": "b26cae1321380296ba8311b632a397d5eac11b47197f9d0aa0b9310f1531ad60"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_10.cpfont",
+      "bytes": 284380,
+      "sha256": "56c659e650773c41954ac342e3f1dce7a33c14d11887c4f75fd84c1697ce8428"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_10.cpshape",
+      "bytes": 26363,
+      "sha256": "5641ba6a274fcfdbc089026098642448acd77b06c68c086c05dac80020acdbd3"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_12.cpfont",
+      "bytes": 373649,
+      "sha256": "ad9587da0f68b64992dc334e0a4948e77a2f88ba1d957746e8acc2569b497801"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_12.cpshape",
+      "bytes": 26363,
+      "sha256": "2399e1ff0e699172edf40d87c2857bc68334f6d36e06e4f51d5aa59e3b5179d3"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_14.cpfont",
+      "bytes": 477855,
+      "sha256": "711aa3b7b2c1df56f5ea44de7ca4cb51e3ab5f0ff89b8da3a405a9bd6de19451"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_14.cpshape",
+      "bytes": 27941,
+      "sha256": "2a2d92e5d7b16f98b99dc2b6fcbbadd9c497565b7c14e6440d656fb028f42cb0"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_16.cpfont",
+      "bytes": 595467,
+      "sha256": "6eba55e56992f6d6150b69944b47c5b4f7351d3f03053d25bab4d8e00be52832"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_16.cpshape",
+      "bytes": 25983,
+      "sha256": "22f8fe461ad63bbf4c66252b6a9ae691a0df3938c8cb6973b5610e11fa95c20c"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_18.cpfont",
+      "bytes": 734984,
+      "sha256": "72292bc5dd980d0400c30e03acbe0c26e34ad19e13898274a52acba922a73714"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_18.cpshape",
+      "bytes": 25983,
+      "sha256": "b945663ef550d1999c72f93dedb95d689988be0601887b76bb01fa41476f8def"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_8.cpfont",
+      "bytes": 214962,
+      "sha256": "8bb81bd98d954baa3b3c6c800b08bed551977142855d71609baba79b617d879a"
+    },
+    {
+      "path": "fonts/THCraft-Sarabun/THCraft-Sarabun_8.cpshape",
+      "bytes": 27750,
+      "sha256": "cacd2c62d3e212f1be071b86a604f9963107f7fb04f82d2e7c1ec6d227b288c9"
+    },
+    {
+      "path": "reports/THCraft-NotoSansThai_10.cpshape.json",
+      "bytes": 10752,
+      "sha256": "0dabb637f41c9d6979b110804fc2b2a53d4b4ee0ac6bdeb6d512e91cdef3fa52"
+    },
+    {
+      "path": "reports/THCraft-NotoSansThai_12.cpshape.json",
+      "bytes": 10752,
+      "sha256": "7549201204c3a8b421d51092de4b7a7cac88272552eac5a49b9609b13de01eb8"
+    },
+    {
+      "path": "reports/THCraft-NotoSansThai_14.cpshape.json",
+      "bytes": 10752,
+      "sha256": "f9d0cadf5fdda4439935169f90f6b49eef5a9fa627327e7e3c92e32155516239"
+    },
+    {
+      "path": "reports/THCraft-NotoSansThai_16.cpshape.json",
+      "bytes": 10752,
+      "sha256": "eccfe08ec155402b07495928a53bcc64f0c234245270e6e7ae61d298dbbb7a33"
+    },
+    {
+      "path": "reports/THCraft-NotoSansThai_18.cpshape.json",
+      "bytes": 10750,
+      "sha256": "628fefbfc4a831a0e7c8598154443063107ecb2f11709ba681a8a7a440ca1e39"
+    },
+    {
+      "path": "reports/THCraft-NotoSansThai_8.cpshape.json",
+      "bytes": 10749,
+      "sha256": "ddcdda85079a0e6a5be8ea25e89e9586d37b3711f7099e222d8abce903bd2262"
+    },
+    {
+      "path": "reports/THCraft-NotoSerifThai_10.cpshape.json",
+      "bytes": 10757,
+      "sha256": "486c990a09ec4382c34905fa477bcd47dfd407b6f0553d7b2ed2d7a8c758edd8"
+    },
+    {
+      "path": "reports/THCraft-NotoSerifThai_12.cpshape.json",
+      "bytes": 10757,
+      "sha256": "736a30e27ad09c0e980e1584d47878913ccf764ef998fe02a5475d105484670c"
+    },
+    {
+      "path": "reports/THCraft-NotoSerifThai_14.cpshape.json",
+      "bytes": 10757,
+      "sha256": "31f484e7a412ec630be2cef6fd8ae29c188133eb231fe9991dfe66ee79b8e189"
+    },
+    {
+      "path": "reports/THCraft-NotoSerifThai_16.cpshape.json",
+      "bytes": 10757,
+      "sha256": "bf46340fe1c829be3dbca7b27613da6b94757568ee1ac208938f602c438850e5"
+    },
+    {
+      "path": "reports/THCraft-NotoSerifThai_18.cpshape.json",
+      "bytes": 10757,
+      "sha256": "449264bd790b1a5646b7326310df39ef5dc922a06a289318894d372ac33e56db"
+    },
+    {
+      "path": "reports/THCraft-NotoSerifThai_8.cpshape.json",
+      "bytes": 10753,
+      "sha256": "48c963cf1bf12c83eb9b1b6ee39703b130fff203b57fb757a59b5f1235c8fec0"
+    },
+    {
+      "path": "reports/THCraft-Sarabun_10.cpshape.json",
+      "bytes": 11660,
+      "sha256": "762fee11a7598df3d3d9d7a310e14d45faff898d69356d9bef0a89e2831be13a"
+    },
+    {
+      "path": "reports/THCraft-Sarabun_12.cpshape.json",
+      "bytes": 11659,
+      "sha256": "7040047b4b0f5f26d76c6e2fbbde1d737edb1848a2414671f2ed8100a573678a"
+    },
+    {
+      "path": "reports/THCraft-Sarabun_14.cpshape.json",
+      "bytes": 11660,
+      "sha256": "ba64b9f123dd6295946c1ee5f5534b5767c1751f56f2b5f103b07b0daf659fb0"
+    },
+    {
+      "path": "reports/THCraft-Sarabun_16.cpshape.json",
+      "bytes": 11660,
+      "sha256": "f5786165a5523c4da62f6f2ac001dab74a8a210bf4d107baaee531a7346c3d20"
+    },
+    {
+      "path": "reports/THCraft-Sarabun_18.cpshape.json",
+      "bytes": 11659,
+      "sha256": "b1ae928b7bf1b48abdbc4c79fbd6b0f0eb1e5f4164444303838359f14f2d34f7"
+    },
+    {
+      "path": "reports/THCraft-Sarabun_8.cpshape.json",
+      "bytes": 11658,
+      "sha256": "a2d9b3d4b2a9cecfc863662ba8da5603b00e15d740668e6fcfba2b92dea125fc"
+    }
+  ]
+}

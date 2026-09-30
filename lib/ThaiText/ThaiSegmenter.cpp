@@ -5,20 +5,21 @@
 namespace thai {
 namespace {
 constexpr size_t LOOKAHEAD_CODEPOINTS = MAX_DICTIONARY_WORD_CODEPOINTS + MAX_CLUSTER_CODEPOINTS;
+constexpr size_t REPAIR_CODEPOINTS = 24;
+constexpr size_t WORD_LOOKAHEAD_CODEPOINTS = LOOKAHEAD_CODEPOINTS + REPAIR_CODEPOINTS;
+constexpr uint16_t SINGLETON_COST = REPAIR_CODEPOINTS + 1;
+constexpr uint16_t UNKNOWN_COST = SINGLETON_COST * SINGLETON_COST;
 
 bool isWhitespace(uint32_t cp) {
-  return cp == ' ' || (cp >= '\t' && cp <= '\r') || cp == 0x00A0 || cp == 0x1680 ||
-         (cp >= 0x2000 && cp <= 0x200A) || cp == 0x2028 || cp == 0x2029 || cp == 0x202F || cp == 0x205F ||
-         cp == 0x3000;
+  return cp == ' ' || (cp >= '\t' && cp <= '\r') || cp == 0x00A0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200A) ||
+         cp == 0x2028 || cp == 0x2029 || cp == 0x202F || cp == 0x205F || cp == 0x3000;
 }
 
 bool isPunctuation(uint32_t cp) {
   return isOpeningPunctuation(cp) || isClosingPunctuation(cp) || isRepetition(cp) || isAbbreviation(cp);
 }
 
-bool isThaiWordScalar(uint32_t cp) {
-  return isThai(cp) && !isDigit(cp) && !isRepetition(cp) && !isAbbreviation(cp);
-}
+bool isThaiWordScalar(uint32_t cp) { return isThai(cp) && !isDigit(cp) && !isRepetition(cp) && !isAbbreviation(cp); }
 
 bool startsWith(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
@@ -39,13 +40,15 @@ bool emit(size_t& offset, Segment& result, size_t end, uint16_t codepoints, Brea
 
 bool genericSegment(std::string_view text, size_t& offset, Segment& result, bool endOfRun) {
   const auto remaining = text.substr(offset);
-  const bool url = startsWith(remaining, "http://") || startsWith(remaining, "https://") || startsWith(remaining, "www.");
+  const bool url =
+      startsWith(remaining, "http://") || startsWith(remaining, "https://") || startsWith(remaining, "www.");
   size_t end = offset;
   uint16_t codepoints = 0;
   while (codepoints < LOOKAHEAD_CODEPOINTS && end < text.size()) {
     const auto scalar = detail::decode(text, end, endOfRun);
     if (!scalar.bytes || !scalar.valid || isWhitespace(scalar.value) || scalar.value == 0x200B ||
-        (!url && isThaiWordScalar(scalar.value))) break;
+        (!url && isThaiWordScalar(scalar.value)))
+      break;
     // A Thai suffix is a protected punctuation unit, not part of a number or a
     // Latin token. ASCII decimal/version/time punctuation stays generic.
     if (!url && (isRepetition(scalar.value) || isAbbreviation(scalar.value))) break;
@@ -58,7 +61,7 @@ bool genericSegment(std::string_view text, size_t& offset, Segment& result, bool
 
 bool wordLookahead(std::string_view text, bool endOfRun, size_t& maxBytes) {
   size_t offset = 0;
-  for (size_t count = 0; count < LOOKAHEAD_CODEPOINTS; ++count) {
+  for (size_t count = 0; count < WORD_LOOKAHEAD_CODEPOINTS; ++count) {
     if (offset == text.size()) {
       if (!endOfRun) return false;
       maxBytes = offset;
@@ -108,6 +111,73 @@ bool allowsPrefixBreak(std::string_view text, size_t end) {
   }
   return !prohibitsBreak(left, detail::decode(text, end, true).value);
 }
+
+// Commit only the first edge; subsequent calls retain the surrounding context
+// in the parser's existing pending buffer.
+size_t repairMatch(std::string_view text, size_t greedy, const ThaiDictionary& dictionary) {
+  if (!greedy || greedy > REPAIR_CODEPOINTS * 3) return greedy;
+  size_t plainBytes = 0;
+  while (plainBytes < text.size() && plainBytes < REPAIR_CODEPOINTS * 3) {
+    const auto scalar = detail::decode(text, plainBytes, true);
+    if (!scalar.valid || !isThaiWordScalar(scalar.value)) break;
+    plainBytes += scalar.bytes;
+  }
+  size_t end = 0;
+  uint16_t greedyCost = 0;
+  bool suspicious = false;
+  while (end < plainBytes) {
+    const size_t matched = end ? longestWholeUnitMatch(text.substr(end), text.size() - end, dictionary) : greedy;
+    size_t next = end + matched;
+    if (!matched) {
+      Cluster cluster{};
+      if (!nextCluster(text, next, cluster, true) || !cluster.valid) break;
+    }
+    if (next > plainBytes) break;
+    const size_t count = (next - end) / 3;
+    suspicious = suspicious || !matched || count == 1;
+    greedyCost += 1 + (!matched ? count * UNKNOWN_COST : count == 1 ? SINGLETON_COST : 0);
+    end = next;
+  }
+  if (!suspicious || end <= greedy || !dictionary.valid()) return greedy;
+
+  // Indices are Thai codepoints; non-boundary states stay unreachable.
+  uint8_t nextBoundary[REPAIR_CODEPOINTS + 1]{};
+  uint16_t costs[REPAIR_CODEPOINTS + 1];
+  for (auto& cost : costs) cost = UINT16_MAX;
+  size_t offset = 0;
+  while (offset < end) {
+    const size_t begin = offset;
+    Cluster cluster{};
+    if (!nextCluster(text, offset, cluster, true) || !cluster.valid || offset > end) return greedy;
+    nextBoundary[begin / 3] = static_cast<uint8_t>(offset / 3);
+  }
+  costs[end / 3] = 0;
+  size_t firstMatch = greedy;
+  for (size_t index = end / 3; index-- > 0;) {
+    const size_t next = nextBoundary[index];
+    if (!next) continue;
+    uint16_t best = costs[next] + (next - index) * UNKNOWN_COST + 1;
+    size_t selected = 0;
+    const auto remaining = text.substr(index * 3);
+    size_t limit = end - index * 3;
+    while (limit) {
+      const size_t matched = longestWholeUnitMatch(remaining, limit, dictionary);
+      if (!matched || !dictionary.valid()) break;
+      const size_t target = index + matched / 3;
+      if (costs[target] != UINT16_MAX) {
+        const uint16_t candidate = costs[target] + 1 + (matched == 3 ? SINGLETON_COST : 0);
+        if (candidate < best) {
+          best = candidate;
+          selected = matched;
+        }
+      }
+      limit = matched - 1;
+    }
+    costs[index] = best;
+    if (index == 0) firstMatch = selected;
+  }
+  return dictionary.valid() && costs[0] < greedyCost ? firstMatch : greedy;
+}
 }  // namespace
 
 bool nextSegment(std::string_view text, size_t& offset, Segment& result, bool endOfRun,
@@ -123,8 +193,9 @@ bool nextSegment(std::string_view text, size_t& offset, Segment& result, bool en
                 opening ? BreakKind::Prohibited : BreakKind::Punctuation, false, true);
   }
   if (first.valid && (isWhitespace(first.value) || first.value == 0x200B)) {
-    const BreakKind rank = first.value == 0x00A0 || first.value == 0x202F ? BreakKind::Prohibited :
-                           first.value == 0x200B ? BreakKind::Word : BreakKind::Space;
+    const BreakKind rank = first.value == 0x00A0 || first.value == 0x202F ? BreakKind::Prohibited
+                           : first.value == 0x200B                        ? BreakKind::Word
+                                                                          : BreakKind::Space;
     return emit(offset, result, offset + first.bytes, 1, rank, rank, false, true);
   }
   if (first.valid && !isThaiWordScalar(first.value)) return genericSegment(text, offset, result, endOfRun);
@@ -136,10 +207,11 @@ bool nextSegment(std::string_view text, size_t& offset, Segment& result, bool en
     const auto remaining = text.substr(offset);
     size_t maxBytes = 0;
     if (!wordLookahead(remaining, endOfRun, maxBytes)) return false;
-    const size_t matched = longestWholeUnitMatch(remaining, maxBytes, dictionary);
+    const size_t greedy = longestWholeUnitMatch(remaining, maxBytes, dictionary);
+    const size_t matched = repairMatch(remaining.substr(0, maxBytes), greedy, dictionary);
     if (matched && dictionary.valid()) {
-      return emit(offset, result, offset + matched, countCodepoints(remaining.substr(0, matched)),
-                  BreakKind::Word, BreakKind::Word, true, true);
+      return emit(offset, result, offset + matched, countCodepoints(remaining.substr(0, matched)), BreakKind::Word,
+                  BreakKind::Word, true, true);
     }
   }
   return emit(offset, result, cluster.end, cluster.codepoints, BreakKind::Emergency, BreakKind::Emergency, false,

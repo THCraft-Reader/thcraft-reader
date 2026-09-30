@@ -48,6 +48,26 @@ add_executable(ThaiDictionaryBenchmark
 target_include_directories(ThaiDictionaryBenchmark PRIVATE ${REPO_ROOT}/lib/ThaiText)
 target_link_libraries(ThaiDictionaryBenchmark PRIVATE crosspoint_test_common crosspoint_thai)
 
+# Opt in with an externally saved, pre-change source; never retain an obsolete
+# tokenizer implementation in the repository.
+set(THAI_SEGMENTER_BASELINE_SOURCE "" CACHE FILEPATH "Pre-change greedy ThaiSegmenter.cpp for benchmarking")
+if(THAI_SEGMENTER_BASELINE_SOURCE)
+  if(NOT EXISTS "${THAI_SEGMENTER_BASELINE_SOURCE}")
+    message(FATAL_ERROR "THAI_SEGMENTER_BASELINE_SOURCE does not exist: ${THAI_SEGMENTER_BASELINE_SOURCE}")
+  endif()
+  add_library(thai_segmenter_greedy_baseline OBJECT "${THAI_SEGMENTER_BASELINE_SOURCE}")
+  target_link_libraries(thai_segmenter_greedy_baseline PRIVATE crosspoint_test_common)
+  target_compile_definitions(thai_segmenter_greedy_baseline PRIVATE
+    nextSegment=greedyNextSegment
+    dictionarySplit=greedyDictionarySplit
+  )
+  add_executable(ThaiSegmenterBenchmark
+    ThaiSegmenterBenchmark.cpp
+    $<TARGET_OBJECTS:thai_segmenter_greedy_baseline>
+  )
+  target_link_libraries(ThaiSegmenterBenchmark PRIVATE crosspoint_test_common crosspoint_thai)
+endif()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME ThaiDictionaryGenerator
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_dictionary_generator.py)

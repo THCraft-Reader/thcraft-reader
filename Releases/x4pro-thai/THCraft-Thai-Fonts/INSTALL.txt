@@ -1,0 +1,22 @@
+THCraft Thai paired bitmap fonts
+
+1. Extract the fonts folder from this archive to the SD card root. Merge it
+   with an existing fonts folder; keep all your original fonts and books.
+2. Keep each .cpfont and its same-basename .cpshape together. Install all six
+   sizes (8, 10, 12, 14, 16, 18) for each family you use, including the UI sizes.
+3. Reinsert the SD card and restart the reader. In Settings > Reader > Font
+   Family select THCraft-NotoSansThai; 16 pt is recommended for reading.
+   The selected family also supplies missing Thai glyphs at UI sizes 8/10/12.
+4. Do not delete reading progress or book caches. If this family already exists
+   under the hidden .fonts folder, update that copy too: .fonts takes priority
+   over fonts for duplicate family names.
+
+This pack uses the CPFont bitmap path with optional CPSHAPE Thai positioning.
+It is not a direct TTF/OTF/TTC installation: copying the source TTF alone does
+not install these paired bitmap recipes. Use firmware with Thai CPSHAPE support;
+older firmware can read the CPFont but will not apply the companion positioning.
+The fonts contain a regular face; existing reader style fallback still applies.
+OFL.txt and the named fallback OFL files retain all source copyright notices.
+Coverage includes IPA, arrows, mathematical/decorative symbols, and Arabic
+letters and contextual presentation forms, in addition to Thai and Latin.
+Build reports are desktop provenance, not required files on the SD card.

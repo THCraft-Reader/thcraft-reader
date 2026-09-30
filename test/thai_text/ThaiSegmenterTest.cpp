@@ -32,7 +32,8 @@ class DictionaryFixture {
         offset += scalar.bytes;
       }
       size_t prefix = 0;
-      if (i % thai::DICTIONARY_BLOCK_WORDS == 0) offsets.push_back(static_cast<uint32_t>(data.size()));
+      if (i % thai::DICTIONARY_BLOCK_WORDS == 0)
+        offsets.push_back(static_cast<uint32_t>(data.size()));
       else {
         while (prefix < previous.size() && prefix < symbols.size() && previous[prefix] == symbols[prefix]) ++prefix;
       }
@@ -44,9 +45,7 @@ class DictionaryFixture {
     offsets.push_back(static_cast<uint32_t>(data.size()));
   }
 
-  thai::DictionaryView view() const {
-    return {data.data(), data.size(), offsets.data(), offsets.size(), wordCount, 0};
-  }
+  thai::DictionaryView view() const { return {data.data(), data.size(), offsets.data(), offsets.size(), wordCount, 0}; }
 
   std::vector<uint8_t> data;
   std::vector<uint32_t> offsets;
@@ -176,6 +175,16 @@ TEST(ThaiSegmenterTest, ProductionLongestMatchKeepsCompoundAndOffersItsLexicalSp
   EXPECT_EQ(thai::dictionarySplit(compound, prefix, dictionary), prefix);
   EXPECT_EQ(thai::dictionarySplit(compound, compound.size(), dictionary), prefix);
 }
+
+TEST(ThaiSegmenterTest, ProductionPhraseKeepsMakWhole) {
+  const thai::ThaiDictionary dictionary;
+  const std::string_view text = "ยิ่งได้มากเท่าไหร่";
+  expectKnownWords(text, dictionary, {"ยิ่ง", "ได้", "มาก", "เท่าไหร่"});
+  const auto expected = whole(text, dictionary);
+  for (size_t split = 0; split <= text.size(); ++split) {
+    EXPECT_EQ(streamed(text, {split, text.size()}, dictionary), expected) << split;
+  }
+}
 #endif
 
 TEST(ThaiSegmenterTest, TinyReviewedLexiconProducesFivePrimaryWords) {
@@ -184,22 +193,117 @@ TEST(ThaiSegmenterTest, TinyReviewedLexiconProducesFivePrimaryWords) {
   expectKnownWords("ประเทศไทยมีประชากรจำนวนมาก", dictionary, {"ประเทศไทย", "มี", "ประชากร", "จำนวน", "มาก"});
 }
 
-TEST(ThaiSegmenterTest, WordTerminalWaitsForMaximumWordAndClusterLookahead) {
+TEST(ThaiSegmenterTest, LongestWordCommitsWithinBoundedInputAndSurvivesEveryByteSplit) {
   const std::string longest = repeated("ก", thai::MAX_DICTIONARY_WORD_CODEPOINTS);
   const DictionaryFixture fixture({"ก", longest});
   const thai::ThaiDictionary dictionary(fixture.view());
-  const std::string pending = longest + repeated("ข", thai::MAX_CLUSTER_CODEPOINTS - 1);
+  const std::string text = longest + repeated("ข", 160) + longest;
   size_t offset = 0;
   thai::Segment segment{};
-  EXPECT_FALSE(thai::nextSegment(pending, offset, segment, false, dictionary));
-  EXPECT_EQ(offset, 0u);
-  const std::string decidable = pending + "ข";
-  ASSERT_TRUE(thai::nextSegment(decidable, offset, segment, false, dictionary));
+  // A finite prefix must commit even without end-of-input or a run delimiter.
+  const auto boundedPrefix = std::string_view(text).substr(0, 126 * 3);
+  ASSERT_TRUE(thai::nextSegment(boundedPrefix, offset, segment, false, dictionary));
   EXPECT_EQ(offset, longest.size());
   EXPECT_EQ(segment.codepoints, thai::MAX_DICTIONARY_WORD_CODEPOINTS);
   EXPECT_TRUE(segment.known);
   expectKnownWords(longest, dictionary, {longest});
   expectKnownWords("ก", dictionary, {"ก"});
+  const auto expected = whole(text, dictionary);
+  for (size_t split = 0; split <= text.size(); ++split) {
+    EXPECT_EQ(streamed(text, {split, text.size()}, dictionary), expected) << split;
+  }
+}
+
+TEST(ThaiSegmenterTest, RepairShortensGreedyWordToAvoidUnknownTail) {
+  const DictionaryFixture fixture({"กข", "ก", "ขค"});
+  const thai::ThaiDictionary dictionary(fixture.view());
+  expectKnownWords("กขค", dictionary, {"ก", "ขค"});
+}
+
+TEST(ThaiSegmenterTest, RepairPrefersMultiCodepointWordsOverKnownSingletons) {
+  const DictionaryFixture fixture({"กขค", "ง", "กข", "คง"});
+  const thai::ThaiDictionary dictionary(fixture.view());
+  expectKnownWords("กขคง", dictionary, {"กข", "คง"});
+}
+
+TEST(ThaiSegmenterTest, RepairKeepsCleanCompoundsAndLongestFirstOnExactTies) {
+  const DictionaryFixture compoundFixture({"กขคง", "กข", "คง"});
+  const thai::ThaiDictionary compounds(compoundFixture.view());
+  expectKnownWords("กขคง", compounds, {"กขคง"});
+  const DictionaryFixture tieFixture({"กขค", "งจ", "ฉ", "กข", "คงจ"});
+  const thai::ThaiDictionary ties(tieFixture.view());
+  expectKnownWords("กขคงจฉ", ties, {"กขค", "งจ", "ฉ"});
+}
+
+TEST(ThaiSegmenterTest, RepairRespectsClustersAndNeverInventsUnknownWords) {
+  const DictionaryFixture fixture({"กขคี่", "ง", "กข", "คี่ง"});
+  const thai::ThaiDictionary dictionary(fixture.view());
+  expectKnownWords("กขคี่ง", dictionary, {"กข", "คี่ง"});
+  const std::string_view text = "กขจฉ";
+  const auto spans = whole(text, dictionary);
+  ASSERT_EQ(pieces(text, spans), (std::vector<std::string_view>{"กข", "จ", "ฉ"}));
+  EXPECT_TRUE(spans[0].known);
+  for (size_t i = 1; i < spans.size(); ++i) {
+    EXPECT_FALSE(spans[i].known);
+    EXPECT_EQ(spans[i].before, BreakKind::Emergency);
+    EXPECT_EQ(spans[i].after, BreakKind::Emergency);
+  }
+}
+
+TEST(ThaiSegmenterTest, RepairDoesNotCrossRunBarriers) {
+  const DictionaryFixture fixture({"กข", "ก", "ขค"});
+  const thai::ThaiDictionary dictionary(fixture.view());
+  for (std::string_view barrier : {"!", "ๆ", "ฯลฯ", "1", "๑", "A", "\xFF"}) {
+    SCOPED_TRACE(barrier);
+    const std::string text = std::string("กข") + std::string(barrier) + "ค";
+    const auto spans = whole(text, dictionary);
+    ASSERT_FALSE(spans.empty());
+    EXPECT_EQ(text.substr(spans[0].begin, spans[0].end - spans[0].begin), "กข");
+    EXPECT_TRUE(spans[0].known);
+  }
+}
+
+TEST(ThaiSegmenterTest, RepairWindowEdgesMatchWholeForEveryByteChunk) {
+  const DictionaryFixture fixture({"กขค", "ง", "กข", "คง", "จฉ"});
+  const thai::ThaiDictionary dictionary(fixture.view());
+  for (size_t prefixWords : {0u, 10u, 11u, 12u, 13u, 62u, 63u}) {
+    const std::string text = repeated("จฉ", prefixWords) + repeated("กขคง", 8) + "จฉ";
+    SCOPED_TRACE(prefixWords);
+    const auto expected = whole(text, dictionary);
+    std::vector<std::string_view> expectedWords;
+    expectedWords.reserve(prefixWords + 17);
+    for (size_t i = 0; i < prefixWords; ++i) expectedWords.push_back("จฉ");
+    for (size_t i = 0; i < 8; ++i) {
+      expectedWords.push_back("กข");
+      expectedWords.push_back("คง");
+    }
+    expectedWords.push_back("จฉ");
+    EXPECT_EQ(pieces(text, expected), expectedWords);
+    for (size_t split = 0; split <= text.size(); ++split) {
+      EXPECT_EQ(streamed(text, {split, text.size()}, dictionary), expected) << split;
+    }
+    std::vector<size_t> byteEnds;
+    byteEnds.reserve(text.size());
+    for (size_t end = 1; end <= text.size(); ++end) byteEnds.push_back(end);
+    EXPECT_EQ(streamed(text, byteEnds, dictionary), expected);
+  }
+}
+
+TEST(ThaiSegmenterTest, RepairDoesNotShortenAWordToChaseCoverageBeyondItsWindow) {
+  const std::string prefix = repeated("ก", 23);
+  const std::string compound = prefix + "ก";
+  const DictionaryFixture fixture({prefix, compound, "กข"});
+  const thai::ThaiDictionary dictionary(fixture.view());
+  const std::string text = compound + "ข";
+  const auto spans = whole(text, dictionary);
+  ASSERT_EQ(pieces(text, spans), (std::vector<std::string_view>{compound, "ข"}));
+  EXPECT_TRUE(spans[0].known);
+  EXPECT_FALSE(spans[1].known);
+  EXPECT_EQ(spans[1].before, BreakKind::Emergency);
+  EXPECT_EQ(spans[1].after, BreakKind::Emergency);
+  for (size_t split = 0; split <= text.size(); ++split) {
+    EXPECT_EQ(streamed(text, {split, text.size()}, dictionary), spans) << split;
+  }
 }
 
 TEST(ThaiSegmenterTest, RealRunTransitionsCommitWithoutFillingTheThaiWindow) {
@@ -225,11 +329,12 @@ TEST(ThaiSegmenterTest, DictionaryTerminalCannotEndInsideTheOriginalCluster) {
 
 TEST(ThaiSegmenterTest, EveryThaiByteSplitMatchesWholeIncludingOldBufferBoundary) {
   const std::string longest = repeated("ก", thai::MAX_DICTIONARY_WORD_CODEPOINTS);
-  const DictionaryFixture fixture({"ก", longest, "กี่", "น้ำ", "เก่ง", "เรื่อง", "ประเทศไทย", "มี", "ประชากร", "จำนวน", "มาก"});
+  const DictionaryFixture fixture(
+      {"ก", longest, "กี่", "น้ำ", "เก่ง", "เรื่อง", "ประเทศไทย", "มี", "ประชากร", "จำนวน", "มาก"});
   const thai::ThaiDictionary dictionary(fixture.view());
   const std::vector<std::string> inputs{
       "ประเทศไทยมีประชากรจำนวนมาก", "กี่น้ำเก่งเรื่อง", longest + "กี่น้ำ" + longest,
-      "“ประเทศไทยๆ”กี่ฯลฯน้ำ...ขคง", "่กี่นํ้าน้ําขคง", "กี่\xC2\xA0น้ำ\xE2\x80\xAFกี่\xE2\x80\x8Bน้ำ"};
+      "“ประเทศไทยๆ”กี่ฯลฯน้ำ...ขคง",  "่กี่นํ้าน้ําขคง",   "กี่\xC2\xA0น้ำ\xE2\x80\xAFกี่\xE2\x80\x8Bน้ำ"};
   for (const auto& text : inputs) {
     SCOPED_TRACE(text);
     const auto expected = whole(text, dictionary);
@@ -359,7 +464,7 @@ TEST(ThaiSegmenterTest, GenericLatinNumbersAndFullUrlsNeverUseThaiDictionaryCuts
   const DictionaryFixture fixture({"ภาษา", "ไทย"});
   const thai::ThaiDictionary dictionary(fixture.view());
   for (std::string_view text : {"EpubCraft", "EPUB", "4.2.0", "02:40", "๑๒๓", "https://example.org/ภาษาไทย?q=12",
-                               "http://example.org/ภาษาไทย", "www.example.org/ภาษาไทย"}) {
+                                "http://example.org/ภาษาไทย", "www.example.org/ภาษาไทย"}) {
     SCOPED_TRACE(text);
     const auto spans = whole(text, dictionary);
     ASSERT_EQ(pieces(text, spans), (std::vector<std::string_view>{text}));

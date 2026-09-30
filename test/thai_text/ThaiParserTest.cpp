@@ -26,8 +26,8 @@ struct ParsedToken {
 
 void PrintTo(const ParsedToken& token, std::ostream* out) {
   *out << token.text << " style=" << unsigned(token.style) << " offset=" << token.offset
-       << " link=" << unsigned(token.link) << " focus=" << unsigned(token.focus)
-       << " continues=" << token.continues << " noSpace=" << token.noSpace << " ruby=" << token.ruby;
+       << " link=" << unsigned(token.link) << " focus=" << unsigned(token.focus) << " continues=" << token.continues
+       << " noSpace=" << token.noSpace << " ruby=" << token.ruby;
 }
 
 // Real Expat callbacks and parser state, without a storage fixture. The parser
@@ -41,14 +41,16 @@ class ParserSession {
   ChapterHtmlSlimParser parser;
 
   explicit ParserSession(uint16_t width = 480, uint16_t height = 800, bool focus = false)
-      : parser(nullptr, filename, renderer, 0, 1.0f, false, static_cast<uint8_t>(CssTextAlign::Left),
-               width, height, false, focus,
-               [this](std::unique_ptr<Page> page, auto, auto, uint32_t offset) {
-                 if (page) {
-                   page->visibleTextOffset = offset;
-                   pages.push_back(std::move(page));
-                 }
-               }, true, "", "", 0, {}, nullptr, &css) {
+      : parser(
+            nullptr, filename, renderer, 0, 1.0f, false, static_cast<uint8_t>(CssTextAlign::Left), width, height, false,
+            focus,
+            [this](std::unique_ptr<Page> page, auto, auto, uint32_t offset) {
+              if (page) {
+                page->visibleTextOffset = offset;
+                pages.push_back(std::move(page));
+              }
+            },
+            true, "", "", 0, {}, nullptr, &css) {
     BlockStyle root;
     root.alignment = CssTextAlign::Left;
     root.textAlignDefined = true;
@@ -73,7 +75,7 @@ class ParserSession {
   void callbacks(std::string_view text, size_t chunk) {
     for (size_t i = 0; i < text.size(); i += chunk) {
       ChapterHtmlSlimParser::characterData(&parser, text.data() + i,
-                                          static_cast<int>(std::min(chunk, text.size() - i)));
+                                           static_cast<int>(std::min(chunk, text.size() - i)));
     }
   }
 
@@ -152,8 +154,7 @@ TEST(ThaiParserTest, ProductionDictionarySurvivesEveryCallbackAndRawWindowBounda
 
 TEST(ThaiParserTest, ExpatByteChunksPreserveStylesLinksAndOffsets) {
   // A markup delimiter makes Expat deliver the final text token before inspection.
-  const std::string markup =
-      "<p><b>ก</b>ี่ประเทศ<b>ไทย</b>มี<a href=\"#note\">ประชากร</a>จำนวนมาก<!--complete-text-->";
+  const std::string markup = "<p><b>ก</b>ี่ประเทศ<b>ไทย</b>มี<a href=\"#note\">ประชากร</a>จำนวนมาก<!--complete-text-->";
   ParserSession whole;
   whole.feed(markup);
   const auto expected = whole.tokens();
@@ -162,6 +163,46 @@ TEST(ThaiParserTest, ExpatByteChunksPreserveStylesLinksAndOffsets) {
     ParserSession split;
     split.feed(markup, chunk);
     EXPECT_EQ(split.tokens(), expected);
+  }
+}
+
+TEST(ThaiParserTest, ProductionMakRemainsOneWordAcrossInlineStyle) {
+  ParserSession plain;
+  plain.feed("<p>ยิ่งได้มากเท่าไหร่<!--complete-text-->");
+  EXPECT_EQ(textOnly(plain.tokens()), (std::vector<std::string>{"ยิ่ง", "ได้", "มาก", "เท่าไหร่"}));
+
+  const std::string markup = "<p>ยิ่งได้<b>มา</b>กเท่าไหร่<!--complete-text-->";
+  ParserSession whole;
+  whole.feed(markup);
+  const auto expected = whole.tokens();
+  ASSERT_EQ(textOnly(expected), (std::vector<std::string>{"ยิ่ง", "ได้", "มา", "ก", "เท่าไหร่"}));
+  EXPECT_EQ(expected[2].style, EpdFontFamily::BOLD);
+  EXPECT_TRUE(expected[3].continues);
+  EXPECT_FALSE(expected[3].noSpace);
+  EXPECT_EQ(expected[3].offset, 9u);
+  for (size_t chunk = 1; chunk <= markup.size(); ++chunk) {
+    SCOPED_TRACE(chunk);
+    ParserSession split;
+    split.feed(markup, chunk);
+    EXPECT_EQ(split.tokens(), expected);
+  }
+}
+
+TEST(ThaiParserTest, RepairsGreedySingletonTailAcrossInlineStyle) {
+  // Front-compressed entries: กข, กขค, คง, ง.
+  const std::array<uint8_t, 14> data{0, 2, 1, 2, 2, 1, 4, 0, 2, 4, 7, 0, 1, 7};
+  const std::array<uint32_t, 2> offsets{0, 14};
+  const thai::DictionaryView dictionary{data.data(), data.size(), offsets.data(), offsets.size(), 4, 0};
+  const std::string markup = "<p>กข<b>คง</b><!--complete-text-->";
+  for (size_t chunk = 1; chunk <= markup.size(); ++chunk) {
+    SCOPED_TRACE(chunk);
+    ParserSession session;
+    session.parser.thaiDictionaryOverride = &dictionary;
+    session.feed(markup, chunk);
+    const auto tokens = session.tokens();
+    ASSERT_EQ(textOnly(tokens), (std::vector<std::string>{"กข", "คง"}));
+    EXPECT_EQ(tokens[1].style, EpdFontFamily::BOLD);
+    EXPECT_EQ(tokens[1].offset, 2u);
   }
 }
 
@@ -310,8 +351,10 @@ TEST(ThaiParserTest, RubyBaseFlushesBeforeAnnotationAndKeepsGroupProtection) {
 
 TEST(ThaiParserTest, BlockTableBreakAndImageTransitionsDoNotLeakPendingText) {
   ParserSession session(480, 800);
-  session.feed("<p>ภาษา<br/>ไทย</p><table><tr><td>ประเทศ</td><td>ไทย</td></tr></table>"
-               "<p>ก่อน<img alt=\"x\"/>หลัง</p>", 1);
+  session.feed(
+      "<p>ภาษา<br/>ไทย</p><table><tr><td>ประเทศ</td><td>ไทย</td></tr></table>"
+      "<p>ก่อน<img alt=\"x\"/>หลัง</p>",
+      1);
   session.finish();
   const auto lines = session.lines();
   ASSERT_GE(lines.size(), 4u);
@@ -454,7 +497,8 @@ TEST(ThaiParserTest, ClosingPunctuationAndThaiSuffixUnitsRemainAttached) {
   const auto tokens = session.tokens();
   EXPECT_EQ(joined(tokens), "ประเทศไทย...แล้วประเทศไทยๆประเทศไทยฯลฯ");
   for (const char* unit : {"...", "ๆ", "ฯลฯ"}) {
-    const auto found = std::find_if(tokens.begin(), tokens.end(), [&](const auto& token) { return token.text == unit; });
+    const auto found =
+        std::find_if(tokens.begin(), tokens.end(), [&](const auto& token) { return token.text == unit; });
     ASSERT_NE(found, tokens.end()) << unit;
     EXPECT_TRUE(found->continues);
     EXPECT_FALSE(found->noSpace);

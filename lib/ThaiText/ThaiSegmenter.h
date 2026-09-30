@@ -19,7 +19,9 @@ struct Segment {
 };
 
 // Byte offsets into text; false leaves offset and result unchanged. Thai words
-// wait for 70 complete scalars plus cluster lookahead, or an actual run boundary.
+// wait for up to 126 scalars (24 repair + 70 dictionary + 32 cluster), or an
+// actual run boundary. Greedy spans with unknown/single-scalar segments use
+// bounded, allocation-free DP; clean spans keep longest matching.
 // Unknown text emits one complete cluster with Emergency ranks, never an
 // artificial Word boundary at the end of a window. A caller carries the previous
 // segment's rank (so a known word ends at Word), with Prohibited on either side
