@@ -262,6 +262,14 @@ The Settings screen allows you to configure the device's behavior. There are a f
 
 #### 3.6.2 Reader
 
+- **Show Clock in Reader**: Off by default. Enable to show the time beside the battery percentage. This toggle is also available in **Customise Status Bar**, immediately after **Battery**. If the battery is hidden, the clock occupies the left side of the status bar.
+
+  - Shows hours and minutes only, using the format and time zone selected in **Settings → System → Clock**.
+  - Updates on page turns and other normal reading-screen redraws. It does not wake the display or schedule periodic refreshes while a page is idle.
+  - On X3/X4 and other devices without a hardware RTC, uses the system clock synchronized over Wi-Fi. Set the time zone and use **Sync Clock Now** before first use. No clock is drawn until time is available.
+  - Devices without a battery-backed RTC cannot track time while powered off. A restored time may lag; synchronize again after power-off for accurate time.
+  - XTC books still require their status bar to be enabled in **Customise Status Bar → XTC Status Bar**.
+
 - **Reader Font Family**: Choose the font used for reading:
   
   - "Noto Serif" (default) - Google's serif font

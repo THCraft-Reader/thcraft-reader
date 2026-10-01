@@ -1,7 +1,6 @@
 #include "StatusBarSettingsActivity.h"
 
 #include <GfxRenderer.h>
-#include <HalClock.h>
 #include <I18n.h>
 
 #include <cstring>
@@ -15,9 +14,7 @@
 namespace fui = freeink::ui;
 
 namespace {
-// Menu items in their natural order. The clock position entry is appended only
-// when the RTC probe found hardware; time, zone, and format live in Settings >
-// System > Clock.
+// Time, zone, and format live in Settings > System > Clock.
 enum MenuItem {
   ITEM_CHAPTER_PAGE_COUNT = 0,
   ITEM_BOOK_PROGRESS_PERCENTAGE,
@@ -25,13 +22,12 @@ enum MenuItem {
   ITEM_PROGRESS_BAR_THICKNESS,
   ITEM_TITLE,
   ITEM_BATTERY,
+  ITEM_CLOCK,
   ITEM_XTC_STATUS_BAR,
-  ITEM_CLOCK,  // RTC boards only
   ITEM_COUNT
 };
 
-constexpr int BASE_MENU_ITEMS = ITEM_CLOCK;  // Items shown on every device
-constexpr int FULL_MENU_ITEMS = ITEM_COUNT;  // Items shown when RTC is available
+constexpr int FULL_MENU_ITEMS = ITEM_COUNT;
 static_assert(FULL_MENU_ITEMS == StatusBarSettingsActivity::MAX_STATUS_BAR_ITEMS,
               "keep StatusBarSettingsActivity::MAX_STATUS_BAR_ITEMS in sync with ITEM_COUNT");
 
@@ -42,8 +38,8 @@ const StrId menuNames[FULL_MENU_ITEMS] = {
     StrId::STR_PROGRESS_BAR_THICKNESS,
     StrId::STR_TITLE,
     StrId::STR_BATTERY,
+    StrId::STR_CLOCK_IN_READER,
     StrId::STR_XTC_STATUS_BAR,
-    StrId::STR_CLOCK,
 };
 
 constexpr int PROGRESS_BAR_ITEMS = 3;
@@ -59,9 +55,6 @@ const StrId titleNames[TITLE_ITEMS] = {StrId::STR_BOOK, StrId::STR_CHAPTER, StrI
 constexpr int XTC_STATUS_BAR_ITEMS = 3;
 const StrId xtcStatusBarNames[XTC_STATUS_BAR_ITEMS] = {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP};
 
-constexpr int STATUS_BAR_CLOCK_ITEMS = CrossPointSettings::STATUS_BAR_CLOCK_MODE_COUNT;
-const StrId statusBarClockNames[STATUS_BAR_CLOCK_ITEMS] = {StrId::STR_HIDE, StrId::STR_DIR_RIGHT, StrId::STR_DIR_LEFT};
-
 const int verticalPreviewTextPadding = 40;
 }  // namespace
 
@@ -70,8 +63,6 @@ StatusBarSettingsActivity::StatusBarSettingsActivity(GfxRenderer& renderer, Mapp
 
 void StatusBarSettingsActivity::onEnter() {
   UiListActivity::onEnter();
-
-  visibleItemCount = halClock.isAvailable() ? FULL_MENU_ITEMS : BASE_MENU_ITEMS;
 
   // Clamp statusBarProgressBar and statusBarTitle in case of corrupt/migrated data
   if (SETTINGS.statusBarProgressBar >= PROGRESS_BAR_ITEMS) {
@@ -88,10 +79,6 @@ void StatusBarSettingsActivity::onEnter() {
 
   if (SETTINGS.xtcStatusBarMode >= XTC_STATUS_BAR_ITEMS) {
     SETTINGS.xtcStatusBarMode = CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_HIDE;
-  }
-
-  if (SETTINGS.statusBarClock >= STATUS_BAR_CLOCK_ITEMS) {
-    SETTINGS.statusBarClock = CrossPointSettings::STATUS_BAR_CLOCK_MODE::STATUS_BAR_CLOCK_HIDE;
   }
 
   // Labels never change (unlike the values, which track live SETTINGS
@@ -155,7 +142,7 @@ void StatusBarSettingsActivity::handleSelection() {
                        });
       return;
     case ITEM_CLOCK:
-      SETTINGS.statusBarClock = (SETTINGS.statusBarClock + 1) % STATUS_BAR_CLOCK_ITEMS;
+      SETTINGS.statusBarClock = !SETTINGS.statusBarClock;
       break;
     default:
       return;
@@ -173,8 +160,6 @@ std::string StatusBarSettingsActivity::rowValueText(const int index) {
       return I18N.get(titleNames[SETTINGS.statusBarTitle]);
     case ITEM_XTC_STATUS_BAR:
       return I18N.get(xtcStatusBarNames[SETTINGS.xtcStatusBarMode]);
-    case ITEM_CLOCK:
-      return I18N.get(statusBarClockNames[SETTINGS.statusBarClock]);
     default:
       return "";
   }
@@ -204,6 +189,7 @@ void StatusBarSettingsActivity::buildScreen(UiScreen& screen) {
   GUI.setCheckboxRow(rowItems_[ITEM_CHAPTER_PAGE_COUNT], SETTINGS.statusBarChapterPageCount);
   GUI.setCheckboxRow(rowItems_[ITEM_BOOK_PROGRESS_PERCENTAGE], SETTINGS.statusBarBookProgressPercentage);
   GUI.setCheckboxRow(rowItems_[ITEM_BATTERY], SETTINGS.statusBarBattery);
+  GUI.setCheckboxRow(rowItems_[ITEM_CLOCK], SETTINGS.statusBarClock);
 
   fui::ListProps props;
   props.items = rowItems_;

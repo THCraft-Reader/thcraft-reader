@@ -97,11 +97,9 @@ void ClockSettingsActivity::buildScreen(UiScreen& screen) {
   rowItems_[ITEM_FORMAT].value = SETTINGS.clockFormat == 1 ? tr(STR_CLOCK_FORMAT_12H) : tr(STR_CLOCK_FORMAT_24H);
   GUI.setCheckboxRow(rowItems_[ITEM_SHOW_ON_HOME], SETTINGS.clockShowInHeader);
   // The sync row's value is the current time itself: it confirms the sync,
-  // previews format/zone changes, and reads "Not Set" until the first sync.
+  // previews format/zone changes, and reads "Not Set" until time is available.
   rowItems_[ITEM_SYNC].value =
-      SETTINGS.clockHasBeenSynced && halClock.formatTime(syncTime_, sizeof(syncTime_), SETTINGS.clockFormat == 1)
-          ? syncTime_
-          : tr(STR_NOT_SET);
+      halClock.formatTime(syncTime_, sizeof(syncTime_), SETTINGS.clockFormat == 1) ? syncTime_ : tr(STR_NOT_SET);
 
   fui::ListProps props;
   props.items = rowItems_;

@@ -181,6 +181,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     }
   }
 
+  // The former Left clock position (2) is now the enabled toggle (1).
+  if (doc["statusBarClock"].is<uint8_t>() && doc["statusBarClock"].as<uint8_t>() == 2) {
+    statusBarClock = 1;
+    needsResave = true;
+  }
+
   const auto indentSpaces = doc["paragraphIndentSpaces"];
   const bool hasSavedWidth = indentSpaces.is<int>();
   const int savedWidth = hasSavedWidth ? indentSpaces.as<int>() : 0;
@@ -284,7 +290,7 @@ CrossPointSettings::StatusBarSpec CrossPointSettings::statusBarSpec() const {
   spec.titleMode = statusBarTitle;
   spec.showBattery = statusBarBattery != 0;
   spec.showBatteryPercent = hideBatteryPercentage == HIDE_NEVER;
-  spec.clockMode = statusBarClock;
+  spec.showClock = statusBarClock != 0;
   spec.clock12h = clockFormat == 1;
   spec.progressBarMode = statusBarProgressBar;
   spec.progressBarHeightPx =

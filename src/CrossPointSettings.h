@@ -54,13 +54,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     XTC_STATUS_BAR_MODE_COUNT
   };
 
-  enum STATUS_BAR_CLOCK_MODE {
-    STATUS_BAR_CLOCK_HIDE = 0,
-    STATUS_BAR_CLOCK_RIGHT = 1,
-    STATUS_BAR_CLOCK_LEFT = 2,
-    STATUS_BAR_CLOCK_MODE_COUNT
-  };
-
   // Auto follows the timezone's baked DST rule; On/Off override it — the
   // escape hatch for a zone whose law changed before the firmware caught up.
   enum CLOCK_DST_MODE { CLOCK_DST_AUTO = 0, CLOCK_DST_ON = 1, CLOCK_DST_OFF = 2, CLOCK_DST_MODE_COUNT };
@@ -235,8 +228,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t statusBarTitle = CHAPTER_TITLE;
   uint8_t statusBarBattery = 1;
   uint8_t xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
-  // Clock display in status bar (any board whose RTC probe succeeds)
-  uint8_t statusBarClock = STATUS_BAR_CLOCK_HIDE;
+  // Show the reader clock beside the battery.
+  uint8_t statusBarClock = 0;
   // LEGACY, kept for migration only: quarter-hour UTC offset biased by 48
   // (48 = UTC+0). Superseded by clockTimezone; read once by
   // timezones::activeIndex() when clockTimezone is unset.
@@ -413,7 +406,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     uint8_t titleMode = HIDE_TITLE;  // STATUS_BAR_TITLE
     bool showBattery = false;
     bool showBatteryPercent = false;
-    uint8_t clockMode = STATUS_BAR_CLOCK_HIDE;  // STATUS_BAR_CLOCK_MODE
+    bool showClock = false;
     bool clock12h = false;
     uint8_t progressBarMode = HIDE_PROGRESS;  // STATUS_BAR_PROGRESS_BAR
     uint8_t progressBarHeightPx = 0;          // (thickness+1)*2; 0 when the bar is hidden
@@ -421,12 +414,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 
     bool showsProgressBar() const { return progressBarMode != HIDE_PROGRESS; }
     bool showsTitle() const { return titleMode != HIDE_TITLE; }
-    bool showsClock() const { return clockMode != STATUS_BAR_CLOCK_HIDE; }
-    // Visibility of the text lane. Clock hardware presence is the caller's
-    // concern: pass halClock.isAvailable(), or true for layout reservation.
+    // Pass clockAvailable=true when reserving layout before time is synced.
     bool textLaneVisible(bool clockAvailable) const {
       return showChapterPageCount || showBookProgressPercent || showsTitle() || showBattery ||
-             (showsClock() && clockAvailable);
+             (showClock && clockAvailable);
     }
   };
   StatusBarSpec statusBarSpec() const;
