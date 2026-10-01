@@ -54,8 +54,10 @@ ThaiDictionary::ThaiDictionary() {
 #if THAI_DICTIONARY
   static_assert(generated::MAX_WORD_CODEPOINTS <= MAX_DICTIONARY_WORD_CODEPOINTS);
   static_assert(generated::BLOCK_WORDS == DICTIONARY_BLOCK_WORDS);
-  view_ = {generated::DATA, generated::DATA_BYTES, generated::OFFSETS, generated::OFFSET_COUNT,
-           generated::WORD_COUNT, generated::DATA_ID};
+  static_assert(sizeof(generated::FIRST_SYMBOL_BLOCKS) / sizeof(uint16_t) == 93);
+  static_assert(generated::OFFSET_COUNT - 1 <= std::numeric_limits<uint16_t>::max());
+  view_ = {generated::DATA,         generated::DATA_BYTES, generated::OFFSETS,
+           generated::OFFSET_COUNT, generated::WORD_COUNT, generated::DATA_ID};
 #endif
 }
 
@@ -90,8 +92,8 @@ bool ThaiDictionary::decodeEntry(size_t& position, size_t end, bool leader, uint
   }
   const size_t prefix = view_.data[position++];
   const size_t suffix = view_.data[position++];
-  if ((leader && prefix != 0) || prefix > length || suffix == 0 ||
-      prefix + suffix > MAX_DICTIONARY_WORD_CODEPOINTS || suffix > end - position) {
+  if ((leader && prefix != 0) || prefix > length || suffix == 0 || prefix + suffix > MAX_DICTIONARY_WORD_CODEPOINTS ||
+      suffix > end - position) {
     return false;
   }
   for (size_t index = 0; index < suffix; ++index) {
@@ -113,8 +115,8 @@ bool ThaiDictionary::validate() const {
   uint8_t word[MAX_DICTIONARY_WORD_CODEPOINTS + 1]{};
   uint8_t previous[MAX_DICTIONARY_WORD_CODEPOINTS + 1]{};
   size_t previousLength = 0;
-  for (size_t block = 0; block < view_.wordCount / DICTIONARY_BLOCK_WORDS +
-                                      (view_.wordCount % DICTIONARY_BLOCK_WORDS != 0); ++block) {
+  for (size_t block = 0;
+       block < view_.wordCount / DICTIONARY_BLOCK_WORDS + (view_.wordCount % DICTIONARY_BLOCK_WORDS != 0); ++block) {
     size_t position, end;
     if (!blockBounds(block, position, end)) {
       return false;
@@ -145,6 +147,15 @@ bool ThaiDictionary::predecessor(std::string_view text, size_t queryLength, size
   uint8_t word[MAX_DICTIONARY_WORD_CODEPOINTS + 1];
   size_t low = 0;
   size_t high = view_.offsetCount - 1;
+#if THAI_DICTIONARY
+  if (view_.data == generated::DATA && view_.offsets == generated::OFFSETS) {
+    const auto symbol = querySymbol(text, 0);
+    const size_t first = generated::FIRST_SYMBOL_BLOCKS[symbol];
+    // The preceding block can contain words beginning with this symbol.
+    low = first ? first - 1 : 0;
+    high = generated::FIRST_SYMBOL_BLOCKS[symbol + 1];
+  }
+#endif
   while (low < high) {
     const size_t middle = low + (high - low) / 2;
     size_t position, end, wordLength = 0, shared;
@@ -196,8 +207,8 @@ size_t ThaiDictionary::longestMatch(std::string_view text, size_t maxBytes) cons
     const auto first = static_cast<uint8_t>(text[offset]);
     const auto middle = static_cast<uint8_t>(text[offset + 1]);
     const auto last = static_cast<uint8_t>(text[offset + 2]);
-    if (first != 0xE0 || !((middle == 0xB8 && last >= 0x81 && last <= 0xBF) ||
-                           (middle == 0xB9 && last >= 0x80 && last <= 0x9B))) {
+    if (first != 0xE0 ||
+        !((middle == 0xB8 && last >= 0x81 && last <= 0xBF) || (middle == 0xB9 && last >= 0x80 && last <= 0x9B))) {
       break;
     }
     ++queryLength;

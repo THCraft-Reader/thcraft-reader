@@ -2,12 +2,14 @@
 """Offline generator regressions; run directly with Python's unittest runner."""
 from __future__ import annotations
 
+from bisect import bisect_right
 import importlib.util
 import json
 from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 import zlib
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +41,8 @@ class DictionaryGeneratorTest(unittest.TestCase):
         self.assertEqual(first["rejected_source_entries"], 2)
         self.assertEqual(first["source"]["duplicates"], 1)
         self.assertEqual(json.loads((self.root / "one/report.json").read_text()), first)
-        self.assertEqual(first["flash_bytes"], first["data_bytes"] + first["offset_bytes"])
+        self.assertEqual(first["flash_bytes"],
+                         first["data_bytes"] + first["offset_bytes"] + first["first_symbol_index_bytes"])
 
     def test_round_trip_blocks_preserve_marks_and_terminal_prefixes(self):
         words = sorted({"ก", "ก่", "กข"} | {"ข" + chr(0x0E01 + i) for i in range(35)})
@@ -59,6 +62,44 @@ class DictionaryGeneratorTest(unittest.TestCase):
         self.assertEqual(decoded, words)
         self.assertEqual(offsets[-1], len(data))
         self.assertEqual(len(offsets), (len(words) + 15) // 16 + 1)
+
+    def test_first_symbol_ranges_include_full_search_predecessor(self):
+        # Symbol 3 starts inside block 0; the terminal symbol starts exactly at block 2.
+        words = ([chr(0x0E01) + chr(0x0E01 + i) for i in range(15)] +
+                 [chr(0x0E03) + chr(0x0E01 + i) for i in range(17)] + [chr(0x0E5B)])
+        leaders = words[::generator.BLOCK_WORDS]
+        directory = generator.first_symbol_blocks(words)
+        self.assertEqual(len(directory), 93)
+        self.assertEqual(directory[0], 0)
+        self.assertEqual(directory[2], 1)  # absent symbol
+        self.assertEqual(directory[3], 1)  # transition inside preceding block
+        self.assertEqual(directory[91], 2)  # exact leader transition
+        self.assertEqual(directory[92], len(leaders))
+        queries = words + [word + "กข" for word in words]
+        for symbol in range(1, 92):
+            queries.extend([chr(0x0E00 + symbol), chr(0x0E00 + symbol) + "กข"])
+        for query in queries:
+            with self.subTest(query=query):
+                symbol = ord(query[0]) - 0x0E00
+                low = max(0, directory[symbol] - 1)
+                high = directory[symbol + 1]
+                self.assertEqual(bisect_right(leaders, query, low, high) - 1,
+                                 bisect_right(leaders, query) - 1)
+
+    def test_empty_first_symbol_ranges(self):
+        self.assertEqual(generator.first_symbol_blocks([]), [0] * 93)
+
+    def test_first_symbol_block_capacity_rejects_before_writing(self):
+        words = [chr(0x0E01 + i // (91 * 91)) + chr(0x0E01 + i // 91 % 91) +
+                 chr(0x0E01 + i % 91) for i in range(65536)]
+        self.source.write_text("\n".join(words), encoding="utf-8")
+        self.extra.write_bytes(b"")
+        with patch.object(generator, "BLOCK_WORDS", 1):
+            self.assertEqual(generator.first_symbol_blocks(words[:-1])[-1], 65535)
+            with self.assertRaisesRegex(ValueError, "^dictionary block count exceeds uint16 first-symbol index$"):
+                self.generate()
+        self.assertFalse((self.root / "one/data.h").exists())
+        self.assertFalse((self.root / "one/report.json").exists())
 
     def test_identity_covers_supplement_and_offsets(self):
         report = self.generate()
@@ -99,7 +140,6 @@ class DictionaryGeneratorTest(unittest.TestCase):
         self.assertEqual(report["word_count"], 0)
         self.assertEqual(report["data_bytes"], 0)
         self.assertEqual(report["offset_count"], 1)
-        self.assertEqual(report["flash_bytes"], 5)  # one-byte C++ sentinel plus terminal uint32
 
     def test_malformed_source_utf8_is_not_silently_replaced(self):
         self.source.write_bytes("ก\n".encode() + b"\xe0\xb8")

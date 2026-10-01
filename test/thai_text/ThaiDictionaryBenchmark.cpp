@@ -25,8 +25,9 @@ bool symbolsFor(std::string_view text, std::string& symbols) {
     const auto first = static_cast<uint8_t>(text[i]);
     const auto middle = static_cast<uint8_t>(text[i + 1]);
     const auto last = static_cast<uint8_t>(text[i + 2]);
-    if (first != 0xE0 || !((middle == 0xB8 && last >= 0x81 && last <= 0xBF) ||
-                         (middle == 0xB9 && last >= 0x80 && last <= 0x9B))) return false;
+    if (first != 0xE0 ||
+        !((middle == 0xB8 && last >= 0x81 && last <= 0xBF) || (middle == 0xB9 && last >= 0x80 && last <= 0x9B)))
+      return false;
     symbols.push_back(static_cast<char>(((middle & 63) << 6 | (last & 63)) - 0xE00));
   }
   return true;
@@ -83,8 +84,8 @@ struct Indexed {
     const size_t count = std::min(text.size() / 3, thai::MAX_DICTIONARY_WORD_CODEPOINTS);
     if (compact) {
       for (size_t i = 0; i < count; ++i) {
-        scratch[i] = static_cast<char>(((static_cast<uint8_t>(text[i * 3 + 1]) & 63) << 6 |
-                                       (static_cast<uint8_t>(text[i * 3 + 2]) & 63)) - 0xE00);
+        scratch[i] = static_cast<char>(
+            ((static_cast<uint8_t>(text[i * 3 + 1]) & 63) << 6 | (static_cast<uint8_t>(text[i * 3 + 2]) & 63)) - 0xE00);
       }
     }
     std::string_view query = compact ? std::string_view(scratch.data(), count) : text.substr(0, count * 3);
@@ -92,8 +93,10 @@ struct Indexed {
       size_t low = 0, high = offsets.size() - 1;
       while (low < high) {
         const size_t middle = low + (high - low) / 2;
-        if (at(middle) <= query) low = middle + 1;
-        else high = middle;
+        if (at(middle) <= query)
+          low = middle + 1;
+        else
+          high = middle;
       }
       if (low == 0) return 0;
       const auto word = at(low - 1);
@@ -121,8 +124,10 @@ struct Compressed {
     for (size_t i = 0; i < words.size(); ++i) {
       symbolsFor(words[i], symbols);
       size_t prefix = 0;
-      if (i % thai::DICTIONARY_BLOCK_WORDS == 0) offsets.push_back(static_cast<uint32_t>(data.size()));
-      else while (prefix < std::min(previous.size(), symbols.size()) && previous[prefix] == symbols[prefix]) ++prefix;
+      if (i % thai::DICTIONARY_BLOCK_WORDS == 0)
+        offsets.push_back(static_cast<uint32_t>(data.size()));
+      else
+        while (prefix < std::min(previous.size(), symbols.size()) && previous[prefix] == symbols[prefix]) ++prefix;
       data.push_back(static_cast<uint8_t>(prefix));
       data.push_back(static_cast<uint8_t>(symbols.size() - prefix));
       data.insert(data.end(), symbols.begin() + prefix, symbols.end());
@@ -135,8 +140,8 @@ struct Compressed {
 };
 
 template <typename Dictionary>
-void measure(const char* name, const Dictionary& dictionary, const std::vector<std::string>& queries,
-             size_t iterations, size_t bytes, size_t scratch, double prepareUs, double initUs, bool comma) {
+void measure(const char* name, const Dictionary& dictionary, const std::vector<std::string>& queries, size_t iterations,
+             size_t bytes, size_t scratch, double prepareUs, double initUs, bool comma) {
   uint64_t matchedBytes = 0;
   const auto start = Clock::now();
   for (size_t repeat = 0; repeat < iterations; ++repeat) {
@@ -160,12 +165,18 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
       const std::string_view arg = argv[i];
       if (i + 1 >= argc) throw std::runtime_error("Expected --input PATH --extra PATH --iterations N");
-      if (arg == "--input") input = argv[++i];
-      else if (arg == "--extra") extra = argv[++i];
-      else if (arg == "--iterations") iterations = std::stoul(argv[++i]);
-      else throw std::runtime_error("Unknown option");
+      if (arg == "--input")
+        input = argv[++i];
+      else if (arg == "--extra")
+        extra = argv[++i];
+      else if (arg == "--iterations")
+        iterations = std::stoul(argv[++i]);
+      else
+        throw std::runtime_error("Unknown option");
     }
     if (iterations == 0) throw std::runtime_error("iterations must be positive");
+    const bool compareProduction =
+        input == "lib/ThaiText/dictionary/words_th.txt" && extra == "lib/ThaiText/dictionary/extra_words.txt";
     std::vector<std::string> words;
     loadWords(input, words, false);
     loadWords(extra, words, true);
@@ -191,6 +202,7 @@ int main(int argc, char** argv) {
     thai::ThaiDictionary production;
     const double productionInit = elapsedUs(start);
     std::vector<std::string> queries = words;
+    queries.reserve(words.size() * 2);
     for (const auto& word : words) queries.push_back(word + "กข");
     for (const auto& query : queries) {
       const size_t expected = compressed.longestMatch(query);
@@ -198,14 +210,40 @@ int main(int argc, char** argv) {
         throw std::runtime_error("Representations disagree on query: " + query);
       }
     }
+    if (compareProduction) {
+      const auto verify = [&](std::string_view query) {
+        if (production.longestMatch(query) != compressed.longestMatch(query)) {
+          throw std::runtime_error("Production lookup disagrees on query: " + std::string(query));
+        }
+        for (const size_t bound : {size_t{0}, size_t{2}, query.size() - 1, query.size(), query.size() + 3}) {
+          if (production.longestMatch(query, bound) != compressed.longestMatch(query, bound)) {
+            throw std::runtime_error("Production bounded lookup disagrees on query: " + std::string(query));
+          }
+        }
+      };
+      for (const auto& query : queries) verify(query);
+      for (const auto& word : words) verify(word + "่");
+      for (uint32_t cp = 0x0E01; cp <= 0x0E5B; ++cp) {
+        const char encoded[] = {static_cast<char>(0xE0), static_cast<char>(0x80 | (cp >> 6)),
+                                static_cast<char>(0x80 | (cp & 0x3F))};
+        const std::string symbol(encoded, sizeof(encoded));
+        verify(symbol);
+        verify(symbol + "กข");
+      }
+      if (!production.valid() || !compressed.valid()) throw std::runtime_error("Lookup invalidated a dictionary");
+    }
     std::cout << "{\n  \"host_only\":true,\n  \"word_count\":" << words.size()
               << ",\n  \"query_count\":" << queries.size()
               << ",\n  \"production_flash_accessor_init_us\":" << productionInit
-              << ",\n  \"production_dictionary_id\":" << production.dataId()
-              << ",\n  \"results\":[\n";
+              << ",\n  \"production_dictionary_id\":" << production.dataId() << ",\n  \"results\":[\n";
     measure("indexed_utf8", utf8, queries, iterations, utf8.bytes(), 0, utf8Prepare, 0, true);
     measure("indexed_symbols", symbols, queries, iterations, symbols.bytes(), 71, symbolsPrepare, 0, true);
-    measure("prefix_blocks_16", compressed, queries, iterations, storage.bytes(), 71, compressedPrepare, checkedInit, false);
+    measure("prefix_blocks_16", compressed, queries, iterations, storage.bytes(), 71, compressedPrepare, checkedInit,
+            compareProduction);
+    if (compareProduction) {
+      measure("production_prefix_ranges", production, queries, iterations, storage.bytes() + 93 * sizeof(uint16_t), 71,
+              0, productionInit, false);
+    }
     std::cout << "  ]\n}\n";
     return 0;
   } catch (const std::exception& error) {

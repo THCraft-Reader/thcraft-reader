@@ -10,12 +10,13 @@
     "rejected_non_thai": 0
   },
   "extra_sha256": "24b6b2c79df315cd4f1492fbdca7f4731fdb2c1fb7f967eb527540956f04e13b",
-  "flash_bytes": 382625,
+  "first_symbol_index_bytes": 186,
+  "flash_bytes": 382811,
   "format_version": 1,
   "maximum_word_codepoints": 70,
   "offset_bytes": 15248,
   "offset_count": 3812,
-  "output_sha256": "d4dd017a8deec76a820595c4c5441e1cdc3a0eaac135461816276ae2c016cf34",
+  "output_sha256": "b8cd575b814bfcb0b50024acf82049323f47d14bc1e1296d58e9a99dcbbc1cbe",
   "rejected_source_entries": 1143,
   "source": {
     "duplicates": 1,

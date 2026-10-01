@@ -87,10 +87,20 @@ compound `จำนวนมาก`; a legal dictionary-prefix/suffix split perm
 `จำนวน|มาก` when the compound must wrap.
 
 Generated data: 60,964 words, maximum 70 codepoints; 367,377 encoded bytes plus
-15,248 offset bytes = 382,625 array bytes, CRC32 `4b87877d`. Eight dictionary,
-seventeen segmenter and seven generator tests pass. A standalone production
+15,248 offset bytes plus a 186-byte first-symbol directory = 382,811 array bytes
+before linker padding, CRC32 `4b87877d`. Eight dictionary, twenty-five segmenter
+and ten generator tests pass. A standalone production
 segmenter emits `ประเทศไทย|มี|ประชากร|จำนวนมาก`; the proper-prefix splitter emits
 `จำนวน|มาก`. Invalid dictionary views retain cluster-safe emergency output.
+
+The generated 93-entry uint16 directory narrows the production accessor's
+block-leader search by first Thai symbol. Each range includes the preceding
+block, which can contain the first matching words even when its leader starts
+with an earlier symbol. Empty symbol buckets retain that predecessor. Injected
+`DictionaryView` accessors keep the full-range search; neither path allocates.
+The directory is derived from the existing lexical payload and is excluded from
+`DATA_ID`: vocabulary, cluster checks, DP scoring, streaming thresholds and
+`ThaiLayoutId` are unchanged, so this optimization does not invalidate page caches.
 
 Word segmentation uses greedy longest matching with local DP repair. Before
 committing a word, it examines complete greedy segments within the next 24
@@ -113,7 +123,8 @@ pre-change greedy tokenizer selected `ยิ่ง|ได้มา|ก|เท่
 identity version 3 invalidates old rendered layouts without changing the section
 format or reading progress.
 
-Hybrid benchmark: macOS arm64, Apple C++ Release (`-O3 -DNDEBUG`), median of three
+Historical hybrid benchmark before the first-symbol directory: macOS arm64,
+Apple C++ Release (`-O3 -DNDEBUG`), median of three
 500-iteration runs. Times below are microseconds per corpus pass in parser-like
 scalar-stream mode, not per word or ESP32 timings. The executable also measures
 whole-input mode and checks whole/stream boundary checksums. The ambiguity and
@@ -156,7 +167,8 @@ between `มา` and `ก`, with eight known words and zero unknown clusters acr
 copies of the phrase. Device page-turn latency and heap high-water remain hardware
 checks; reopen an existing book after flashing to exercise automatic reflow.
 
-Native Windows/MSVC host lookup comparison (10 iterations, 121,928 common
+Historical native Windows/MSVC host lookup comparison without the directory
+(10 iterations, 121,928 common
 queries per iteration; background visual capture active, not target timings):
 
 | Representation | Array bytes | Decoder scratch | Lookups/s |
@@ -169,6 +181,75 @@ All three return the same matched-byte checksum (28,648,860). The generated
 flash accessor has no initialization scan/copy; validating an injected compressed
 view took 1,348.2 microseconds in this host run. These figures quantify the
 storage/lookup tradeoff, not ESP32 speed or heap savings.
+
+First-symbol directory benchmark: macOS arm64, Apple C++ Release, median of five
+sequential samples at ten iterations (1,219,280 lookups per sample). The same
+executable compares the injected unindexed compressed view with the actual default
+production accessor, using identical source/supplement data and timed queries:
+
+| Representation | Array bytes | Median lookup µs | Matched-byte checksum |
+| --- | ---: | ---: | ---: |
+| `prefix_blocks_16` | 382,625 | 833,489 | 28,648,860 |
+| `production_prefix_ranges` | 382,811 | 761,999 | 28,648,860 |
+
+The indexed path takes 8.58% less host lookup time, above the 5% acceptance
+threshold. Untimed equivalence checks also cover byte bounds 0, 2, query length
+minus one, exact length and length plus three; appended tone marks; and all Thai
+first symbols including empty buckets. Both accessors remain valid. Custom input
+paths benchmark only their own corpus, without comparing unrelated compiled data.
+
+An isolated throwaway harness linked the current ThaiText sources and called only
+the current `nextSegment` with indexed/unindexed accessors. Before timing it
+compared every segment's boundaries, break kinds, codepoint count, known/valid
+flags, source coverage, unknown/singleton counts and whole/scalar-stream output.
+Both accessors also split `จำนวนมาก` at the byte length of `จำนวน`.
+Five sequential 500-iteration samples gave these median µs per corpus pass:
+
+| Corpus | Whole unindexed | Whole indexed | Scalar unindexed | Scalar indexed |
+| --- | ---: | ---: | ---: | ---: |
+| Clean known prose | 90.092 | 84.359 | 119.976 | 114.203 |
+| Requested phrase | 400.486 | 324.670 | 421.037 | 345.874 |
+| Compound-heavy | 62.289 | 59.421 | 87.467 | 84.661 |
+| Ambiguity fixture | 78.461 | 78.270 | 54.677 | 54.922 |
+| Long unknown run | 337.258 | 337.582 | 646.850 | 647.604 |
+| Mixed Thai/Latin | 35.185 | 31.388 | 39.825 | 36.000 |
+
+The ambiguity/unknown rows use the same tiny fixture for both accessors and are
+unchanged controls. All rows meet the maximum regression threshold of 5% plus
+1 µs per pass. Timed loops recorded zero standard C++ allocations (not direct
+libc allocations); pending high-water was identical, including 378 bytes for
+the unknown run. The 105-test Thai host suite, ten generator tests and eight
+dictionary tests in a separate `THAI_DICTIONARY=0` build pass.
+
+The `default` ESP32-C3 firmware build succeeds. Its ELF contains exactly one
+186-byte `FIRST_SYMBOL_BLOCKS` object in `.flash.rodata`, alongside `DATA` and
+`OFFSETS`; the dictionary object has zero-sized `.data`/`.bss` and no heap-allocation
+references. The added storage is flash payload, not a startup RAM table or copy.
+
+The `x4pro` ESP32-S3 build also succeeds, with wolfSSL macro-redefinition warnings.
+Its ELF likewise contains one 186-byte directory in `.flash.rodata`. After flashing
+the X4 Pro firmware, the device owner reported no problems in a reading smoke test
+on 2026-10-01. This is user-reported functional evidence, not measured device
+latency, heap stability or completion of the hardware acceptance procedure below.
+
+Reproduce lookup equivalence and timing from the repository root:
+
+```sh
+cmake -S test -B build/test -DCMAKE_BUILD_TYPE=Release -DTHAI_SEGMENTER_BASELINE_SOURCE=
+cmake --build build/test --target ThaiTextTest ThaiDictionaryBenchmark
+python3 test/thai_text/test_dictionary_generator.py
+build/test/thai_text/ThaiTextTest
+for sample in 1 2 3 4 5; do
+  build/test/thai_text/ThaiDictionaryBenchmark --iterations 10
+done
+```
+
+These results are not ESP32 latency or device heap evidence. Hardware acceptance
+requires identical fonts, books, SD and refresh settings: collect 20 cold opens,
+20 warm reopens, 50 turns and five open/turn/exit cycles with `THAI_ENGINE_STATS`.
+Compare median/p95 segment, layout, draw and refresh times separately; require
+internal free heap above 50 KiB, stable heap across cycles, adequate stack headroom,
+identical pages and no cache invalidation caused solely by this directory.
 
 Thai-bearing blocks use the furthest fitting legal space, dictionary-word or
 punctuation boundary. A source space does not take priority over a later word
