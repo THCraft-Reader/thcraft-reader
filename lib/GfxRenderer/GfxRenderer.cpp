@@ -8,11 +8,11 @@
 #include <Logging.h>
 #include <MemoryManager.h>
 #include <SdCardFont.h>
+#include <ThaiCluster.h>
+#include <ThaiShape.h>
+#include <ThaiStats.h>
 #include <TtfEpdFont.h>
 #include <Utf8.h>
-#include <ThaiStats.h>
-#include <ThaiShape.h>
-#include <ThaiCluster.h>
 
 #include <algorithm>
 #include <cstring>
@@ -30,6 +30,7 @@ class TextDrawTimer {
   ~TextDrawTimer() {
     if (enabled) thai::recordDrawMicros(static_cast<uint32_t>(micros()) - started);
   }
+
  private:
   bool enabled;
   uint32_t started;
@@ -68,9 +69,8 @@ int32_t scaleThaiFP(const int32_t value, const bool scaled) {
 // One placement contract for measurement and both draw directions. The caller
 // retains the native loop, including an exact native span on unsupported input.
 template <typename Visit>
-bool placeThaiCluster(const char*& text, const char* end, const char*& nativeUntil,
-                      const ThaiShapeView* shape, const EpdFontFamily& font,
-                      EpdFontFamily::Style style, SdCardFont* sdFont, int8_t tracking,
+bool placeThaiCluster(const char*& text, const char* end, const char*& nativeUntil, const ThaiShapeView* shape,
+                      const EpdFontFamily& font, EpdFontFamily::Style style, SdCardFont* sdFont, int8_t tracking,
                       int& origin, uint32_t& previous, int32_t& previousAdvance, Visit&& visit) {
   if (!shape || text < nativeUntil) return false;
   ThaiGlyphCursor cursor;
@@ -544,8 +544,8 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
   const int dstH = (srcH + 1) / 2;
   // Scale the glyph bearing by the same factor so the scaled glyph sits at the correct
   // pixel offset from the (already-shifted) cursor position.
-  const int baseX = rotation == TextRotation::None ? cursorX + glyph->left / 2
-                                                  : cursorX + fontData->ascender - glyph->top / 2;
+  const int baseX =
+      rotation == TextRotation::None ? cursorX + glyph->left / 2 : cursorX + fontData->ascender - glyph->top / 2;
   const int baseY = rotation == TextRotation::None ? cursorY - glyph->top / 2 : cursorY - glyph->left / 2;
   const auto drawScaledPixel = [&](int dx, int dy) {
     if constexpr (rotation == TextRotation::None) {
@@ -825,14 +825,16 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 #endif
   while (*textCursor) {
 #if THAI_SHAPING
-    if (placeThaiCluster(textCursor, end, nativeUntil, shape, font, style, sdFont, tracking,
-                         lastBaseX, prevCp, prevAdvanceFP, [&](uint32_t shapedCp, int gx, int yOffset) {
-          if (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) {
-            renderCharScaled(*this, renderMode, font, shapedCp, gx, yPos - yOffset, black, style);
-          } else {
-            renderCharImpl<TextRotation::None>(*this, renderMode, font, shapedCp, gx, yPos - yOffset, black, style);
-          }
-        })) continue;
+    if (placeThaiCluster(textCursor, end, nativeUntil, shape, font, style, sdFont, tracking, lastBaseX, prevCp,
+                         prevAdvanceFP, [&](uint32_t shapedCp, int gx, int yOffset) {
+                           if (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) {
+                             renderCharScaled(*this, renderMode, font, shapedCp, gx, yPos - yOffset, black, style);
+                           } else {
+                             renderCharImpl<TextRotation::None>(*this, renderMode, font, shapedCp, gx, yPos - yOffset,
+                                                                black, style);
+                           }
+                         }))
+      continue;
 #endif
     cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&textCursor));
     if (!cp) break;
@@ -1023,9 +1025,7 @@ void GfxRenderer::drawArc(const int maxRadius, const int cx, const int cy, const
     const int width = std::abs(x1 - x0) + 1;
     const int py = cy + yDir * dy;
 
-    if (width > 0) {
-      fillRect(left, py, width, 1, state);
-    }
+    fillRect(left, py, width, 1, state);
   }
 };
 
@@ -2279,8 +2279,9 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
 #endif
   while (text && *text) {
 #if THAI_SHAPING
-    if (shapedText && placeThaiCluster(text, end, nativeUntil, shape, font, style, sdFont, tracking,
-                                      widthPx, prevCp, prevAdvanceFP, [](uint32_t, int, int) {})) continue;
+    if (shapedText && placeThaiCluster(text, end, nativeUntil, shape, font, style, sdFont, tracking, widthPx, prevCp,
+                                       prevAdvanceFP, [](uint32_t, int, int) {}))
+      continue;
 #endif
     cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text));
     if (!cp) break;
@@ -2404,16 +2405,16 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   while (*text) {
 #if THAI_SHAPING
     int origin = y - lastBaseY;
-    if (placeThaiCluster(text, end, nativeUntil, shape, font, style, sdFont, 0,
-                         origin, prevCp, prevAdvanceFP, [&](uint32_t shapedCp, int gx, int yOffset) {
-          if (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) {
-            renderCharScaled<TextRotation::Rotated90CW>(*this, renderMode, font, shapedCp,
-                                                        x - yOffset, y - gx, black, style);
-          } else {
-            renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, shapedCp,
-                                                     x - yOffset, y - gx, black, style);
-          }
-        })) {
+    if (placeThaiCluster(text, end, nativeUntil, shape, font, style, sdFont, 0, origin, prevCp, prevAdvanceFP,
+                         [&](uint32_t shapedCp, int gx, int yOffset) {
+                           if (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) {
+                             renderCharScaled<TextRotation::Rotated90CW>(*this, renderMode, font, shapedCp, x - yOffset,
+                                                                         y - gx, black, style);
+                           } else {
+                             renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, shapedCp, x - yOffset,
+                                                                       y - gx, black, style);
+                           }
+                         })) {
       lastBaseY = y - origin;
       continue;
     }
@@ -2449,7 +2450,7 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
 #if THAI_SHAPING
       if (shape) kernFP = scaleThaiFP(kernFP, (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0);
 #endif
-      lastBaseY -= fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
+      lastBaseY -= fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
     }
 
     const EpdGlyph* glyph = font.getGlyph(cp, style);

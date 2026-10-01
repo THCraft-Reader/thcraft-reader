@@ -4,6 +4,7 @@ endif()
 
 add_executable(ContentOpfParserTest
   ContentOpfParserTest.cpp
+  EncryptionManifestProbeTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/ContentOpfParser.cpp
 )
 

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <HalStorage.h>
-#include <expat.h>
 #include <ThaiConfig.h>
 #include <ThaiDictionary.h>
 #include <ThaiLineBreaker.h>
+#include <expat.h>
 
 #include <array>
 #include <climits>
@@ -95,6 +95,7 @@ class ChapterHtmlSlimParser {
   int fontId;
   float lineCompression;
   bool extraParagraphSpacing;
+  uint8_t paragraphIndentSpaces = 2;
   int8_t characterSpacing = 0;
   uint8_t wordSpacingPercent = 100;
   uint8_t paragraphAlignment;
@@ -218,8 +219,8 @@ class ChapterHtmlSlimParser {
   void flushPartWordBuffer();
   EpdFontFamily::Style currentTextStyle() const;
   uint8_t currentTextLink();
-  bool appendThaiCodepoint(std::string_view bytes, uint32_t cp, EpdFontFamily::Style style,
-                           uint8_t linkId, uint32_t visibleOffset);
+  bool appendThaiCodepoint(std::string_view bytes, uint32_t cp, EpdFontFamily::Style style, uint8_t linkId,
+                           uint32_t visibleOffset);
   void flushThaiPending(bool endOfRun);
   void endTextRun(bool thaiOnly = false);
   void appendLegacyBytes(std::string_view bytes, uint32_t visibleOffset);
@@ -282,6 +283,7 @@ class ChapterHtmlSlimParser {
     wordSpacingPercent = wordPercent;
   }
   bool thaiAnalysisUnavailable() const { return thaiUnavailable; }
+  void setParagraphIndentSpaces(const uint8_t spaces) { paragraphIndentSpaces = spaces; }
 
   // One-shot parse: builds every page before returning (begin + step* + finish).
   bool parseAndBuildPages();

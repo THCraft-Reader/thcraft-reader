@@ -90,11 +90,14 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 49
+### Version 51
 
-The header is now 47 bytes (previously 43), adding little-endian `u32
-thaiLayoutId` immediately after `wordSpacingPercent`. Both finalized and suspended
-section caches compare this identity along with the other render settings.
+The 48-byte header combines upstream's `u8 paragraphIndentSpaces` after
+`extraParagraphSpacing` with `u32 thaiLayoutId` immediately after
+`wordSpacingPercent`. Both finalized and suspended section caches compare these
+values along with the other render settings. Versions 49 and 50 used different
+headers in Thai and upstream builds; both are rejected and rebuilt.
+
 `thai::layoutId()` is FNV-1a (seed 2166136261, prime 16777619) over little-endian
 `u32` analyzer version 2, little-endian `u32` dictionary CRC32 (zero when disabled),
 then one byte each for enabled word breaking and dictionary use. Bit 31 is cleared.
@@ -110,7 +113,7 @@ Invalidation removes only rendered section data, not extracted HTML, book metada
 or reading progress.
 
 An in-progress file has version zero until commit. Suspended files use the derived
-partial version `0xFE - (49 - 28)` = 233, with the same header and LUT schema plus
+partial version `0xFE - (51 - 28)` = 231, with the same header and LUT schema plus
 two `u32` values (`bytesConsumed`, `totalBytes`) after the visible-offset LUT.
 Older final and partial versions are rejected.
 
@@ -224,7 +227,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 49
+#define EXPECTED_VERSION 51
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -381,6 +384,7 @@ struct SectionBin {
     s32 fontId;
     float lineCompression;
     bool extraParagraphSpacing;
+    u8 paragraphIndentSpaces;
     u8 paragraphAlignment;
     u16 viewportWidth;
     u16 viewportHeight;
