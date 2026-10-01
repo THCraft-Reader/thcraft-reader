@@ -245,6 +245,9 @@ all fallback faces.
 
 ### Thai bitmap positioning
 
+For the end-to-end agent workflow, including source inspection, paired conversion,
+visual checks, and ZIP packaging, follow [Create a new Thai font](../CREATE_NEW_FONT.md).
+
 Thai wrapping is automatic; no language setting is required. For fonts whose native
 bitmaps collide or misplace Thai marks, bake optional positioning alongside CPFont:
 
