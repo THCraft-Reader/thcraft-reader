@@ -47,16 +47,18 @@ void expectAligned(const ParsedText& text) {
 std::vector<std::unique_ptr<TextBlock>> extract(ParsedText& text, uint16_t width, bool last = true) {
   GfxRenderer renderer;
   std::vector<std::unique_ptr<TextBlock>> lines;
-  text.layoutAndExtractLines(renderer, 0, width,
-                            [&](std::unique_ptr<TextBlock> line, uint32_t) {
-                              EXPECT_TRUE(line->valid());
-                              lines.push_back(std::move(line));
-                            }, last);
+  text.layoutAndExtractLines(
+      renderer, 0, width,
+      [&](std::unique_ptr<TextBlock> line, uint32_t) {
+        EXPECT_TRUE(line->valid());
+        lines.push_back(std::move(line));
+      },
+      last);
   return lines;
 }
 
 TEST(ThaiTokenTest, GenericControlsKeepNfcFocusAndCjkWithoutThaiStorage) {
-  ParsedText text(false, false, true);
+  ParsedText text(false, true);
   text.addWord("EpubCraft", REGULAR);
   text.addWord("4.2.0", REGULAR);
   text.addWord("Tie\xCC\x82\xCC\x81ng", EpdFontFamily::ITALIC, true);
@@ -79,7 +81,7 @@ TEST(ThaiTokenTest, GenericControlsKeepNfcFocusAndCjkWithoutThaiStorage) {
 }
 
 TEST(ThaiTokenTest, AnalyzedBoundariesKeepSpacesAttachmentsAndRanksDistinct) {
-  ParsedText text(false, false, true);
+  ParsedText text(false, true);
   const std::vector<Kind> kinds{Kind::Space, Kind::Word, Kind::Prohibited, Kind::Punctuation, Kind::Emergency};
   const std::vector<std::string> words{"ภาษา", "ไทย", "กี่", "น้ำ", "ฃ"};
   for (size_t i = 0; i < kinds.size(); ++i) {
@@ -101,7 +103,7 @@ TEST(ThaiTokenTest, AnalyzedBoundariesKeepSpacesAttachmentsAndRanksDistinct) {
 }
 
 TEST(ThaiTokenTest, GenericAfterThaiPreservesFocusNfcAndNoInsertedSpace) {
-  ParsedText text(false, false, true);
+  ParsedText text(false, true);
   text.getBlockStyle().alignment = CssTextAlign::Left;
   const auto link = text.addLinkTarget("#note");
   text.addAnalyzedToken("ไทย", REGULAR, Kind::Space, 4, 0);
@@ -174,7 +176,7 @@ TEST(ThaiTokenTest, RubyAppliedAfterThaiProhibitsInternalAnalyzedBoundary) {
 }
 
 TEST(ThaiTokenTest, RubyPaddingStaysAtOriginalIndexAcrossFocusPieces) {
-  ParsedText text(false, false, true);
+  ParsedText text(false, true);
   text.addWord("x", REGULAR);
   text.setRubyForWordAt(0, "ex");
   text.addWord("hello!", REGULAR);
@@ -189,9 +191,8 @@ TEST(ThaiTokenTest, RubyPaddingStaysAtOriginalIndexAcrossFocusPieces) {
 }
 
 TEST(ThaiTokenTest, PartialExtractionRetainsRankStyleLinkAndRebasedOffset) {
-  ParsedText text(false);
+  ParsedText text(false, false, BlockStyle(), 0);
   text.getBlockStyle().alignment = CssTextAlign::Left;
-  text.getBlockStyle().textIndentDefined = true;
   const auto link = text.addLinkTarget("#last");
   text.addAnalyzedToken("ก", REGULAR, Kind::Space, 10, 0);
   text.addAnalyzedToken("ข", REGULAR, Kind::Word, 70000, 0);
@@ -218,7 +219,7 @@ TEST(ThaiTokenTest, PartialExtractionRetainsRankStyleLinkAndRebasedOffset) {
 }
 
 TEST(ThaiTokenTest, GenericSplitInThaiBlockPreservesSurroundingRanksAndOffsets) {
-  ParsedText text(false, true);
+  ParsedText text(true);
   const auto link = text.addLinkTarget("#korean");
   text.addAnalyzedToken("ไทย", REGULAR, Kind::Space, 0, 0);
   text.addWordWithBoundary("한국어", REGULAR, false, Kind::Word, 3, link);

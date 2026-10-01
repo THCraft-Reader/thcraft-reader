@@ -23,10 +23,7 @@ struct Line {
 };
 using Lines = std::vector<Line>;
 
-void configure(ParsedText& text, CssTextAlign align = CssTextAlign::Left) {
-  text.getBlockStyle().alignment = align;
-  text.getBlockStyle().textIndentDefined = true;
-}
+void configure(ParsedText& text, CssTextAlign align = CssTextAlign::Left) { text.getBlockStyle().alignment = align; }
 Lines layout(ParsedText& text, uint16_t width, bool final = true, int8_t tracking = 0, uint8_t spacing = 100) {
   GfxRenderer renderer;
   Lines lines;
@@ -68,7 +65,7 @@ TEST(ThaiLayoutTest, SourceSpaceDoesNotLeaveRoomForAnotherWholeThaiWord) {
   const int width = renderer.getTextAdvanceX(0, "ภาษาไทยมีประชากร", regular) + space;
   for (const auto alignment : {CssTextAlign::Left, CssTextAlign::Justify}) {
     for (const bool hyphenation : {false, true}) {
-      ParsedText text(false, hyphenation);
+      ParsedText text(hyphenation, false, BlockStyle(), 0);
       configure(text, alignment);
       add(text, "ภาษาไทย", Kind::Space, 0);
       add(text, "มี", Kind::Space, 8);
@@ -85,7 +82,7 @@ TEST(ThaiLayoutTest, SourceSpaceDoesNotLeaveRoomForAnotherWholeThaiWord) {
 }
 
 TEST(ThaiLayoutTest, ClosingPunctuationCanFinishLineAfterEarlierWordBoundary) {
-  ParsedText text(false);
+  ParsedText text(false, false, BlockStyle(), 0);
   configure(text);
   analyze(text, "มีคนไทย...มาก");
   GfxRenderer renderer;
@@ -94,7 +91,7 @@ TEST(ThaiLayoutTest, ClosingPunctuationCanFinishLineAfterEarlierWordBoundary) {
 }
 
 TEST(ThaiLayoutTest, WholeWordBoundaryPreventsEmergencyCutToFillLine) {
-  ParsedText text(false);
+  ParsedText text(false, false, BlockStyle(), 0);
   configure(text);
   add(text, "ก", Kind::Space);
   add(text, "ข", Kind::Word);
@@ -104,7 +101,7 @@ TEST(ThaiLayoutTest, WholeWordBoundaryPreventsEmergencyCutToFillLine) {
 }
 
 TEST(ThaiLayoutTest, RightmostFittingWordBoundary) {
-  ParsedText text(false);
+  ParsedText text(false, false, BlockStyle(), 0);
   configure(text);
   for (const char* word : {"ก", "ข", "ค", "ง"}) add(text, word, Kind::Word);
   EXPECT_EQ(strings(layout(text, 24)), (std::vector<std::string>{"กขค", "ง"}));
@@ -115,7 +112,7 @@ TEST(ThaiLayoutTest, DictionaryCompoundPrefersKnownPrefixAndSuffixAcrossStyles) 
   const int width = renderer.getTextAdvanceX(0, "จำนวน", regular);
   for (bool hyphenation : {false, true}) {
     for (bool styled : {false, true}) {
-      ParsedText text(false, hyphenation);
+      ParsedText text(hyphenation, false, BlockStyle(), 0);
       configure(text);
       if (styled) {
         add(text, "จำ", Kind::Space, 100, EpdFontFamily::BOLD);
@@ -134,7 +131,7 @@ TEST(ThaiLayoutTest, DictionaryCompoundPrefersKnownPrefixAndSuffixAcrossStyles) 
 }
 
 TEST(ThaiLayoutTest, FittingStyledWordMovesWholeInsteadOfBreakingAtMarkup) {
-  ParsedText text(false);
+  ParsedText text(false, false, BlockStyle(), 0);
   configure(text);
   add(text, "ก", Kind::Space);
   add(text, "โรง", Kind::Word, 1, EpdFontFamily::BOLD);
@@ -153,7 +150,7 @@ TEST(ThaiLayoutTest, EveryViewportPreservesAllMarkedClustersAndMakesProgress) {
       for (int width = 1; width <= full; ++width) {
         SCOPED_TRACE(cluster);
         SCOPED_TRACE(width);
-        ParsedText text(false, hyphenation);
+        ParsedText text(hyphenation, false, BlockStyle(), 0);
         configure(text);
         add(text, source, Kind::Space);
         const auto lines = layout(text, width);
@@ -170,7 +167,7 @@ TEST(ThaiLayoutTest, EveryViewportPreservesAllMarkedClustersAndMakesProgress) {
 
 TEST(ThaiLayoutTest, PartialExtractionPreservesRemainderOffsetsStylesAndLinks) {
   for (bool hyphenation : {false, true}) {
-    ParsedText text(false, hyphenation);
+    ParsedText text(hyphenation, false, BlockStyle(), 0);
     configure(text);
     const auto link = text.addLinkTarget("#linked");
     add(text, "กี่ขค", Kind::Space, 70000, EpdFontFamily::BOLD, link);
@@ -195,7 +192,7 @@ TEST(ThaiLayoutTest, ClosingUnitsStayLeftAndOpeningQuoteStaysRight) {
   for (const std::string source : {"“ภาษาไทย”ก", "ภาษาไทยฯลฯก", "ภาษาไทย...ก", "ภาษาไทยๆก", "ภาษาไทยฯก"}) {
     for (const bool hyphenation : {false, true}) {
       for (const int width : {1, 24, 48, 72}) {
-        ParsedText text(false, hyphenation);
+        ParsedText text(hyphenation, false, BlockStyle(), 0);
         configure(text);
         analyze(text, source);
         const auto lines = layout(text, width);
@@ -224,7 +221,7 @@ TEST(ThaiLayoutTest, ClosingUnitsStayLeftAndOpeningQuoteStaysRight) {
 TEST(ThaiLayoutTest, RubyAndNbspRemainAtomicAtOverwideFinalAndPartialLines) {
   for (bool ruby : {false, true}) {
     for (bool hyphenation : {false, true}) {
-      ParsedText text(false, hyphenation);
+      ParsedText text(hyphenation, false, BlockStyle(), 0);
       configure(text);
       add(text, "ก", Kind::Space);
       if (!ruby) text.addWord(" ", regular, false, true);
@@ -241,7 +238,7 @@ TEST(ThaiLayoutTest, RubyAndNbspRemainAtomicAtOverwideFinalAndPartialLines) {
 
 TEST(ThaiLayoutTest, UnknownRunBeyond64KiBPreservesEveryClusterWithBoundedLineProgress) {
   for (bool hyphenation : {false, true}) {
-    ParsedText text(false, hyphenation);
+    ParsedText text(hyphenation, false, BlockStyle(), 0);
     configure(text);
     constexpr size_t count = 22000;
     for (size_t i = 0; i < count; ++i) add(text, "ฃ", Kind::Emergency, i);
@@ -257,7 +254,7 @@ TEST(ThaiLayoutTest, UnknownRunBeyond64KiBPreservesEveryClusterWithBoundedLinePr
 
 TEST(ThaiLayoutTest, TrackingAndJustificationNeverStretchThaiDictionaryGaps) {
   for (const auto alignment : {CssTextAlign::Left, CssTextAlign::Justify}) {
-    ParsedText text(false);
+    ParsedText text(false, false, BlockStyle(), 0);
     configure(text, alignment);
     for (const char* word : {"ก", "ข", "ค", "ง"}) add(text, word, Kind::Word);
     const auto lines = layout(text, 35, true, 2, 125);
@@ -270,7 +267,7 @@ TEST(ThaiLayoutTest, TrackingAndJustificationNeverStretchThaiDictionaryGaps) {
 }
 
 TEST(ThaiLayoutTest, WordSpacingAndCjkInMixedBlockReuseExistingGapPositions) {
-  ParsedText text(false);
+  ParsedText text(false, false, BlockStyle(), 0);
   configure(text);
   add(text, "ก", Kind::Space);
   text.addWord("中文", regular);
@@ -284,7 +281,7 @@ TEST(ThaiLayoutTest, WordSpacingAndCjkInMixedBlockReuseExistingGapPositions) {
 }
 
 TEST(ThaiLayoutTest, EnglishOnlyControlKeepsExistingWordSpacingAndFocus) {
-  ParsedText text(false, false, true);
+  ParsedText text(false, true, BlockStyle(), 0);
   configure(text);
   text.addWord("hello", regular);
   text.addWord("world", regular);
@@ -297,9 +294,8 @@ TEST(ThaiLayoutTest, EnglishOnlyControlKeepsExistingWordSpacingAndFocus) {
 }
 
 TEST(ThaiLayoutTest, IndentReducesOnlyFirstEffectiveLineAndNeverCutsCluster) {
-  ParsedText text(false);
+  ParsedText text(false, false, BlockStyle(), 4);
   configure(text);
-  text.getBlockStyle().textIndent = 16;
   add(text, "กี่", Kind::Space);
   add(text, "ข", Kind::Word);
   add(text, "ค", Kind::Word);
@@ -312,7 +308,7 @@ TEST(ThaiLayoutTest, IndentReducesOnlyFirstEffectiveLineAndNeverCutsCluster) {
 
 TEST(ThaiLayoutTest, RubyAddedBeforeThaiInitializationAndCurrentFlagsBothProtectGroups) {
   for (bool ruby : {false, true}) {
-    ParsedText text(false);
+    ParsedText text(false, false, BlockStyle(), 0);
     configure(text);
     text.addWord("中文", regular);
     if (ruby) text.setRubyGroupAt(0, 2, "reading");
@@ -329,7 +325,7 @@ TEST(ThaiLayoutTest, RubyAddedBeforeThaiInitializationAndCurrentFlagsBothProtect
 
 TEST(ThaiLayoutTest, PrefixesBeyondLegacyBufferLimitKeepBytesAndOffsets) {
   for (const size_t prefixCount : {70u, 80u}) {
-    ParsedText text(false);
+    ParsedText text(false, false, BlockStyle(), 0);
     configure(text);
     std::string source;
     for (size_t i = 0; i < 100; ++i) source += "ฃ";
@@ -343,7 +339,7 @@ TEST(ThaiLayoutTest, PrefixesBeyondLegacyBufferLimitKeepBytesAndOffsets) {
 }
 
 TEST(ThaiLayoutTest, SingleTokenRubyCannotBeSplitByGenericHyphenationInMixedBlock) {
-  ParsedText text(false, true);
+  ParsedText text(true, false, BlockStyle(), 0);
   configure(text);
   text.addWord("hospital", regular);
   text.setRubyForWordAt(0, "reading");

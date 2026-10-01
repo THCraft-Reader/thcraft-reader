@@ -36,8 +36,7 @@ class ThaiTextTest : public ::testing::Test {
     std::filesystem::remove(path, error);
   }
 
-  Lines parse(const std::string& body, uint16_t width = 480, size_t chunkBytes = 0,
-              bool hyphenation = false) {
+  Lines parse(const std::string& body, uint16_t width = 480, size_t chunkBytes = 0, bool hyphenation = false) {
     const std::string xml = "<html><head/><body>" + body + "</body></html>";
     {
       std::ofstream output(path, std::ios::binary);
@@ -47,22 +46,37 @@ class ThaiTextTest : public ::testing::Test {
     Lines result;
     const std::string filename = path.string();
     CssParser cssParser{path.parent_path().string()};
-    ChapterHtmlSlimParser parser{
-        nullptr, filename, renderer, 0, 1.0f, false, static_cast<uint8_t>(CssTextAlign::Left),
-        width, 800, hyphenation, false,
-        [&](std::unique_ptr<Page> page, auto, auto, auto) {
-          if (!page) return;
-          for (const auto& element : page->elements) {
-            if (element->getTag() != TAG_PageLine) continue;
-            const auto* block = static_cast<const PageLine&>(*element).getBlock();
-            EXPECT_TRUE(block->valid());
-            auto& line = result.emplace_back();
-            for (uint16_t i = 0; i < block->wordCount(); ++i) {
-              line.push_back({block->wordText(i), block->wordStyle(i)});
-            }
-          }
-        },
-        true, "", "", 0, {}, nullptr, &cssParser};
+    ChapterHtmlSlimParser parser{nullptr,
+                                 filename,
+                                 renderer,
+                                 0,
+                                 1.0f,
+                                 false,
+                                 static_cast<uint8_t>(CssTextAlign::Left),
+                                 width,
+                                 800,
+                                 hyphenation,
+                                 false,
+                                 [&](std::unique_ptr<Page> page, auto, auto, auto) {
+                                   if (!page) return;
+                                   for (const auto& element : page->elements) {
+                                     if (element->getTag() != TAG_PageLine) continue;
+                                     const auto* block = static_cast<const PageLine&>(*element).getBlock();
+                                     EXPECT_TRUE(block->valid());
+                                     auto& line = result.emplace_back();
+                                     for (uint16_t i = 0; i < block->wordCount(); ++i) {
+                                       line.push_back({block->wordText(i), block->wordStyle(i)});
+                                     }
+                                   }
+                                 },
+                                 true,
+                                 "",
+                                 "",
+                                 0,
+                                 {},
+                                 nullptr,
+                                 &cssParser};
+    parser.setParagraphIndentSpaces(0);
     if (chunkBytes == 0) {
       EXPECT_TRUE(parser.parseAndBuildPages());
     } else {
@@ -72,8 +86,8 @@ class ThaiTextTest : public ::testing::Test {
       }
       for (size_t offset = 0; offset < xml.size(); offset += chunkBytes) {
         const size_t count = std::min(chunkBytes, xml.size() - offset);
-        if (XML_Parse(parser.xmlParser_, xml.data() + offset, static_cast<int>(count),
-                      offset + count == xml.size()) != XML_STATUS_OK) {
+        if (XML_Parse(parser.xmlParser_, xml.data() + offset, static_cast<int>(count), offset + count == xml.size()) !=
+            XML_STATUS_OK) {
           ADD_FAILURE() << XML_ErrorString(XML_GetErrorCode(parser.xmlParser_));
           parser.abortParse();
           return result;
@@ -127,16 +141,16 @@ TEST_F(ThaiTextTest, ExplicitBreakKeepsBothThaiRuns) {
 }
 
 TEST_F(ThaiTextTest, MixedVersionTimeAndUrlRetainBytes) {
-  const std::string input = "EpubCraft เป็น EPUB Editor Version 4.2.0 บทที่ 12 เวลา 02:40 น. "
-                            "https://example.org/ภาษาไทย?q=12";
+  const std::string input =
+      "EpubCraft เป็น EPUB Editor Version 4.2.0 บทที่ 12 เวลา 02:40 น. "
+      "https://example.org/ภาษาไทย?q=12";
   std::string expected = input;
   expected.erase(std::remove(expected.begin(), expected.end(), ' '), expected.end());
   EXPECT_EQ(joined(parse("<p>" + input + "</p>")), expected);
 }
 
 TEST_F(ThaiTextTest, VietnameseNfcControlUsesExistingNormalization) {
-  EXPECT_EQ(joined(parse("<p>Tie\xCC\x82\xCC\x81ng a\xCC\x82\xCC\x81 a\xCC\xA3\xCC\x82</p>")),
-            "Tiếngấậ");
+  EXPECT_EQ(joined(parse("<p>Tie\xCC\x82\xCC\x81ng a\xCC\x82\xCC\x81 a\xCC\xA3\xCC\x82</p>")), "Tiếngấậ");
 }
 
 TEST_F(ThaiTextTest, DictionaryWrapMovesHospitalWordIntact) {

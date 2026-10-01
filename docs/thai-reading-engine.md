@@ -180,8 +180,8 @@ Prefix commits reuse WordStore suffix ownership; no unbounded prefix string is
 built. The extra persistent layout metadata is one rank byte per token in
 Thai-bearing blocks, plus vector capacity; non-Thai rank vectors stay empty.
 
-Section version 49 uses a 47-byte header, including `thaiLayoutId` immediately
-after word spacing. Both final and suspended layouts compare its analyzer,
+Section version 51 uses a 48-byte header, including `thaiLayoutId` immediately
+after word spacing and upstream's paragraph indentation. Both final and suspended layouts compare its analyzer,
 dictionary and behavior identity. Commits with transient analysis failure set
 bit 31; current pages stay readable, but a healthy reopen reflows those sections.
 Ten final/partial cache tests pass, including failure → healthy reopen and

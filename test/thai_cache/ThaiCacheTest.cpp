@@ -1,11 +1,10 @@
-#include <gtest/gtest.h>
-
-#include <Epub/Section.h>
 #include <Epub/Page.h>
+#include <Epub/Section.h>
 #include <Epub/hyphenation/Hyphenator.h>
 #include <Epub/parsers/ChapterHtmlSlimParser.h>
 #include <GfxRenderer.h>
 #include <ThaiLayoutId.h>
+#include <gtest/gtest.h>
 
 #include <filesystem>
 #include <fstream>
@@ -61,7 +60,8 @@ class ThaiSectionCacheTest : public testing::TestWithParam<bool> {
     // Each discovered test has its own directory, including parallel CTest processes.
     const auto* info = testing::UnitTest::GetInstance()->current_test_info();
     std::string name = std::string(info->test_suite_name()) + "_" + info->name();
-    for (char& c : name) if (c == '/' || c == '\\') c = '_';
+    for (char& c : name)
+      if (c == '/' || c == '\\') c = '_';
     root = std::filesystem::temp_directory_path() / ("crosspoint_thai_cache_" + name);
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root / "html");
@@ -188,6 +188,26 @@ TEST_P(ThaiSectionCacheTest, ChangedIdentityRejectsOnlyRenderedCache) {
   EXPECT_TRUE(next.loadPage(0));
 }
 
+TEST_P(ThaiSectionCacheTest, ChangedIndentationRejectsOnlyRenderedCache) {
+  spec.paragraphIndentSpaces = 2;
+  Section built(epub, 0, renderer);
+  ASSERT_TRUE(built.startBuild(spec));
+  completeOrSuspend(built);
+  ASSERT_FALSE(HasFatalFailure());
+  Section matching(epub, 0, renderer);
+  ASSERT_TRUE(matching.loadSectionFile(spec));
+  auto changed = spec;
+  changed.paragraphIndentSpaces = 4;
+  Section reopened(epub, 0, renderer);
+  EXPECT_FALSE(reopened.loadSectionFile(changed));
+  EXPECT_FALSE(std::filesystem::exists(root / "sections/0.bin"));
+  expectPublicationPreserved();
+  ASSERT_TRUE(reopened.createSectionFile(changed));
+  Section next(epub, 0, renderer);
+  EXPECT_TRUE(next.loadSectionFile(changed));
+  EXPECT_TRUE(next.loadPage(0));
+}
+
 TEST_P(ThaiSectionCacheTest, PriorFinalAndPartialVersionsAreRejected) {
   Section built(epub, 0, renderer);
   ASSERT_TRUE(built.startBuild(spec));
@@ -195,15 +215,18 @@ TEST_P(ThaiSectionCacheTest, PriorFinalAndPartialVersionsAreRejected) {
   ASSERT_FALSE(HasFatalFailure());
   auto bytes = readBytes(root / "sections/0.bin");
   ASSERT_FALSE(bytes.empty());
-  bytes[0] = static_cast<char>(GetParam() ? 0xFE - (48 - 28) : 48);
-  writeBytes(root / "sections/0.bin", bytes);
-  Section reopened(epub, 0, renderer);
-  EXPECT_FALSE(reopened.loadSectionFile(spec));
-  EXPECT_FALSE(std::filesystem::exists(root / "sections/0.bin"));
-  expectPublicationPreserved();
-  ASSERT_TRUE(reopened.createSectionFile(spec));
-  Section next(epub, 0, renderer);
-  EXPECT_TRUE(next.loadSectionFile(spec));
+  for (const uint8_t version : {48, 49, 50}) {
+    SCOPED_TRACE(version);
+    bytes[0] = static_cast<char>(GetParam() ? 0xFE - (version - 28) : version);
+    writeBytes(root / "sections/0.bin", bytes);
+    Section reopened(epub, 0, renderer);
+    EXPECT_FALSE(reopened.loadSectionFile(spec));
+    EXPECT_FALSE(std::filesystem::exists(root / "sections/0.bin"));
+    expectPublicationPreserved();
+    ASSERT_TRUE(reopened.createSectionFile(spec));
+    Section next(epub, 0, renderer);
+    EXPECT_TRUE(next.loadSectionFile(spec));
+  }
 }
 
 #if THAI_WORD_BREAKING && THAI_DICTIONARY
@@ -238,5 +261,5 @@ TEST_P(ThaiSectionCacheTest, InvalidDictionaryRemainsReadableThenHealthyOpenRefl
 #endif
 
 INSTANTIATE_TEST_SUITE_P(FinalAndSuspended, ThaiSectionCacheTest, testing::Bool(),
-                        [](const testing::TestParamInfo<bool>& info) { return info.param ? "Partial" : "Final"; });
+                         [](const testing::TestParamInfo<bool>& info) { return info.param ? "Partial" : "Final"; });
 }  // namespace
