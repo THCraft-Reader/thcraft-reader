@@ -58,7 +58,8 @@ void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int 
 
 }  // namespace
 
-void BaseTheme::drawMascotScreen(const GfxRenderer& renderer, const char* status, const char* version) {
+void BaseTheme::drawMascotScreen(const GfxRenderer& renderer, const char* status, const bool dark,
+                                 const char* version) {
   int top, right, bottom, left;
   renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
   const Rect bounds(left, top, renderer.getScreenWidth() - left - right, renderer.getScreenHeight() - top - bottom);
@@ -71,9 +72,10 @@ void BaseTheme::drawMascotScreen(const GfxRenderer& renderer, const char* status
   const int y = bounds.y + (bounds.height - footerHeight - blockHeight) / 2;
 
   // Plot in logical coordinates so the pre-dithered artwork stays upright without a rotated buffer.
+  const auto* bitmap = dark ? MASCOT_DARK_BITMAP : MASCOT_BITMAP;
   for (int row = 0; row < MASCOT_HEIGHT; ++row) {
     for (int col = 0; col < MASCOT_WIDTH; ++col) {
-      const uint8_t byte = MASCOT_BITMAP[row * (MASCOT_WIDTH / 8) + col / 8];
+      const uint8_t byte = bitmap[row * (MASCOT_WIDTH / 8) + col / 8];
       if ((byte & (0x80 >> (col & 7))) == 0) {
         renderer.drawPixel(x + col, y + row, true);
       }

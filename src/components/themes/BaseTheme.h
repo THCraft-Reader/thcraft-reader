@@ -235,7 +235,9 @@ class BaseTheme {
   // Component drawing methods
   static freeink::ui::BitmapRef checkboxIcon(bool checked);
   static void setCheckboxRow(freeink::ui::ListItem& item, bool checked);
-  static void drawMascotScreen(const GfxRenderer& renderer, const char* status, const char* version = nullptr);
+  // Dark artwork is counter-inverted; the caller must invert the final screen.
+  static void drawMascotScreen(const GfxRenderer& renderer, const char* status, bool dark,
+                               const char* version = nullptr);
   static void drawCoverPlaceholder(const GfxRenderer& renderer, Rect rect);
   // Draws a pre-dithered cover thumb 1:1, centered and clipped to fill the
   // slot. Rescaling a dithered bitmap aliases badly, so overflow is cropped.

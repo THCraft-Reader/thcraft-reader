@@ -615,11 +615,11 @@ void SleepActivity::renderCustomSleepScreen() const {
 // sequence, used once for the sleep image. It never runs the multi-flash GC
 // waveform (0xF7) that FULL_REFRESH selects (#2471's blinking complaint).
 void SleepActivity::renderDefaultSleepScreen() const {
+  const bool dark = SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT;
   renderer.clearScreen();
-  GUI.drawMascotScreen(renderer, tr(STR_SLEEPING));
+  GUI.drawMascotScreen(renderer, tr(STR_SLEEPING), dark);
 
-  // Make sleep screen dark unless light is selected in settings
-  if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT) {
+  if (dark) {
     renderer.invertScreen();
   }
 

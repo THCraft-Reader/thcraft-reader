@@ -17,11 +17,17 @@ Check [our Devices page](https://crosspointreader.com/devices) for the full list
 The THCraft build uses the supplied Thai-flag mascot on the boot and default
 light/dark sleep screens. Custom sleep images and book covers are unchanged.
 The white-background color master is [`src/images/Mascot.png`](src/images/Mascot.png).
-Regenerate the firmware bitmap with `python scripts/generate_mascot.py` (Pillow required).
+Regenerate the firmware bitmaps with `python scripts/generate_mascot.py` (Pillow required).
 Conversion preserves aspect ratio, downsamples with Lanczos, sharpens outlines,
 and uses Floyd–Steinberg dithering to retain shading on monochrome e-ink.
-The 224×336 bitmap occupies 9,408 bytes of flash and renders without an image
-heap buffer; logical-coordinate plotting keeps it upright in all four orientations.
+Dark mode preserves the mascot's normal face/clothing shading on black, with a
+one-pixel white outline. The generator removes border-connected white background
+and bakes the silhouette into a counter-inverted bitmap; no mask processing runs
+on the device. Light-mode artwork is unchanged.
+The two 224×336 bitmaps occupy 18,816 bytes of flash and render without an image
+heap buffer; logical-coordinate plotting keeps them upright in all four orientations.
+The boot splash follows **Night Mode**; the default sleep mascot follows the
+separate **Sleep Screen** light/dark selection.
 
 > If you're planning to buy an Xteink device, consider purchasing an **X3/X4 Developer Edition** through https://crosspointreader.com. CrossPoint receives a small share of each sale, helping fund development costs.
 
