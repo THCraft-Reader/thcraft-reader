@@ -74,8 +74,8 @@ Optional packager arguments are `--assets DIR` (default `build/thai/assets`), `-
 incomplete font/companion pairs stop packaging; no system font is substituted.
 
 The archive contains regular-face **THCraft-NotoSansThai**,
-**THCraft-NotoSerifThai** and **THCraft-Sarabun**, each at **8, 10, 12, 14, 16 and
-18 pt**, converted at 150 DPI. Thai positioning is baked into same-basename
+**THCraft-NotoSerifThai** and **THCraft-Sarabun**, each at **8, 10, 12, 14, 16,
+18, 20, 22, 24 and 26 pt**, converted at 150 DPI. Thai positioning is baked into same-basename
 `.cpfont`/`.cpshape` pairs. Coverage includes Latin, Greek letters used in phonetic
 transcription, IPA Extensions and Spacing Modifier Letters (U+0250–U+02FF),
 combining diacritics, arrows, mathematical/decorative symbols, and Arabic.
@@ -92,17 +92,27 @@ inputs, not firmware or installation assets. `build-report.json` (schema 2) and
 `reports/` live outside `fonts/` and record ordered source hashes, output sizes,
 converter identity and companion style counts.
 
+The complete release ZIP described in [RELEASE.MD](../RELEASE.MD) additionally
+includes **BaiJamjuree, Mali, Garuda and JS-Jindara**, for seven families and
+70 pairs at those ten sizes. The three-family packager above is not a replacement
+for that complete archive. The 20–26 pt files in every family include the
+configured IPA, Symbols & Arrows, Arabic and Thai coverage. Older sizes remain
+unchanged; Garuda's 8–18 pt files retain their narrower native coverage.
+BaiJamjuree uses its corrected stacked-tone source, and Jindara's existing
+20–26 pt pairs are retained. See the release workflow's licensing gate before
+public distribution.
+
 To install:
 
 1. Extract the archive's **`fonts` folder to the SD card root**, merging with any
    existing folder. Keep your original fonts and books.
-2. Keep every `.cpfont` beside its matching `.cpshape`, including **all six sizes**
+2. Keep every `.cpfont` beside its matching `.cpshape`, including **all ten sizes**
    for each family you install. For example:
    `fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpfont` and
    `fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpshape`.
    The 8/10/12 pt pairs support missing Thai glyphs in the UI, including small
-   reader status titles and file-browser names; the 12/14/16/18 pt pairs support
-   reader sizes. A reader-size pair alone does not supply the small UI sizes.
+   reader status titles and file-browser names; 20/22/24/26 pt add larger reading
+   sizes alongside 12/14/16/18 pt. A reader-size pair alone does not supply the small UI sizes.
 3. Reinsert the card, **restart**, then choose **Settings > Reader > Font Family >
    THCraft-NotoSansThai**. **16 pt** is the recommended starting reading size.
    The other two families can be selected the same way.

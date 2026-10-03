@@ -25,9 +25,9 @@ This workflow does not upload firmware, push Git changes, or publish a GitHub re
   The production environment is **`x4pro-gh_release`**, not the default X4/C3
   environment or the more verbose `x4pro` development environment.
 - Have the complete, previously prepared Thai font ZIP available. The default
-  input is `Releases/x4pro-thai/THCraft-Thai-Fonts.zip`. These local font assets
-  are not recreated by compiling firmware and may need to be supplied separately
-  on a fresh checkout. To use a different complete ZIP, set its path first:
+  input is `Release/x4pro-thai/THCraft-Thai-Fonts.zip`; it is staged before any
+  output is replaced. The older `Releases/` example lacks the additional sizes.
+  These assets are not recreated by compiling firmware. To use a different complete ZIP, set its path first:
 
   ```bash
   export FONT_ZIP="/absolute/path/to/THCraft-Thai-Fonts.zip"
@@ -49,9 +49,9 @@ fonts/
 ```
 
 Every family must include matching `.cpfont` and `.cpshape` files at **8, 10,
-12, 14, 16, and 18 pt**. JS-Jindara also includes **20, 22, 24, and 26 pt**.
-For example, `fonts/Mali/Mali_16.cpfont` must remain beside
-`fonts/Mali/Mali_16.cpshape`. The current pack contains 46 pairs.
+12, 14, 16, 18, 20, 22, 24, and 26 pt**.
+For example, `fonts/Mali/Mali_26.cpfont` must remain beside
+`fonts/Mali/Mali_26.cpshape`. The complete pack contains 70 pairs.
 Keep all license notices and any accompanying installation/source files.
 
 The workflow validates the archive and copies it **byte-for-byte**; it does not
@@ -60,6 +60,15 @@ Do not substitute the output of `scripts/package_thai_fonts.py` alone: that
 script builds only THCraft-NotoSansThai, THCraft-NotoSerifThai, and THCraft-Sarabun,
 not this complete seven-family collection. After updating any fonts, supply an
 updated complete ZIP as `FONT_ZIP` before running the workflow.
+
+The 20/22/24/26 pt pairs include 176 IPA/modifier characters, 112 arrows,
+1,166 Arabic/presentation-form characters, 87 Thai characters, and 1,045
+characters from the converter's Symbols preset. This is not exhaustive Unicode
+or emoji coverage. Source glyphs take precedence over the existing ordered
+Noto Sans/Symbols/Symbols 2/Math/Arabic fallbacks. The new Garuda sizes use that
+fallback chain too; its original 8–18 pt pairs remain unchanged and retain their
+native coverage. Existing Jindara 20–26 pt pairs are preserved byte-for-byte.
+
 
 ## Build and package
 
@@ -88,7 +97,7 @@ environment = "x4pro-gh_release"
 build = root / ".pio" / "build" / environment
 output = root / "Release" / "x4pro-thai"
 font_zip = Path(os.environ.get(
-    "FONT_ZIP", "Releases/x4pro-thai/THCraft-Thai-Fonts.zip"
+    "FONT_ZIP", "Release/x4pro-thai/THCraft-Thai-Fonts.zip"
 )).expanduser().resolve()
 artifacts = ("firmware.bin", "firmware.factory.bin", "THCraft-Thai-Fonts.zip")
 families = {
@@ -110,9 +119,7 @@ with zipfile.ZipFile(font_zip) as archive:
     if {p.with_suffix(".cpshape") for p in fonts} != shapes:
         raise SystemExit("Every .cpfont must have a matching .cpshape, and vice versa")
     for family in sorted(families):
-        sizes = (8, 10, 12, 14, 16, 18)
-        if family == "JS-Jindara":
-            sizes += (20, 22, 24, 26)
+        sizes = (8, 10, 12, 14, 16, 18, 20, 22, 24, 26)
         for size in sizes:
             name = f"fonts/{family}/{family}_{size}.cpfont"
             if name not in members:
@@ -195,3 +202,7 @@ corresponding source as required by that license. The local
 conversion information; inspect and include the required material in the complete
 font archive before packaging a public release. Preserve the other families'
 OFL and source notices as well.
+
+The expanded Garuda 20–26 pt files also contain OFL-licensed fallback glyphs.
+Their named Noto OFL files are included, but do not relicense Garuda itself.
+Review the combined GPL/OFL distribution conditions before public release.

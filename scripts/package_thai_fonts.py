@@ -22,7 +22,7 @@ from prepare_thai_test_assets import (
     ARABIC_FALLBACK_SHA256, CONVERTER, FALLBACK_SHA256, FONTS, PACK_FALLBACK_FONTS, ROOT,
 )
 
-SIZES = (8, 10, 12, 14, 16, 18)
+SIZES = (8, 10, 12, 14, 16, 18, 20, 22, 24, 26)
 FAMILIES = {
     "noto-sans-thai": "THCraft-NotoSansThai",
     "noto-serif-thai": "THCraft-NotoSerifThai",
@@ -34,8 +34,8 @@ INSTALL = """THCraft Thai paired bitmap fonts
 
 1. Extract the fonts folder from this archive to the SD card root. Merge it
    with an existing fonts folder; keep all your original fonts and books.
-2. Keep each .cpfont and its same-basename .cpshape together. Install all six
-   sizes (8, 10, 12, 14, 16, 18) for each family you use, including the UI sizes.
+2. Keep each .cpfont and its same-basename .cpshape together. Install all ten
+   sizes (8, 10, 12, 14, 16, 18, 20, 22, 24, 26) for each family you use, including the UI sizes.
 3. Reinsert the SD card and restart the reader. In Settings > Reader > Font
    Family select THCraft-NotoSansThai; 16 pt is recommended for reading.
    The selected family also supplies missing Thai glyphs at UI sizes 8/10/12.
@@ -221,7 +221,7 @@ def package(assets: Path, output: Path, archive: Path) -> None:
             "packager_sha256": digest(Path(__file__)), "pairs": pairs,
             "files": [file_record(path, stage) for path in sorted(stage.rglob("*")) if path.is_file()],
         })
-        # Publish only after all 18 pairs and their licenses have been validated.
+        # Publish only after all 30 pairs and their licenses have been validated.
         files = [path for path in stage.rglob("*") if path.is_file()]
         expected = {path.relative_to(stage) for path in files}
         if output.exists():
