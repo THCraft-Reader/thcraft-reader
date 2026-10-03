@@ -8,6 +8,47 @@ and the existing bitmap renderer. The acceptance baseline must be captured befor
 Thai analysis or glyph-placement changes. Host pixel evidence does not establish
 X4 Pro display, latency, internal-heap or PSRAM acceptance.
 
+## Thai Justify
+
+**Thai Justify** is a separate alignment option in Text Settings, the reader
+overlay, and `/api/settings` (`paragraphAlignment: 5`). Existing values 0–4 and
+the default Justify are unchanged. Its preview deliberately uses Thai text.
+
+Dictionary wrapping still chooses lines. On non-final lines with eligible Thai
+slots, spare advance width is shared equally between complete Thai letter
+clusters and ordinary space/CJK gaps; integer remainders go left-to-right.
+Vowels and tone marks stay with their cluster. Native ligatures, ruby groups,
+and focus-split tokens are internally atomic. Numbers, punctuation, malformed
+spans, orphan marks, and script transitions do not create Thai slots.
+There is no spacing cap or compression; final and overwide lines stay natural.
+English-only paragraphs use ordinary Justify.
+
+Thai-bearing paragraphs prepare exact rendered metrics, including native
+ligature outputs and kerning. Paired CPSHAPE, absent companions, and shaping
+disabled builds use the same expansion rules; fallback does not repair a font's
+existing mark design. Failed exact preparation or scratch allocation fails the
+section build rather than caching incomplete layout.
+
+Text and source offsets are unchanged. Expanded word/link rectangles include
+the internal budget. Resident metadata costs two bytes per existing word only
+on lines with expansion, inside TextBlock's existing arena. Layout reuses one
+four-byte-per-maximum-line-word scratch allocation and a lazy analyzed-token
+provenance bit per token; it does not retain per-cluster records. Unusually long
+Thai-bearing tokens (over 210 bytes) also use one checked, token-sized buffer
+reused across exact prefix measurements and streaming layout calls. Ordinary
+dictionary words use the bounded stack buffer. Section v52 invalidates old
+rendered caches without changing progress or font formats.
+
+Host verification uses `ThaiRenderProbe --alignment thai-justify
+--cache-roundtrip on --verify-thai-placement on`: glyph-level checks cover
+normal/rotated and scaled drawing, cold/full prewarm, chained native ligatures,
+and allocation failure. Cache replay must match BW and both grayscale planes.
+On-device acceptance also requires checking both six-option menus and the Thai
+preview in all orientations, reopening at the same reading position, saving and
+rebooting with value 5, expanded selection/link hit boxes, and free heap above
+50 KiB without persistent growth across page turns.
+
+
 ## Existing pipeline
 
 EPUB extraction produces chapter XHTML. Expat callbacks in
@@ -44,8 +85,8 @@ identity currently hashes the header/style TOC (`SdCardFont.h:144–146`).
 ## Thai analysis contract
 
 Thai cannot be added to `utf8IsCjkBreakable`: breaks require orthographic clusters
-and dictionary context, and Thai dictionary gaps must not stretch during
-justification. Reuse TokenBoundary's two bits (`TokenBoundary.h:7–19`): ordinary
+and dictionary context. Ordinary Justify does not stretch Thai dictionary gaps.
+Reuse TokenBoundary's two bits (`TokenBoundary.h:7–19`): ordinary
 space `(false,false)`, breakable zero-space attachment `(true,true)`, protected
 attachment `(true,false)`. A separate lazy break kind distinguishes ordinary
 space/word/punctuation opportunities from emergency and prohibited boundaries

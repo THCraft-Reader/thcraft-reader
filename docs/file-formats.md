@@ -90,6 +90,19 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 52
+
+TextBlock's presence byte is now flags: bit 0 carries focus metadata and bit 1
+carries Thai cluster expansion. Other bits are invalid. When bit 1 is set,
+`u16 thaiExtraPixels[wordCount]` follows the optional focus suffix positions,
+before the byte arrays. Empty/all-zero budgets omit the array. All 16-bit arrays
+remain evenly aligned in the single resident arena; truncated arrays are rejected.
+
+Reader alignment 5 is Thai Justify; values 0–4 retain their meanings. Alignment
+already participates in section-cache validation. Version 51 and older final
+and partial caches are rebuilt. The 48-byte header, reading progress, book
+metadata, Thai analysis identity, CPFont and CPSHAPE formats are unchanged.
+
 ### Version 51
 
 The 48-byte header combines upstream's `u8 paragraphIndentSpaces` after
@@ -266,7 +279,8 @@ enum TextAlign : u8 {
     LEFT_ALIGN = 1,
     CENTER_ALIGN = 2,
     RIGHT_ALIGN = 3,
-    NONE = 4
+    NONE = 4,
+    THAI_JUSTIFIED = 5
 };
 
 struct BlockStyle {
@@ -289,22 +303,26 @@ struct BlockStyle {
 
 struct TextBlock {
     u16 wordCount;
-    u8 hasFocus;
+    u8 flags [[comment("bit 0: focus; bit 1: Thai expansion; other bits invalid")]];
     u16 textBytes [[comment("Total size of text[], including one NUL per word")]];
 
     if (wordCount > 0) {
         u16 textOff[wordCount] [[comment("Byte offset of word i's text within text[]")]];
         s16 wordXPos[wordCount];
-        if (hasFocus != 0) {
+        if ((flags & 1) != 0) {
             u16 wordFocusSuffixX[wordCount] [[comment("Suffix x offset from word start")]];
         }
+        if ((flags & 2) != 0) {
+            u16 thaiExtraPixels[wordCount] [[comment("Internal Thai expansion budget in layout pixels")]];
+        }
         WordStyle wordStyle[wordCount];
-        if (hasFocus != 0) {
+        if ((flags & 1) != 0) {
             u8 wordFocusBoundary[wordCount] [[comment("UTF-8 byte boundary between bold prefix and suffix")]];
         }
         char text[textBytes] [[comment("All words back to back, each NUL-terminated")]];
     }
 
+    String rubyTexts[wordCount];
     BlockStyle blockStyle;
 };
 

@@ -52,8 +52,9 @@ constexpr StrId WORD_SPACING_IDS[] = {StrId::STR_SPACING_50_PERCENT,  StrId::STR
 constexpr StrId CHARACTER_SPACING_IDS[] = {StrId::STR_SPACING_MINUS_2, StrId::STR_SPACING_MINUS_1,
                                            StrId::STR_SPACING_ZERO, StrId::STR_SPACING_PLUS_1,
                                            StrId::STR_SPACING_PLUS_2};
-constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
-                                   StrId::STR_BOOK_S_STYLE};
+constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY,     StrId::STR_ALIGN_LEFT,   StrId::STR_CENTER,
+                                   StrId::STR_ALIGN_RIGHT, StrId::STR_BOOK_S_STYLE, StrId::STR_THAI_JUSTIFY};
+static_assert(std::size(ALIGNMENT_IDS) == CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT, "alignment labels");
 constexpr int MARGIN_MIN = CrossPointSettings::SCREEN_MARGIN_MIN;
 constexpr int MARGIN_MAX = CrossPointSettings::SCREEN_MARGIN_MAX;
 constexpr int MARGIN_STEP = CrossPointSettings::SCREEN_MARGIN_STEP;

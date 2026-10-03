@@ -1,14 +1,14 @@
 #include "SdCardFont.h"
 
 #include <FontPsram.h>  // PSRAM-preferring resident buffers (font memory lift)
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <Utf8.h>
+#include <MinizConfig.h>
 #include <ThaiCharClass.h>
 #include <ThaiConfig.h>
-#include <MinizConfig.h>
-#include <HalMemory.h>
+#include <Utf8.h>
 
 #include <algorithm>
 #include <climits>
@@ -61,7 +61,6 @@ inline uint32_t readU32(const uint8_t* p) {
   return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
 
-
 // resetStyleMiniData retention bounds (see the PerStyle comment in the header).
 constexpr size_t MINI_RETAIN_MIN_FREE_HEAP = 40 * 1024;
 constexpr uint8_t MINI_UNDERUSE_RUNS_BEFORE_FREE = 3;
@@ -103,15 +102,16 @@ void SdCardFont::loadThaiShape() {
     HalFile companion;
     if (!Storage.openFileForRead("THAI", path, companion)) return false;
     const size_t size = companion.size();
-    if (size < 44 || size > ThaiShapeView::MAX_FAMILY_BYTES ||
-        HalMemory::getInternal8BitHeap().freeBytes <= 50 * 1024) return false;
+    if (size < 44 || size > ThaiShapeView::MAX_FAMILY_BYTES || HalMemory::getInternal8BitHeap().freeBytes <= 50 * 1024)
+      return false;
     std::unique_ptr<uint8_t[], ThaiShapeBufferDeleter> buffer(psramNewArray<uint8_t>(size));
     if (!buffer || HalMemory::getInternal8BitHeap().freeBytes <= 50 * 1024) return false;
     uint8_t* bytes = buffer.get();
     if (companion.read(bytes, size) != static_cast<int>(size)) return false;
     companion.close();
     if (memcmp(bytes, "CPSHAPE\0", 8) || readU16(bytes + 8) != 1 || readU16(bytes + 10) != 32 ||
-        readU32(bytes + 24) != size || readU32(bytes + 28) != styleCount_) return false;
+        readU32(bytes + 24) != size || readU32(bytes + 28) != styleCount_)
+      return false;
     const uint32_t payloadCRC = static_cast<uint32_t>(mz_crc32(MZ_CRC32_INIT, bytes + 32, size - 32));
     if (payloadCRC != readU32(bytes + 20)) return false;
     HalFile font;
@@ -142,7 +142,8 @@ void SdCardFont::loadThaiShape() {
       if (selected == MAX_STYLES) return false;
       const auto& s = styles_[selected];
       if (s.intervalsFileOffset < previousEnd || s.bitmapFileOffset < s.intervalsFileOffset ||
-          !checksumRange(s.intervalsFileOffset, s.bitmapFileOffset - s.intervalsFileOffset)) return false;
+          !checksumRange(s.intervalsFileOffset, s.bitmapFileOffset - s.intervalsFileOffset))
+        return false;
       previousEnd = s.bitmapFileOffset;
       visited |= static_cast<uint8_t>(1u << selected);
     }
@@ -155,10 +156,13 @@ void SdCardFont::loadThaiShape() {
       const uint8_t* toc = bytes + 32 + i * 12;
       const uint8_t style = toc[0];
       const uint32_t offset = readU32(toc + 4), length = readU32(toc + 8);
-      if (style >= MAX_STYLES || !styles_[style].present || (seen & (1u << style)) ||
-          toc[1] || toc[2] || toc[3] || offset != nextOffset || offset > size || length > size - offset)
+      if (style >= MAX_STYLES || !styles_[style].present || (seen & (1u << style)) || toc[1] || toc[2] || toc[3] ||
+          offset != nextOffset || offset > size || length > size - offset)
         return false;
-      struct CoverageContext { const SdCardFont* font; const PerStyle* style; } context{this, &styles_[style]};
+      struct CoverageContext {
+        const SdCardFont* font;
+        const PerStyle* style;
+      } context{this, &styles_[style]};
       const auto covered = [](void* ctx, uint32_t cp) -> bool {
         const auto& c = *static_cast<CoverageContext*>(ctx);
         return c.font->findGlobalGlyphIndex(*c.style, cp) >= 0;
@@ -166,7 +170,8 @@ void SdCardFont::loadThaiShape() {
       if (!views[style].validate(bytes + offset, length, covered, &context)) return false;
       const auto& h = styles_[style].header;
       if (views[style].ascender() != h.ascender || views[style].descender() != h.descender ||
-          views[style].lineAdvance() != h.advanceY) return false;
+          views[style].lineAdvance() != h.advanceY)
+        return false;
       seen |= static_cast<uint8_t>(1u << style);
       nextOffset += length;
     }
@@ -188,10 +193,11 @@ void SdCardFont::loadThaiShape() {
 #endif
 }
 
-bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count,
-                                      uint32_t limit, uint8_t styleMask, bool shapeText) const {
+bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count, uint32_t limit,
+                                       uint8_t styleMask, bool shapeText, bool nativeLigatures) const {
   const auto add = [&](uint32_t cp) -> bool {
-    for (uint32_t i = 0; i < count; ++i) if (codepoints[i] == cp) return false;
+    for (uint32_t i = 0; i < count; ++i)
+      if (codepoints[i] == cp) return false;
     if (count == limit) return true;
     codepoints[count++] = cp;
     return false;
@@ -201,37 +207,74 @@ bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, u
     for (uint8_t i = 0; i < MAX_STYLES; ++i)
       if ((styleMask & (1u << i)) && styles_[i].thaiShape.valid()) shapedStyles |= static_cast<uint8_t>(1u << i);
   }
-  if (!shapedStyles) {
+  // Exact preparation also retains raw source coverage for fallback and later prewarms.
+  if (!shapedStyles || nativeLigatures) {
     const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
     while (*p) {
       const uint32_t cp = utf8NextCodepoint(&p);
       if (!cp) break;
       if (add(cp)) return true;
     }
-    return false;
+    if (!shapedStyles && !nativeLigatures) return false;
   }
   const std::string_view source(text);
   for (uint8_t i = 0; i < MAX_STYLES; ++i) {
-    if (!(styleMask & (1u << i))) continue;
+    if (!(styleMask & (1u << i)) || !styles_[i].present) continue;
+    if (nativeLigatures && !(shapedStyles & (1u << i)) && styles_[i].header.ligaturePairCount == 0) continue;
     size_t offset = 0;
+    size_t nativeUntil = 0;
     while (offset < source.size()) {
       ThaiGlyphCursor cursor;
-      if ((shapedStyles & (1u << i)) && cursor.begin(source.substr(offset), styles_[i].thaiShape)) {
+      if (offset >= nativeUntil && (shapedStyles & (1u << i)) &&
+          cursor.begin(source.substr(offset), styles_[i].thaiShape)) {
         ThaiGlyphPlacement placement;
-        while (cursor.next(placement)) if (add(placement.codepoint)) return true;
+        while (cursor.next(placement))
+          if (add(placement.codepoint)) return true;
         offset += cursor.consumedBytes();
       } else {
-        // Unsupported outer clusters remain native as a whole.
-        const size_t end = cursor.consumedBytes() ? offset + cursor.consumedBytes() : offset +
-            thai::detail::decode(source, offset, true).bytes;
-        while (offset < end) {
+        // Match renderer whole-cluster admission: a failed recipe stays native
+        // until the outer cluster ends, even after ligatures consume source bytes.
+        if (offset >= nativeUntil) nativeUntil = offset + cursor.consumedBytes();
+        const char* next = text + offset;
+        uint32_t cp;
+        if (nativeLigatures) {
+          cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&next));
+          if (!cp) break;
+          if (!utf8IsCombiningMark(cp)) cp = styles_[i].epdFont.applyLigatures(cp, next);
+        } else {
           const auto scalar = thai::detail::decode(source, offset, true);
-          if (add(scalar.value)) return true;
-          offset += scalar.bytes;
+          cp = scalar.value;
+          next += scalar.bytes;
         }
+        if (add(cp)) return true;
+        offset = static_cast<size_t>(next - text);
       }
     }
   }
+  return false;
+}
+
+bool SdCardFont::completeLigatureCoverage(uint32_t* codepoints, uint32_t& count, const uint32_t limit,
+                                          const uint8_t styleMask) const {
+  const auto contains = [&](uint32_t cp) {
+    return std::find(codepoints, codepoints + count, cp) != codepoints + count;
+  };
+  uint32_t previousCount;
+  do {
+    previousCount = count;
+    for (uint8_t si = 0; si < MAX_STYLES; ++si) {
+      const auto& s = styles_[si];
+      if (!(styleMask & (1u << si)) || !s.present || !s.kernLigLoaded || !s.ligaturePairs) continue;
+      for (uint8_t li = 0; li < s.header.ligaturePairCount; ++li) {
+        const auto& pair = s.ligaturePairs[li];
+        const uint32_t output = pair.ligatureCp;
+        if (contains(output) || !contains(pair.pair >> 16) || !contains(pair.pair & 0xFFFF)) continue;
+        if (count == limit) return true;
+        codepoints[count++] = output;
+      }
+    }
+    // A chained output can sort before its input pair; retain the bounded closure.
+  } while (count != previousCount);
   return false;
 }
 
@@ -385,7 +428,12 @@ void SdCardFont::applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const
 }
 
 bool SdCardFont::loadStyleKernLigatureData(PerStyle& s) {
-  if (s.kernLigLoaded) return true;
+  if (s.kernLigLoaded) {
+    // A metadata-only mini rebuild may have cleared its ligature pointers.
+    s.miniData.ligaturePairs = s.ligaturePairs;
+    s.miniData.ligaturePairCount = s.header.ligaturePairCount;
+    return true;
+  }
   bool hasKern = s.header.kernLeftEntryCount > 0;
   bool hasLig = s.header.ligaturePairCount > 0;
   if (!hasKern && !hasLig) {
@@ -462,6 +510,8 @@ bool SdCardFont::loadStyleKernLigatureData(PerStyle& s) {
   // applyKernLigaturePointers() after buildMiniKernMatrix() runs.
   s.stubData.ligaturePairs = s.ligaturePairs;
   s.stubData.ligaturePairCount = s.header.ligaturePairCount;
+  s.miniData.ligaturePairs = s.ligaturePairs;
+  s.miniData.ligaturePairCount = s.header.ligaturePairCount;
 
   LOG_DBG("SDCF", "Kern classes + lig loaded: kernL=%u, kernR=%u, ligs=%u", s.header.kernLeftEntryCount,
           s.header.kernRightEntryCount, s.header.ligaturePairCount);
@@ -967,8 +1017,8 @@ namespace {
 const char* singleTextGetter(const void* ctx, uint32_t) { return static_cast<const char*>(ctx); }
 }  // namespace
 
-int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly, bool loadKernLig,
-                        bool accumulate, bool shapeText) {
+int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly, bool loadKernLig, bool accumulate,
+                        bool shapeText) {
   return prewarm(&singleTextGetter, utf8Text, 1, styleMask, metadataOnly, loadKernLig, accumulate, shapeText);
 }
 
@@ -1028,11 +1078,17 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
     return -1;
   }
   uint32_t cpCount = 0;
+  const bool nativeLigatures = !metadataOnly && loadKernLig && shapeText;
+  if (!metadataOnly && loadKernLig) {
+    for (uint8_t si = 0; si < MAX_STYLES; ++si) {
+      if ((styleMask & (1u << si)) && styles_[si].present) loadStyleKernLigatureData(styles_[si]);
+    }
+  }
 
   for (uint32_t ti = 0; ti < textCount && cpCount < cpBudget; ti++) {
     const char* text = getter(ctx, ti);
     if (text == nullptr) continue;
-    if (collectTextCodepoints(text, codepoints.get(), cpCount, cpBudget, styleMask, shapeText)) break;
+    if (collectTextCodepoints(text, codepoints.get(), cpCount, cpBudget, styleMask, shapeText, nativeLigatures)) break;
   }
 
   // Always include the replacement character
@@ -1049,43 +1105,10 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
     }
   }
 
-  // Add ligature output codepoints from all styles being prewarmed.
-  // Skip during metadata-only prewarm (layout measurement) to avoid loading
-  // kern/lig data for all styles upfront (~22KB per style). Kern/lig is
-  // loaded per-style in prewarmStyle() during the full render prewarm instead.
+  // Glyph-set scans have no source order. Complete chains in the same bounded
+  // scratch so cold cached pages retain every emitted glyph's kerning class.
   if (!metadataOnly && loadKernLig) {
-    for (uint8_t si = 0; si < MAX_STYLES; si++) {
-      if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
-      auto& s = styles_[si];
-
-      loadStyleKernLigatureData(s);
-      if (s.ligaturePairs && s.header.ligaturePairCount > 0) {
-        for (uint8_t li = 0; li < s.header.ligaturePairCount && cpCount < MAX_PAGE_GLYPHS; li++) {
-          uint32_t leftCp = s.ligaturePairs[li].pair >> 16;
-          uint32_t rightCp = s.ligaturePairs[li].pair & 0xFFFF;
-          uint32_t outCp = s.ligaturePairs[li].ligatureCp;
-
-          bool hasLeft = false, hasRight = false;
-          for (uint32_t i = 0; i < cpCount; i++) {
-            if (codepoints[i] == leftCp) hasLeft = true;
-            if (codepoints[i] == rightCp) hasRight = true;
-            if (hasLeft && hasRight) break;
-          }
-          if (!hasLeft || !hasRight) continue;
-
-          bool hasOut = false;
-          for (uint32_t i = 0; i < cpCount; i++) {
-            if (codepoints[i] == outCp) {
-              hasOut = true;
-              break;
-            }
-          }
-          if (!hasOut) {
-            codepoints[cpCount++] = outCp;
-          }
-        }
-      }
-    }
+    completeLigatureCoverage(codepoints.get(), cpCount, MAX_PAGE_GLYPHS, styleMask);
   }
 
   // Sort codepoints for ordered interval building
@@ -1723,7 +1746,7 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
 
 int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens,
                                         const size_t segmentCount, const bool includeSpace, const bool includeHyphen,
-                                        uint8_t styleMask, const char* extraText) {
+                                        uint8_t styleMask, const char* extraText, bool loadKernLig) {
   if (!loaded_) return -1;
   styleMask = resolveStyleMask(styleMask);
   if (styleMask == 0) return 0;
@@ -1732,7 +1755,8 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
 
   // +2 reserved slots for space and hyphen injected after the main scan.
   static constexpr uint32_t MAX_UNIQUE_CODEPOINTS = 4096;
-  uint32_t* codepoints = new (std::nothrow) uint32_t[MAX_UNIQUE_CODEPOINTS + 2];
+  std::unique_ptr<uint32_t[]> scratch(new (std::nothrow) uint32_t[MAX_UNIQUE_CODEPOINTS + 2]);
+  uint32_t* const codepoints = scratch.get();
   if (!codepoints) {
     LOG_ERR("SDCF", "buildAdvanceTable: failed to allocate codepoint buffer (%u bytes)", MAX_UNIQUE_CODEPOINTS * 4);
     return -1;
@@ -1740,17 +1764,27 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
   uint32_t cpCount = 0;
   bool hitCap = false;
 
+  // Native output collection must see the same ligature tables as rendering.
+  if (loadKernLig) {
+    for (uint8_t si = 0; si < MAX_STYLES; ++si) {
+      if ((styleMask & (1u << si)) && styles_[si].present && !loadStyleKernLigatureData(styles_[si])) return -1;
+    }
+  }
+
   // Each segment holds consecutive NUL-terminated words; walk word by word.
   for (size_t seg = 0; seg < segmentCount && !hitCap; ++seg) {
     const char* p = segments[seg];
     const char* const end = p + segmentLens[seg];
     while (p < end && !hitCap) {
-      hitCap = collectTextCodepoints(p, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask, true);
+      hitCap = collectTextCodepoints(p, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask, true, loadKernLig);
       p += strlen(p) + 1;
     }
   }
   if (extraText && !hitCap) {
-    hitCap = collectTextCodepoints(extraText, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask, true);
+    hitCap = collectTextCodepoints(extraText, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask, true, loadKernLig);
+  }
+  if (loadKernLig && !hitCap) {
+    hitCap = completeLigatureCoverage(codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask);
   }
 
   if (includeSpace && std::none_of(codepoints, codepoints + cpCount, [](uint32_t c) { return c == ' '; }))
@@ -1759,6 +1793,10 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
     codepoints[cpCount++] = '-';
 
   if (hitCap) {
+    if (loadKernLig) {
+      LOG_ERR("SDCF", "buildAdvanceTable: exact metric codepoint cap (%u) hit", MAX_UNIQUE_CODEPOINTS);
+      return -1;
+    }
     LOG_ERR("SDCF", "buildAdvanceTable: unique codepoint cap (%u) hit, layout may be approximate",
             MAX_UNIQUE_CODEPOINTS);
   }
@@ -1766,12 +1804,11 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
   int totalMissed = fetchAdvancesForCodepoints(codepoints, cpCount, styleMask);
   for (uint8_t si = 0; si < MAX_STYLES; ++si) {
     auto& s = styles_[si];
-    if (!(styleMask & (1u << si)) || !s.thaiShape.valid()) continue;
-    if (loadStyleKernLigatureData(s)) {
-      buildMiniKernMatrix(s, codepoints, cpCount);
+    if (!(styleMask & (1u << si)) || !(s.thaiShape.valid() || loadKernLig)) continue;
+    if (!loadStyleKernLigatureData(s) || !buildMiniKernMatrix(s, codepoints, cpCount)) {
+      if (loadKernLig) return -1;
     }
   }
-  delete[] codepoints;
   stats_.prewarmTotalMs = millis() - startMs;
   return totalMissed;
 }

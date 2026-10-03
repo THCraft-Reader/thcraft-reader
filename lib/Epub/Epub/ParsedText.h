@@ -6,6 +6,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,8 @@ class ParsedText {
   // each token; ordinary non-Thai paragraphs keep the existing flags alone.
   bool hasThaiTokens = false;
   std::vector<thai::BreakKind> wordBreakRanks;
+  // Only analyzed, complete-cluster spans may supply styled Thai expansion edges.
+  std::vector<bool> wordThaiAnalyzed;
   // Focus Reading emphasis: bytes [0, wordFocusBoundary) render bold, the rest at wordStyles.
   // 0 = none. An annotation rather than a token split, so the hyphenator and line breaker still
   // see whole words; TextBlock stores emphasis the same way, so extractLine passes it through.
@@ -74,6 +77,9 @@ class ParsedText {
   bool isNaturalAlign;
   bool hasRtlWord;
   bool droppedWords = false;
+  bool thaiJustificationMetrics = false;
+  std::unique_ptr<char[]> thaiPrefixScratch;
+  size_t thaiPrefixCapacity = 0;
   std::vector<std::string> reorderedWordsScratch;
   std::vector<EpdFontFamily::Style> reorderedStylesScratch;
   std::vector<uint16_t> reorderedWidthsScratch;
@@ -107,7 +113,7 @@ class ParsedText {
                                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
                                                   std::vector<bool>& noSpaceBeforeVec);
   std::vector<size_t> computeThaiLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
-                                           std::vector<uint16_t>& wordWidths);
+                                            std::vector<uint16_t>& wordWidths);
   size_t splitThaiGroup(size_t begin, size_t end, int availableWidth, const GfxRenderer& renderer, int fontId,
                         std::vector<uint16_t>& wordWidths);
   bool splitThaiToken(size_t index, size_t offset, thai::BreakKind rank, const GfxRenderer& renderer, int fontId,
@@ -119,7 +125,8 @@ class ParsedText {
                    const std::vector<bool>& continuesVec, const std::vector<bool>& noSpaceBeforeVec,
                    const std::vector<size_t>& lineBreakIndices,
                    const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
-                   const GfxRenderer& renderer, int fontId);
+                   const GfxRenderer& renderer, int fontId, std::span<uint16_t> thaiGapCounts,
+                   std::span<uint16_t> thaiBudgets);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
 
  public:

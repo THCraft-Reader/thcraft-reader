@@ -283,7 +283,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
             .withTextSettings(),
         SettingInfo::Enum(StrId::STR_PARA_ALIGNMENT, &CrossPointSettings::paragraphAlignment,
                           {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
-                           StrId::STR_BOOK_S_STYLE},
+                           StrId::STR_BOOK_S_STYLE, StrId::STR_THAI_JUSTIFY},
                           "paragraphAlignment", StrId::STR_CAT_READER)
             .withTextSettings(),
         SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",

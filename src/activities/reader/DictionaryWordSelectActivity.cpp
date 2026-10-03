@@ -93,6 +93,9 @@ void DictionaryWordSelectActivity::extractWords() {
       box.width = 0;  // measured below, once the advance table is ready
       box.row = rowCount;
       box.text = text;
+      box.renderedMetrics = block->getBlockStyle().alignment == CssTextAlign::ThaiJustify;
+      box.thaiExtraPixels = box.renderedMetrics ? block->thaiExpansion(i) : 0;
+      box.tracking = box.renderedMetrics ? block->getBlockStyle().characterSpacing : 0;
       words.push_back(box);
       rowHasWords = true;
 
@@ -106,7 +109,11 @@ void DictionaryWordSelectActivity::extractWords() {
   if (styleMask == 0) styleMask = 0x01;  // REGULAR
   renderer.ensureSdCardFontReady(fontId, pageText.c_str(), styleMask);
   for (auto& word : words) {
-    word.width = static_cast<int16_t>(renderer.getTextAdvanceX(fontId, word.text, word.style));
+    word.width = static_cast<int16_t>(
+        word.renderedMetrics
+            ? renderer.getTextAdvanceX(fontId, word.text, word.style, word.tracking, BidiUtils::BidiBaseDir::AUTO,
+                                       GfxRenderer::TextMeasureMode::Rendered, word.thaiExtraPixels)
+            : renderer.getTextAdvanceX(fontId, word.text, word.style));
   }
 }
 

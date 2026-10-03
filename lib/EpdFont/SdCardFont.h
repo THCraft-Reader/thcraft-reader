@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "EpdFont.h"
@@ -81,9 +81,11 @@ class SdCardFont {
   int buildAdvanceTable(const char* utf8Text, uint8_t styleMask = 0x0F, const char* extraText = nullptr);
   // Packed variant: each segment holds consecutive NUL-terminated words
   // (paragraph word-arena chunks), scanned without per-word string objects.
+  // loadKernLig prepares exact rendered metrics, including native ligature outputs.
+  // Returns -1 on requested kern/ligature preparation failure or codepoint-cap overflow.
   int buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
                               bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
-                              const char* extraText = nullptr);
+                              const char* extraText = nullptr, bool loadKernLig = false);
 
   // Look up advanceX for a codepoint from the advance table.
   // Returns false if absent; a cached zero-advance mark is a successful lookup.
@@ -285,8 +287,9 @@ class SdCardFont {
   uint8_t styleCount_ = 0;
   std::unique_ptr<uint8_t[], ThaiShapeBufferDeleter> thaiShapeBuffer_;
   void loadThaiShape();
-  bool collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count,
-                             uint32_t limit, uint8_t styleMask, bool shapeText) const;
+  bool collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count, uint32_t limit, uint8_t styleMask,
+                             bool shapeText, bool nativeLigatures = false) const;
+  bool completeLigatureCoverage(uint32_t* codepoints, uint32_t& count, uint32_t limit, uint8_t styleMask) const;
 
   char filePath_[128] = {};
 

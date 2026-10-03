@@ -3,10 +3,10 @@
 #include <FontDecompressor.h>
 #include <Logging.h>
 #include <SdCardFont.h>
+#include <ThaiConfig.h>
+#include <ThaiShape.h>
 #include <TtfEpdFont.h>
 #include <Utf8.h>
-#include <ThaiShape.h>
-#include <ThaiConfig.h>
 
 #include <algorithm>
 #include <cstring>
@@ -66,7 +66,7 @@ void FontCacheManager::releaseSdFontCaches() {
 }
 
 void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask, bool accumulate,
-                                   bool shapeText) {
+                                    bool shapeText) {
   // TTF (vector) font prewarm path. This is the single dispatch every draw path
   // funnels through (reader endScanAndPrewarm, the settings preview, UI text),
   // so building here covers them all. accumulate=false means "this is the whole
@@ -87,8 +87,8 @@ void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t st
   // SD card font prewarm path: prewarm all requested styles in one call
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
-    int missed = it->second->prewarm(utf8Text, styleMask, /*metadataOnly=*/false, /*loadKernLig=*/true,
-                                    accumulate, shapeText);
+    int missed =
+        it->second->prewarm(utf8Text, styleMask, /*metadataOnly=*/false, /*loadKernLig=*/true, accumulate, shapeText);
     if (missed > 0) {
       LOG_DBG("FCM", "prewarmCache(SD): %d glyph(s) not found (styleMask=0x%02X)", missed, styleMask);
     }
@@ -196,6 +196,15 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
     if (shape && cursor >= nativeUntil) {
       ThaiGlyphCursor shaped;
       if (shaped.begin(std::string_view(cursor, end - cursor), *shape)) {
+        // Cold scans also need source coverage: native ligatures may consume a
+        // later shaped cluster once SD tables are loaded during prewarm.
+        const char* raw = cursor;
+        const char* const clusterEnd = cursor + shaped.consumedBytes();
+        while (raw < clusterEnd) {
+          const uint32_t codepoint = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&raw));
+          if (!codepoint) break;
+          recordCodepoint(codepoint);
+        }
         ThaiGlyphPlacement placement;
         while (shaped.next(placement)) recordCodepoint(placement.codepoint);
         cursor += shaped.consumedBytes();

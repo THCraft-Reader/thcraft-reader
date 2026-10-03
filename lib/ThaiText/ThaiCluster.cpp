@@ -38,8 +38,10 @@ struct Match {
   Match& range(uint16_t low, uint16_t high, bool optional = false) {
     if (state != MatchState::Yes) return *this;
     if (pos == window.count) {
-      if (!window.final) state = MatchState::More;
-      else if (!optional) state = MatchState::No;
+      if (!window.final)
+        state = MatchState::More;
+      else if (!optional)
+        state = MatchState::No;
     } else if (window.cp[pos] >= low && window.cp[pos] <= high) {
       ++pos;
     } else if (!optional) {
@@ -52,8 +54,10 @@ struct Match {
   Match& tone(bool optional = true) { return range(0x0E48, 0x0E4B, optional); }
 
   void acceptOptional(const Match& branch) {
-    if (branch.state == MatchState::Yes) pos = branch.pos;
-    else if (branch.state == MatchState::More) state = MatchState::More;
+    if (branch.state == MatchState::Yes)
+      pos = branch.pos;
+    else if (branch.state == MatchState::More)
+      state = MatchState::More;
   }
   Match& toneBase() {
     if (state != MatchState::Yes) return *this;
@@ -86,9 +90,12 @@ struct Match {
   }
   Match& vowelIUU() {
     if (state != MatchState::Yes) return *this;
-    if (pos == window.count) state = window.final ? MatchState::No : MatchState::More;
-    else if (window.cp[pos] == 0x0E34 || window.cp[pos] == 0x0E38 || window.cp[pos] == 0x0E39) ++pos;
-    else state = MatchState::No;
+    if (pos == window.count)
+      state = window.final ? MatchState::No : MatchState::More;
+    else if (window.cp[pos] == 0x0E34 || window.cp[pos] == 0x0E38 || window.cp[pos] == 0x0E39)
+      ++pos;
+    else
+      state = MatchState::No;
     return *this;
   }
   Match& vowelIIUU() {
@@ -107,40 +114,103 @@ MatchState grammar(const Window& window, uint8_t start, uint8_t& end) {
     Match m{window, start};
     switch (rule) {
       // Explicit correction before upstream alternatives: เ c ื t อ ะ?
-      case 0: m.literal(0x0E40).base().literal(0x0E37).tone().literal(0x0E2D).literal(0x0E30, true); break;
-      case 1: m.base().literal(0x0E31).toneBase(); break;
-      case 2: m.base().literal(0x0E31).toneBase().suffix(); break;
-      case 3: m.literal(0x0E40).base().literal(0x0E47).base().suffix(); break;
-      case 4: m.literal(0x0E40).base().base().tone().literal(0x0E32).literal(0x0E30).suffix(); break;
-      case 5: m.literal(0x0E40).base().base().literal(0x0E35).tone().literal(0x0E22).literal(0x0E30).suffix(); break;
-      case 6: m.literal(0x0E40).base().base().literal(0x0E35).tone().literal(0x0E22).followingBaseOrVowel().suffix(); break;
-      case 7: m.literal(0x0E40).base().vowelIIUU().tone().literal(0x0E22).followingBaseOrVowel().suffix(); break;
-      case 8: m.literal(0x0E40).base().base().literal(0x0E47).base().suffix(); break;
-      case 9: m.literal(0x0E40).base().literal(0x0E34).base().literal(0x0E4C).base().suffix(); break;
-      case 10: m.literal(0x0E40).base().literal(0x0E34).tone().base().suffix(); break;
-      case 11: m.literal(0x0E40).base().literal(0x0E35).tone().literal(0x0E22).literal(0x0E30, true).suffix(); break;
-      case 12: m.literal(0x0E40).base().literal(0x0E37).tone().literal(0x0E2D).literal(0x0E30).suffix(); break;
-      case 13: m.literal(0x0E40).base().literal(0x0E37); break;
-      case 14: m.literal(0x0E40).base().tone().literal(0x0E32, true).literal(0x0E30, true).suffix(); break;
-      case 15: m.base().range(0x0E36, 0x0E37).tone().base().suffix(); break;
-      case 16: m.base().range(0x0E30, 0x0E39).tone().suffix(); break;
-      case 17: m.base().vowelIUU().literal(0x0E4C); break;
-      case 18: m.base().literal(0x0E23).literal(0x0E23).base().literal(0x0E4C); break;
-      case 19: m.base().literal(0x0E47); break;
-      case 20: m.base().tone();
+      case 0:
+        m.literal(0x0E40).base().literal(0x0E37).tone().literal(0x0E2D).literal(0x0E30, true);
+        break;
+      case 1:
+        m.base().literal(0x0E31).toneBase();
+        break;
+      case 2:
+        m.base().literal(0x0E31).toneBase().suffix();
+        break;
+      case 3:
+        m.literal(0x0E40).base().literal(0x0E47).base().suffix();
+        break;
+      case 4:
+        m.literal(0x0E40).base().base().tone().literal(0x0E32).literal(0x0E30).suffix();
+        break;
+      case 5:
+        m.literal(0x0E40).base().base().literal(0x0E35).tone().literal(0x0E22).literal(0x0E30).suffix();
+        break;
+      case 6:
+        m.literal(0x0E40).base().base().literal(0x0E35).tone().literal(0x0E22).followingBaseOrVowel().suffix();
+        break;
+      case 7:
+        m.literal(0x0E40).base().vowelIIUU().tone().literal(0x0E22).followingBaseOrVowel().suffix();
+        break;
+      case 8:
+        m.literal(0x0E40).base().base().literal(0x0E47).base().suffix();
+        break;
+      case 9:
+        m.literal(0x0E40).base().literal(0x0E34).base().literal(0x0E4C).base().suffix();
+        break;
+      case 10:
+        m.literal(0x0E40).base().literal(0x0E34).tone().base().suffix();
+        break;
+      case 11:
+        m.literal(0x0E40).base().literal(0x0E35).tone().literal(0x0E22).literal(0x0E30, true).suffix();
+        break;
+      case 12:
+        m.literal(0x0E40).base().literal(0x0E37).tone().literal(0x0E2D).literal(0x0E30).suffix();
+        break;
+      case 13:
+        m.literal(0x0E40).base().literal(0x0E37);
+        break;
+      case 14:
+        m.literal(0x0E40).base().tone().literal(0x0E32, true).literal(0x0E30, true).suffix();
+        break;
+      case 15:
+        m.base().range(0x0E36, 0x0E37).tone().base().suffix();
+        break;
+      case 16:
+        m.base().range(0x0E30, 0x0E39).tone().suffix();
+        break;
+      case 17:
+        m.base().vowelIUU().literal(0x0E4C);
+        break;
+      case 18:
+        m.base().literal(0x0E23).literal(0x0E23).base().literal(0x0E4C);
+        break;
+      case 19:
+        m.base().literal(0x0E47);
+        break;
+      case 20:
+        m.base().tone();
         if (m.state == MatchState::Yes && m.pos < window.count &&
-            (window.cp[m.pos] == 0x0E30 || window.cp[m.pos] == 0x0E32 || window.cp[m.pos] == 0x0E33)) ++m.pos;
-        m.suffix(); break;
-      case 21: m.literal(0x0E41).base().literal(0x0E47).base().suffix(); break;
-      case 22: m.literal(0x0E41).base().base().literal(0x0E4C).suffix(); break;
-      case 23: m.literal(0x0E41).base().tone().literal(0x0E30).suffix(); break;
-      case 24: m.literal(0x0E41).base().base().literal(0x0E47).base().suffix(); break;
-      case 25: m.literal(0x0E41).base().base().base().literal(0x0E4C).suffix(); break;
-      case 26: m.literal(0x0E42).base().tone().literal(0x0E30).suffix(); break;
-      case 27: m.range(0x0E40, 0x0E44).base().tone().suffix(); break;
-      case 28: m.literal(0x0E01).literal(0x0E47); break;
-      case 29: m.literal(0x0E2D).literal(0x0E36); break;
-      case 30: m.literal(0x0E2B).literal(0x0E36); break;
+            (window.cp[m.pos] == 0x0E30 || window.cp[m.pos] == 0x0E32 || window.cp[m.pos] == 0x0E33))
+          ++m.pos;
+        m.suffix();
+        break;
+      case 21:
+        m.literal(0x0E41).base().literal(0x0E47).base().suffix();
+        break;
+      case 22:
+        m.literal(0x0E41).base().base().literal(0x0E4C).suffix();
+        break;
+      case 23:
+        m.literal(0x0E41).base().tone().literal(0x0E30).suffix();
+        break;
+      case 24:
+        m.literal(0x0E41).base().base().literal(0x0E47).base().suffix();
+        break;
+      case 25:
+        m.literal(0x0E41).base().base().base().literal(0x0E4C).suffix();
+        break;
+      case 26:
+        m.literal(0x0E42).base().tone().literal(0x0E30).suffix();
+        break;
+      case 27:
+        m.range(0x0E40, 0x0E44).base().tone().suffix();
+        break;
+      case 28:
+        m.literal(0x0E01).literal(0x0E47);
+        break;
+      case 29:
+        m.literal(0x0E2D).literal(0x0E36);
+        break;
+      case 30:
+        m.literal(0x0E2B).literal(0x0E36);
+        break;
     }
     if (m.state != MatchState::No) {
       end = m.pos;
@@ -212,5 +282,35 @@ size_t lastSafeBoundary(std::string_view text, size_t limit, bool endOfRun) {
     safe = cluster.end;
   }
   return safe;
+}
+
+bool isJustifiableLetterCluster(std::string_view text, const Cluster& cluster) {
+  if (!cluster.valid || cluster.begin >= cluster.end || cluster.end > text.size()) return false;
+  const auto first = detail::decode(text, cluster.begin, true);
+  if (!first.valid || (!isBase(first.value) && !isLeadingVowel(first.value))) return false;
+  bool hasBase = false;
+  for (size_t offset = cluster.begin; offset < cluster.end;) {
+    const auto scalar = detail::decode(text, offset, true);
+    if (!scalar.valid || !scalar.bytes || scalar.bytes > cluster.end - offset) return false;
+    const auto cp = scalar.value;
+    if (!isBase(cp) && !isLeadingVowel(cp) && !isSpacingVowel(cp) && !isCombiningSign(cp)) return false;
+    hasBase |= isBase(cp);
+    offset += scalar.bytes;
+  }
+  return hasBase;
+}
+
+bool JustificationBoundaryCursor::next(size_t& byteOffset) {
+  Cluster cluster{};
+  while (nextCluster(text_, offset_, cluster, true)) {
+    const bool eligible = isJustifiableLetterCluster(text_, cluster);
+    const bool boundary = previousEligible_ && eligible;
+    previousEligible_ = eligible;
+    if (boundary) {
+      byteOffset = cluster.begin;
+      return true;
+    }
+  }
+  return false;
 }
 }  // namespace thai

@@ -7,6 +7,7 @@
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <ThaiSegmenter.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -29,6 +30,45 @@ CssTextAlign toCssAlign(uint8_t align) {
   return static_cast<CssTextAlign>(align);
 }
 
+const char* previewText() {
+  return SETTINGS.paragraphAlignment == CrossPointSettings::THAI_JUSTIFIED ? tr(STR_THAI_JUSTIFY_PREVIEW_TEXT)
+                                                                           : tr(STR_FONT_PREVIEW_TEXT);
+}
+
+void addThaiPreview(ParsedText& parsed, const std::string_view text) {
+  const thai::ThaiDictionary dictionary;
+  uint32_t visibleOffset = 0;
+  size_t offset = 0;
+  const auto whitespace = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+  while (offset < text.size()) {
+    if (whitespace(text[offset])) {
+      ++offset;
+      ++visibleOffset;
+      continue;
+    }
+    const size_t begin = offset;
+    while (offset < text.size() && !whitespace(text[offset])) ++offset;
+    const auto run = text.substr(begin, offset - begin);
+    size_t segmentOffset = 0;
+    thai::BreakKind before = thai::BreakKind::Space;
+    thai::Segment segment{};
+    while (thai::nextSegment(run, segmentOffset, segment, true, dictionary)) {
+      before = before == thai::BreakKind::Prohibited || segment.before == thai::BreakKind::Prohibited
+                   ? thai::BreakKind::Prohibited
+                   : static_cast<thai::BreakKind>(
+                         std::min(static_cast<uint8_t>(before), static_cast<uint8_t>(segment.before)));
+      const auto piece = run.substr(segment.begin, segment.end - segment.begin);
+      if (segment.valid) {
+        parsed.addAnalyzedToken(piece, EpdFontFamily::REGULAR, before, visibleOffset, 0);
+      } else {
+        parsed.addWordWithBoundary(std::string(piece), EpdFontFamily::REGULAR, false, before, visibleOffset, 0);
+      }
+      for (const unsigned char byte : piece) visibleOffset += (byte & 0xc0) != 0x80;
+      before = segment.after;
+    }
+  }
+}
+
 // Lay the sample text out through the reader engine into layout.lines
 void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, int textWidth) {
   layout.lines.clear();
@@ -40,18 +80,22 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
   ParsedText parsed(SETTINGS.hyphenationEnabled != 0, SETTINGS.focusReadingEnabled != 0, style,
                     SETTINGS.paragraphIndentSpaces);
 
-  // Feed one space-separated word at a time; addWord handles NFC/CJK/RTL/focus splitting
-  const char* text = I18N.get(StrId::STR_FONT_PREVIEW_TEXT);
-  std::string word;
-  for (const char* p = text;; p++) {
-    if (*p == ' ' || *p == '\0') {
-      if (!word.empty()) {
-        parsed.addWord(word, EpdFontFamily::REGULAR);
-        word.clear();
+  const char* text = previewText();
+  if (SETTINGS.paragraphAlignment == CrossPointSettings::THAI_JUSTIFIED) {
+    addThaiPreview(parsed, text);
+  } else {
+    // Existing previews retain generic NFC/CJK/RTL/focus tokenization.
+    std::string word;
+    for (const char* p = text;; p++) {
+      if (*p == ' ' || *p == '\0') {
+        if (!word.empty()) {
+          parsed.addWord(word, EpdFontFamily::REGULAR);
+          word.clear();
+        }
+        if (*p == '\0') break;
+      } else {
+        word.push_back(*p);
       }
-      if (*p == '\0') break;
-    } else {
-      word.push_back(*p);
     }
   }
 
@@ -111,7 +155,7 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
                        .hyphenation = SETTINGS.hyphenationEnabled != 0};
   if (key != layout.key) {
     if (auto* fcm = renderer.getFontCacheManager()) {
-      fcm->prewarmCache(fontId, I18N.get(StrId::STR_FONT_PREVIEW_TEXT), SETTINGS.focusReadingEnabled ? 0x03 : 0x01);
+      fcm->prewarmCache(fontId, previewText(), SETTINGS.focusReadingEnabled ? 0x03 : 0x01);
     }
     relayout(layout, renderer, fontId, textWidth);
     layout.key = key;

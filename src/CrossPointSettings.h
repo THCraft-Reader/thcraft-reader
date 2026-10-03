@@ -114,6 +114,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     CENTER_ALIGN = 2,
     RIGHT_ALIGN = 3,
     BOOK_STYLE = 4,
+    THAI_JUSTIFIED = 5,
     PARAGRAPH_ALIGNMENT_COUNT
   };
 

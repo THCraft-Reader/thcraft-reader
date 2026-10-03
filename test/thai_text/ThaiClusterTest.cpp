@@ -99,8 +99,63 @@ void expectClusters(std::string_view text, const std::vector<std::string_view>& 
   EXPECT_EQ(position, text.size());
 }
 
+std::vector<size_t> justificationBoundaries(std::string_view text) {
+  thai::JustificationBoundaryCursor cursor(text);
+  std::vector<size_t> boundaries;
+  size_t offset = text.size() + 1;
+  while (cursor.next(offset)) boundaries.push_back(offset);
+  const auto finalOffset = offset;
+  EXPECT_FALSE(cursor.next(offset));
+  EXPECT_EQ(offset, finalOffset);
+  return boundaries;
+}
+
+TEST(ThaiClusterTest, JustificationUsesWholeLetterClustersAndPreservesMarks) {
+  EXPECT_EQ(justificationBoundaries("กขค"), (std::vector<size_t>{3, 6}));
+  const std::string_view marked = "กี่น้ำเพื่อญูฐุนํ้า";
+  EXPECT_EQ(justificationBoundaries(marked), (std::vector<size_t>{9, 18, 33, 39, 45}));
+  for (const auto& span : whole(marked)) {
+    const thai::Cluster cluster{span.begin, span.end, span.codepoints, span.valid};
+    EXPECT_TRUE(thai::isJustifiableLetterCluster(marked, cluster));
+  }
+  EXPECT_EQ(justificationBoundaries("ภาษาไทย"), (std::vector<size_t>{6, 12, 18}));
+}
+
+TEST(ThaiClusterTest, JustificationExcludesSymbolsDigitsScriptsAndWhitespace) {
+  for (const std::string_view separator :
+       {"๑", "๙", "ๆ", "ฯ", "฿", "๏", "๚", "๛", ".", " ", "\xC2\xA0", "A", "中", "א"}) {
+    SCOPED_TRACE(separator);
+    const std::string text = std::string("กข") + std::string(separator) + "คง";
+    EXPECT_EQ(justificationBoundaries(text), (std::vector<size_t>{3, 9 + separator.size()}));
+  }
+  for (const std::string_view fragment : {"", "เ", "า", "่", "่ก", "ํ้เก่"}) {
+    SCOPED_TRACE(fragment);
+    EXPECT_TRUE(justificationBoundaries(fragment).empty());
+    size_t offset = 0;
+    thai::Cluster cluster{};
+    if (thai::nextCluster(fragment, offset, cluster, true))
+      EXPECT_FALSE(thai::isJustifiableLetterCluster(fragment, cluster));
+  }
+  EXPECT_EQ(justificationBoundaries("่กขค"), (std::vector<size_t>{9}));
+}
+
+TEST(ThaiClusterTest, JustificationRecoversAfterMalformedAndPathologicalSpans) {
+  for (const std::string& invalid : {std::string("\xFF"), std::string("\xE0\xB8"), std::string("\0", 1)}) {
+    const std::string text = std::string("กข") + invalid + "คง";
+    EXPECT_EQ(justificationBoundaries(text), (std::vector<size_t>{3, 9 + invalid.size()}));
+  }
+  std::string pathological = "ก";
+  for (size_t i = 0; i < thai::MAX_CLUSTER_CODEPOINTS * 3; ++i) pathological += "่";
+  const std::string text = std::string("ขค!") + pathological + "!งจ";
+  EXPECT_EQ(justificationBoundaries(text), (std::vector<size_t>{3, text.size() - 3}));
+  EXPECT_FALSE(thai::isJustifiableLetterCluster("ก", {0, 0, 0, true}));
+  EXPECT_FALSE(thai::isJustifiableLetterCluster("ก", {0, 4, 1, true}));
+  EXPECT_FALSE(thai::isJustifiableLetterCluster("ก", {0, 2, 1, true}));
+  EXPECT_FALSE(thai::isJustifiableLetterCluster("ก", {0, 3, 1, false}));
+}
+
 TEST(ThaiClusterTest, SuppliedMarkedClustersHaveNoInteriorBoundary) {
-  for (std::string_view cluster : {"ก่", "ก้", "ก๊", "ก๋", "กิ", "กี", "กึ", "กื", "กุ", "กู", "กี่", "กุ่",
+  for (std::string_view cluster : {"ก่",  "ก้",  "ก๊",  "ก๋",  "กิ",   "กี",   "กึ", "กื", "กุ", "กู", "กี่", "กุ่",
                                    "น้ำ", "นํ้า", "ตั้ง", "เก่", "เรื่อ", "เพื่อ", "ญู", "ฐุ", "ปี่", "ฝี่", "ฟี่"}) {
     SCOPED_TRACE(cluster);
     expectClusters(cluster, {cluster});
@@ -128,9 +183,8 @@ TEST(ThaiClusterTest, FiniteTccAlternativesRetainPriorityAndGreediness) {
   // 4be114097e0cb1d9cfe044691f2aa79bc294925e, with dependent-sign coalescing.
   // The first c[ั] alternative must win over the following suffix-bearing one.
   expectClusters("กั่กก์", {"กั่ก", "ก์"});
-  for (std::string_view cluster : {"เก็กก์", "เกกาะ", "เกกียะ", "เกก็ก", "เกิก์ก", "เกิ่ก", "เกียะ", "เกื่อะ",
-                                   "กื่ง", "กรรค์", "แก็ก", "แกก์", "แก่ะ", "แกก็ก", "แกกก์", "โก่ะ", "ไก่",
-                                   "เกากกุ์"}) {
+  for (std::string_view cluster : {"เก็กก์", "เกกาะ", "เกกียะ", "เกก็ก", "เกิก์ก", "เกิ่ก", "เกียะ", "เกื่อะ", "กื่ง", "กรรค์", "แก็ก",
+                                   "แกก์", "แก่ะ", "แกก็ก", "แกกก์", "โก่ะ", "ไก่", "เกากกุ์"}) {
     SCOPED_TRACE(cluster);
     expectClusters(cluster, {cluster});
   }
@@ -191,11 +245,16 @@ TEST(ThaiClusterTest, SafeBoundaryUsesByteLimitsAndNeverCutsAProtectedSpan) {
 }
 
 TEST(ThaiClusterTest, EveryByteSplitMatchesWholeInputAndRetainsUndecidableSuffix) {
-  const std::vector<std::string> inputs{
-      "ก่ก้ก๊ก๋กิกีกึกืกุกูกี่กุ่", "เก่งน้ำตั้งเรื่องอ่านผู้หญิงประเทศไทยโรงพยาบาลหนังสือภาษาไทย",
-      "เพื่อเรื่อะนํ้าน้ํา่่", "กั่กก์เกากกุ์เกกียกเกิยก", "เกกีย!", "เกกียๆ", "่กี่ํ้เก่",
-      "EpubCraft เป็น EPUB Editor 4.2.0 02:40",
-      "“สวัสดีครับ” คุณทำอะไรอยู่? ประเทศไทย...แล้วอย่างไรต่อ", "กี่\xE2\x80\x8Bน้ำ"};
+  const std::vector<std::string> inputs{"ก่ก้ก๊ก๋กิกีกึกืกุกูกี่กุ่",
+                                        "เก่งน้ำตั้งเรื่องอ่านผู้หญิงประเทศไทยโรงพยาบาลหนังสือภาษาไทย",
+                                        "เพื่อเรื่อะนํ้าน้ํา่่",
+                                        "กั่กก์เกากกุ์เกกียกเกิยก",
+                                        "เกกีย!",
+                                        "เกกียๆ",
+                                        "่กี่ํ้เก่",
+                                        "EpubCraft เป็น EPUB Editor 4.2.0 02:40",
+                                        "“สวัสดีครับ” คุณทำอะไรอยู่? ประเทศไทย...แล้วอย่างไรต่อ",
+                                        "กี่\xE2\x80\x8Bน้ำ"};
   for (const auto& input : inputs) {
     SCOPED_TRACE(input);
     const auto expected = whole(input);
@@ -215,8 +274,8 @@ TEST(ThaiClusterTest, CallbackAndBufferSizedChunksDoNotChangeBoundaries) {
   input.reserve(4096);
   while (input.size() < 3072) input += "เก่งนํ้าเรื่องประเทศไทย";
   const auto expected = whole(input);
-  for (size_t chunk : {size_t{1}, size_t{2}, size_t{3}, size_t{198}, size_t{199}, size_t{200}, size_t{201},
-                       size_t{202}, size_t{767}, size_t{768}, size_t{769}}) {
+  for (size_t chunk : {size_t{1}, size_t{2}, size_t{3}, size_t{198}, size_t{199}, size_t{200}, size_t{201}, size_t{202},
+                       size_t{767}, size_t{768}, size_t{769}}) {
     SCOPED_TRACE(chunk);
     std::vector<size_t> ends;
     ends.reserve(input.size() / chunk + 1);
@@ -255,9 +314,9 @@ TEST(ThaiClusterTest, EmptyAndNonterminatedViewsAreEndBounded) {
 }
 
 TEST(ThaiClusterTest, InvalidUtf8IsPreservedAndNeverReportedAsValidThai) {
-  const std::vector<std::string> invalid{
-      std::string("\x80", 1), std::string("\xC0\xAF", 2), std::string("\xED\xA0\x80", 3),
-      std::string("\xF4\x90\x80\x80", 4), std::string("\xF5\xFF", 2), std::string("\xE0\x28\xA1", 3)};
+  const std::vector<std::string> invalid{std::string("\x80", 1),         std::string("\xC0\xAF", 2),
+                                         std::string("\xED\xA0\x80", 3), std::string("\xF4\x90\x80\x80", 4),
+                                         std::string("\xF5\xFF", 2),     std::string("\xE0\x28\xA1", 3)};
   for (const auto& bytes : invalid) {
     const std::string input = bytes + "กี่";
     const auto spans = whole(input);
@@ -284,8 +343,7 @@ TEST(ThaiClusterTest, InvalidUtf8IsPreservedAndNeverReportedAsValidThai) {
 }
 
 TEST(ThaiClusterTest, TruncatedUtf8WaitsUntilEofThenPreservesEveryByte) {
-  for (const std::string bytes : {std::string("\xE0", 1), std::string("\xE0\xB8", 2),
-                                  std::string("\xF0\x9F\x98", 3)}) {
+  for (const std::string bytes : {std::string("\xE0", 1), std::string("\xE0\xB8", 2), std::string("\xF0\x9F\x98", 3)}) {
     size_t offset = 0;
     thai::Cluster cluster{};
     EXPECT_FALSE(thai::nextCluster(bytes, offset, cluster, false));
