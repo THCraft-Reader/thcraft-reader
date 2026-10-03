@@ -268,6 +268,10 @@ memory-constrained companions fall back to native rendering; no desktop shaping
 library runs on the device. Reload the font after replacing a companion.
 Omitting `--thai-shaping` keeps ordinary converter output unchanged.
 
+Resident page glyphs retain their Latin kerning and ligatures across UI prewarms.
+When Thai layout preparation replaces the kerning subset, the next page prewarm
+restores kerning for all resident glyphs without reloading their bitmaps.
+
 ### Available Unicode interval presets
 
 | Preset | Coverage |
