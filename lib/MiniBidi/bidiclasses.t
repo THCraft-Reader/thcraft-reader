@@ -2,7 +2,7 @@
  *
  * Coverage rationale:
  *   Hebrew and Arabic-script languages (Arabic, Farsi, Urdu, Sindhi, Pashto,
- *   Kurdish) are the RTL targets. CrossPoint also renders Latin and Cyrillic
+ *   Kurdish) are the RTL targets. CrossPoint also renders Thai, Latin and Cyrillic
  *   scripts for many other languages, so these MUST be classified as L (not
  *   fall through to ON) to avoid regression when they appear adjacent to
  *   RTL runs.
@@ -117,6 +117,16 @@
 {0x06EE, 0x06EF, AL},   /* dal/reh with inverted V */
 {0x06F0, 0x06F9, EN},   /* extended Arabic-Indic digits ۰-۹ (Farsi/Urdu) — EN per UCD */
 {0x06FA, 0x06FF, AL},
+
+/* Thai letters/digits stay LTR inside RTL paragraphs (Unicode 15.1 UCD). */
+{0x0E01, 0x0E30, L},
+{0x0E31, 0x0E31, NSM},
+{0x0E32, 0x0E33, L},
+{0x0E34, 0x0E3A, NSM},
+{0x0E3F, 0x0E3F, ET},
+{0x0E40, 0x0E46, L},
+{0x0E47, 0x0E4E, NSM},
+{0x0E4F, 0x0E5B, L},
 
 /* ── Latin Extended Additional (L) ─────────────────────────────────── */
 /* Covers accented chars for Vietnamese, Welsh, Romanian, etc.

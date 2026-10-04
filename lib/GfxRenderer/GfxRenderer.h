@@ -352,6 +352,8 @@ class GfxRenderer {
                       TextMeasureMode mode = TextMeasureMode::Layout, uint16_t thaiExtraPixels = 0) const;
   size_t countThaiJustificationGaps(int fontId, const char* text, EpdFontFamily::Style style,
                                     BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO) const;
+  // Integer added-spacing cap from the resolved style's uncompressed line advance.
+  int getThaiJustificationGapLimit(int fontId, const char* text, EpdFontFamily::Style style) const;
 #ifdef THAI_RENDER_PROBE
   void setGlyphPlacementObserver(void* context, void (*observer)(void*, size_t, uint32_t, int, int)) const {
     glyphPlacementContext_ = context;

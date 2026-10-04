@@ -22,6 +22,9 @@
 #include "hyphenation/Hyphenator.h"
 
 constexpr int MAX_COST = std::numeric_limits<int>::max();
+#ifdef THAI_RENDER_PROBE
+uint8_t ParsedText::probeThaiSpaceWeight = 4;
+#endif
 
 namespace {
 
@@ -859,15 +862,9 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
 
   if (blockStyle.alignment == CssTextAlign::ThaiJustify) {
     for (size_t i = 0; i < words.size() && !thaiJustificationMetrics; ++i) {
-      const auto text = wordAt(i);
-      size_t offset = 0;
-      thai::Cluster cluster{};
-      while (thai::nextCluster(text, offset, cluster, true)) {
-        if (thai::isJustifiableLetterCluster(text, cluster)) {
-          thaiJustificationMetrics = true;
-          break;
-        }
-      }
+      // Eligibility may be empty (malformed marks, numbers, atomic content, tiny
+      // fonts). Presence, not spacing eligibility, selects the bounded policy.
+      thaiJustificationMetrics = thai::containsThai(wordAt(i));
     }
   }
   if (thaiJustificationMetrics && hasThaiTokens) {
@@ -1876,9 +1873,12 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
 
   std::vector<int16_t> lineXPos;
   lineXPos.reserve(lineWordCount);
+#ifdef THAI_RENDER_PROBE
+  TextBlock::ThaiDistributionProbe probeThaiDistribution;
+#endif
 
   // Count and assign in physical left-to-right order without changing token identity.
-  // Returning false selects the untouched legacy integer-space distribution below.
+  // A Thai-bearing paragraph never falls back to unlimited spacing on a non-final line.
   const auto positionThaiLine = [&](const std::vector<std::string>& text,
                                     const std::vector<EpdFontFamily::Style>& styles) {
     if (!thaiJustificationMetrics || isLastLine || thaiBudgets.empty()) return false;
@@ -1934,7 +1934,8 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
                         wordSpacingPercent);
     };
 
-    uint32_t thaiSlots = 0, slots = 0;
+    // Reuse the budget scratch for per-token limits until the final placement pass.
+    // No per-cluster allocation is needed, even for a long dictionary token.
     int32_t naturalWidth = willReorder ? 0 : lineWordWidthSum + totalNaturalGaps;
     for (size_t p = 0; p < lineWordCount; ++p) {
       const size_t i = physicalIndex(p), logical = logicalIndex(i);
@@ -1947,33 +1948,124 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
         return false;
       }
       thaiGapCounts[i] = static_cast<uint16_t>(count);
-      thaiSlots += count;
-      slots += count;
-      if (willReorder) naturalWidth += width(i);
-      if (p + 1 < lineWordCount) {
-        const size_t next = physicalIndex(p + 1);
-        const bool ordinaryEdge = ordinarySlot(i, next);
-        const bool thaiEdge = !ordinaryEdge && thaiSlot(i, next);
-        thaiSlots += thaiEdge;
-        slots += thaiEdge || ordinaryEdge;
-        if (willReorder) naturalWidth += naturalGap(i, next);
+      thaiBudgets[i] = static_cast<uint16_t>(
+          std::clamp(renderer.getThaiJustificationGapLimit(fontId, text[i].c_str(), styles[i]), 0, 65535));
+      if (willReorder) {
+        naturalWidth += width(i);
+        if (p + 1 < lineWordCount) naturalWidth += naturalGap(i, physicalIndex(p + 1));
       }
     }
-    const int32_t spare = effectivePageWidth - extraStartOffset - extraEndOffset - naturalWidth;
-    if (!thaiSlots || spare <= 0) return false;
-    const uint32_t q = static_cast<uint32_t>(spare) / slots;
-    uint32_t remainder = static_cast<uint32_t>(spare) % slots;
-    const auto allocate = [&](uint32_t count) {
-      const uint32_t extra = std::min(remainder, count);
-      remainder -= extra;
-      return q * count + extra;
+#ifdef THAI_RENDER_PROBE
+    const uint32_t spaceWeight = probeThaiSpaceWeight;
+#else
+    constexpr uint32_t spaceWeight = 4;
+#endif
+    struct Edge {
+      uint32_t limit;
+      uint32_t weight;
+      bool space;
+      bool thai;
     };
-    lineXPos.resize(lineWordCount);
-    int32_t xpos = blockStyle.isRtl ? effectivePageWidth - extraEndOffset - (naturalWidth + spare)
-                                    : firstLineIndent + extraStartOffset;
+    const auto edgeAt = [&](size_t left, size_t right) -> Edge {
+      if (ordinarySlot(left, right)) {
+        const size_t i = std::min(left, right), next = i + 1;
+        if (continues(next) || !noSpace(next)) {
+          const int rawSpace = continues(next) ? renderer.getSpaceWidth(fontId, styles[i])
+                                               : renderer.getSpaceAdvance(fontId, lastCodepoint(text[i]),
+                                                                          firstCodepoint(text[next]), styles[i]);
+          return {static_cast<uint32_t>(std::max(0, rawSpace) / 2), spaceWeight, true, false};
+        }
+        // Existing CJK boundaries remain usable, but cannot absorb unlimited slack.
+        return {std::min(thaiBudgets[left], thaiBudgets[right]), 1, false, false};
+      }
+      if (thaiSlot(left, right)) {
+        return {std::min(thaiBudgets[left], thaiBudgets[right]), 1, false, true};
+      }
+      return {0, 1, false, false};
+    };
+    const auto visitOpportunities = [&](const auto& visit) {
+      for (size_t p = 0; p < lineWordCount; ++p) {
+        const size_t i = physicalIndex(p);
+        visit(thaiGapCounts[i], thaiBudgets[i], 1u);
+        if (p + 1 < lineWordCount) {
+          const auto edge = edgeAt(i, physicalIndex(p + 1));
+          visit(1u, edge.limit, edge.weight);
+        }
+      }
+    };
+    uint64_t capacity = 0;
+    uint32_t maxLevel = 0;
+    visitOpportunities([&](uint32_t count, uint32_t limit, uint32_t weight) {
+      capacity += static_cast<uint64_t>(count) * limit;
+      if (count) maxLevel = std::max(maxLevel, limit * (spaceWeight / weight));
+    });
+    const int32_t spare = effectivePageWidth - extraStartOffset - extraEndOffset - naturalWidth;
+    const uint32_t allocated = static_cast<uint32_t>(std::min<uint64_t>(std::max<int32_t>(0, spare), capacity));
+
+    // Integer water filling: 1/spaceWeight-pixel levels make the weights and every
+    // integer cap exact breakpoints. Binary search is bounded by the font/space
+    // limits, not by spare pixels or the number of clusters.
+    const uint64_t target = static_cast<uint64_t>(allocated) * spaceWeight;
+    const auto usedAt = [&](uint32_t level) {
+      uint64_t used = 0;
+      visitOpportunities([&](uint32_t count, uint32_t limit, uint32_t weight) {
+        used += static_cast<uint64_t>(count) * std::min(limit * spaceWeight, level * weight);
+      });
+      return used;
+    };
+    uint32_t low = 0, high = maxLevel;
+    while (low < high) {
+      const uint32_t mid = low + (high - low + 1) / 2;
+      if (usedAt(mid) <= target)
+        low = mid;
+      else
+        high = mid - 1;
+    }
+    const uint64_t remainder = target - usedAt(low);
+    uint64_t activeWeight = 0;
+    visitOpportunities([&](uint32_t count, uint32_t limit, uint32_t weight) {
+      if (low * weight < limit * spaceWeight) activeWeight += static_cast<uint64_t>(count) * weight;
+    });
+    const uint64_t denominator = spaceWeight * std::max<uint64_t>(1, activeWeight);
+    uint64_t cumulative = 0, previous = 0;
+    const auto allocate = [&](uint32_t count, uint32_t limit, uint32_t weight) {
+      const uint32_t base = std::min(limit * spaceWeight, low * weight);
+      const uint64_t fraction = base < limit * spaceWeight ? remainder * weight : 0;
+      cumulative += static_cast<uint64_t>(count) * (base * std::max<uint64_t>(1, activeWeight) + fraction);
+      const uint64_t rounded = cumulative / denominator;
+      const uint32_t extra = static_cast<uint32_t>(rounded - previous);
+      previous = rounded;
+      return extra;
+    };
+#ifdef THAI_RENDER_PROBE
+    probeThaiDistribution.handled = true;
+    probeThaiDistribution.naturalWidth = naturalWidth;
+    probeThaiDistribution.availableWidth = effectivePageWidth - extraStartOffset - extraEndOffset;
+    probeThaiDistribution.allocated = allocated;
+    probeThaiDistribution.gaps.reserve(lineWordCount - 1);
     for (size_t p = 0; p < lineWordCount; ++p) {
       const size_t i = physicalIndex(p);
-      const uint32_t budget = allocate(thaiGapCounts[i]);
+      probeThaiDistribution.thaiCapacity += static_cast<uint32_t>(thaiGapCounts[i]) * thaiBudgets[i];
+      if (p + 1 < lineWordCount) {
+        const auto edge = edgeAt(i, physicalIndex(p + 1));
+        if (edge.space)
+          probeThaiDistribution.spaceCapacity += edge.limit;
+        else if (edge.thai)
+          probeThaiDistribution.thaiCapacity += edge.limit;
+        else
+          probeThaiDistribution.otherCapacity += edge.limit;
+      }
+    }
+#endif
+    lineXPos.resize(lineWordCount);
+    int32_t xpos = blockStyle.isRtl
+                       ? effectivePageWidth - extraEndOffset - naturalWidth - static_cast<int32_t>(allocated)
+                       : firstLineIndent + extraStartOffset;
+    for (size_t p = 0; p < lineWordCount; ++p) {
+      const size_t i = physicalIndex(p);
+      // Read both limits before replacing this token's scratch limit with its budget.
+      const auto edge = p + 1 < lineWordCount ? edgeAt(i, physicalIndex(p + 1)) : Edge{0, 1, false, false};
+      const uint32_t budget = allocate(thaiGapCounts[i], thaiBudgets[i], 1);
       if (budget > std::numeric_limits<uint16_t>::max()) {
         LOG_ERR("PTX", "Thai justification budget overflow");
         droppedWords = true;
@@ -1984,8 +2076,14 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       xpos += width(i) + budget;
       if (p + 1 < lineWordCount) {
         const size_t next = physicalIndex(p + 1);
-        xpos += naturalGap(i, next);
-        if (ordinarySlot(i, next) || thaiSlot(i, next)) xpos += allocate(1);
+        const int natural = naturalGap(i, next);
+        const uint32_t extra = allocate(1, edge.limit, edge.weight);
+        xpos += natural + extra;
+#ifdef THAI_RENDER_PROBE
+        probeThaiDistribution.gaps.push_back({static_cast<uint16_t>(i), static_cast<uint16_t>(next), natural,
+                                              static_cast<int>(extra), static_cast<int>(edge.limit), edge.space,
+                                              static_cast<int>(width(i) + budget)});
+#endif
       }
     }
     return true;
@@ -2297,6 +2395,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     }
 #ifdef THAI_RENDER_PROBE
     block->setProbeVisibleOffsets(std::move(probeVisibleOffsets));
+    block->setProbeThaiDistribution(std::move(probeThaiDistribution));
 #endif
     processLine(std::move(block), lineVisibleOffset);
     return;
@@ -2326,6 +2425,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   }
 #ifdef THAI_RENDER_PROBE
   block->setProbeVisibleOffsets(std::move(probeVisibleOffsets));
+  block->setProbeThaiDistribution(std::move(probeThaiDistribution));
 #endif
   processLine(std::move(block), lineVisibleOffset);
 }

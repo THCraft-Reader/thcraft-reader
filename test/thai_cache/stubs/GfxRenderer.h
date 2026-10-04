@@ -38,6 +38,10 @@ class GfxRenderer {
   int getLineHeight(int, float = 1.0f) const { return 16; }
   int getFontAscenderSize(int) const { return 12; }
   int getSpaceWidth(int, EpdFontFamily::Style) const { return 4; }
+  int getThaiJustificationGapLimit(int, const char*, EpdFontFamily::Style style) const {
+    constexpr int advanceY = 48;
+    return (style & (EpdFontFamily::SUP | EpdFontFamily::SUB) ? advanceY / 2 : advanceY) / 24;
+  }
   size_t countThaiJustificationGaps(int, const char* text, EpdFontFamily::Style,
                                     BidiUtils::BidiBaseDir = BidiUtils::BidiBaseDir::AUTO) const {
     thai::JustificationBoundaryCursor cursor(text ? std::string_view(text) : std::string_view{});

@@ -110,15 +110,60 @@ std::vector<size_t> justificationBoundaries(std::string_view text) {
   return boundaries;
 }
 
-TEST(ThaiClusterTest, JustificationUsesWholeLetterClustersAndPreservesMarks) {
-  EXPECT_EQ(justificationBoundaries("กขค"), (std::vector<size_t>{3, 6}));
+void expectSpacingUnits(std::string_view text, const std::vector<std::string_view>& units) {
+  std::vector<size_t> expected;
+  size_t offset = 0;
+  for (const auto unit : units) {
+    if (offset) expected.push_back(offset);
+    EXPECT_EQ(text.substr(offset, unit.size()), unit);
+    offset += unit.size();
+  }
+  ASSERT_EQ(offset, text.size());
+  EXPECT_EQ(justificationBoundaries(text), expected);
+}
+
+TEST(ThaiClusterTest, JustificationSeparatesLetterUnitsWithoutSeparatingMarks) {
+  expectSpacingUnits("กขค", {"ก", "ข", "ค"});
   const std::string_view marked = "กี่น้ำเพื่อญูฐุนํ้า";
-  EXPECT_EQ(justificationBoundaries(marked), (std::vector<size_t>{9, 18, 33, 39, 45}));
+  expectSpacingUnits(marked, {"กี่", "น้ำ", "เ", "พื่", "อ", "ญู", "ฐุ", "นํ้า"});
   for (const auto& span : whole(marked)) {
     const thai::Cluster cluster{span.begin, span.end, span.codepoints, span.valid};
     EXPECT_TRUE(thai::isJustifiableLetterCluster(marked, cluster));
   }
-  EXPECT_EQ(justificationBoundaries("ภาษาไทย"), (std::vector<size_t>{6, 12, 18}));
+  expectSpacingUnits("ภาษาไทย", {"ภ", "า", "ษ", "า", "ไ", "ท", "ย"});
+  expectSpacingUnits("ประเทศไทย", {"ป", "ร", "ะ", "เ", "ท", "ศ", "ไ", "ท", "ย"});
+  expectSpacingUnits("เรื่อง", {"เ", "รื่", "อ", "ง"});
+}
+
+TEST(ThaiClusterTest, InteriorSpacingDoesNotCreateLineBreaks) {
+  for (const std::string_view text : {"เพื่อ", "เก่", "เรื่อ", "ตั้ง", "ไก่"}) {
+    SCOPED_TRACE(text);
+    const auto boundaries = justificationBoundaries(text);
+    ASSERT_FALSE(boundaries.empty());
+    expectClusters(text, {text});
+    for (const size_t boundary : boundaries) {
+      EXPECT_EQ(thai::lastSafeBoundary(text, boundary, true), 0u);
+      EXPECT_FALSE(thai::isCombiningSign(thai::detail::decode(text, boundary, true).value));
+    }
+  }
+  expectSpacingUnits("เพื่อ", {"เ", "พื่", "อ"});
+  expectSpacingUnits("เก่", {"เ", "ก่"});
+  expectSpacingUnits("ตั้ง", {"ตั้", "ง"});
+}
+
+TEST(ThaiClusterTest, RecipesRemainRigidAndMalformedStacksCannotExpand) {
+  for (const std::string_view recipe : {"กี่", "กุ่", "น้ำ", "นํ้า", "ญู", "ฐุ", "กํ่", "ก็่"}) {
+    SCOPED_TRACE(recipe);
+    EXPECT_TRUE(justificationBoundaries(recipe).empty());
+    const std::string text = std::string(recipe) + "ข";
+    expectSpacingUnits(text, {recipe, "ข"});
+  }
+  for (const std::string_view malformed : {"ก่่", "กีี", "ก่ี", "กํุ่", "เกี่่", "นํ้้า"}) {
+    SCOPED_TRACE(malformed);
+    EXPECT_TRUE(justificationBoundaries(malformed).empty());
+    const std::string text = std::string(malformed) + "ขค";
+    EXPECT_EQ(justificationBoundaries(text), (std::vector<size_t>{text.size() - std::string_view("ค").size()}));
+  }
 }
 
 TEST(ThaiClusterTest, JustificationExcludesSymbolsDigitsScriptsAndWhitespace) {

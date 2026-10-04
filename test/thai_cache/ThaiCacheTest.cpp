@@ -6,6 +6,7 @@
 #include <ThaiLayoutId.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -215,7 +216,7 @@ TEST_P(ThaiSectionCacheTest, PriorFinalAndPartialVersionsAreRejected) {
   ASSERT_FALSE(HasFatalFailure());
   auto bytes = readBytes(root / "sections/0.bin");
   ASSERT_FALSE(bytes.empty());
-  for (const uint8_t version : {48, 49, 50, 51}) {
+  for (const uint8_t version : {48, 49, 50, 51, 52}) {
     SCOPED_TRACE(version);
     bytes[0] = static_cast<char>(GetParam() ? 0xFE - (version - 28) : version);
     writeBytes(root / "sections/0.bin", bytes);
@@ -232,7 +233,7 @@ TEST_P(ThaiSectionCacheTest, PriorFinalAndPartialVersionsAreRejected) {
 TEST_P(ThaiSectionCacheTest, ThaiJustifyReusesExpandedGeometryAndPageLinks) {
   spec.paragraphAlignment = 5;
   spec.paragraphIndentSpaces = 0;
-  spec.viewportWidth = 77;
+  spec.viewportWidth = 100;
   html = "<html><body>";
   for (int i = 0; i < paragraphCount; ++i) {
     html += "<p><a href=\"#target\">ประเทศไทยประเทศไทย</a></p>";
@@ -275,14 +276,18 @@ TEST_P(ThaiSectionCacheTest, ThaiJustifyReusesExpandedGeometryAndPageLinks) {
       EXPECT_EQ(block->wordXpos(0), 0);
       EXPECT_EQ(old->wordXpos(0), block->wordXpos(0));
       const bool linked = lineIndex < static_cast<size_t>(paragraphCount) * 2;
-      const uint16_t budget = linked && lineIndex % 2 == 0 ? 5 : 0;
+      const int natural = renderer.getTextAdvanceX(spec.fontId, block->wordText(0), block->wordStyle(0));
+      const int capacity = renderer.countThaiJustificationGaps(spec.fontId, block->wordText(0), block->wordStyle(0)) *
+                           renderer.getThaiJustificationGapLimit(spec.fontId, block->wordText(0), block->wordStyle(0));
+      const uint16_t budget = linked && lineIndex % 2 == 0 ? std::min(spec.viewportWidth - natural, capacity) : 0;
       EXPECT_EQ(block->thaiExpansion(0), budget);
       EXPECT_EQ(old->thaiExpansion(0), budget);
       EXPECT_EQ(block->getBlockStyle().alignment, CssTextAlign::ThaiJustify);
       const int extent = renderer.getTextAdvanceX(spec.fontId, block->wordText(0), block->wordStyle(0), 0,
                                                   BidiUtils::BidiBaseDir::AUTO, GfxRenderer::TextMeasureMode::Rendered,
                                                   block->thaiExpansion(0));
-      EXPECT_EQ(extent, budget ? 77 : 72);
+      EXPECT_EQ(extent, natural + budget);
+      EXPECT_LT(extent, spec.viewportWidth);
       if (budget)
         ++expandedLines;
       else

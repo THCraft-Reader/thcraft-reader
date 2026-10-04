@@ -14,14 +14,26 @@ X4 Pro display, latency, internal-heap or PSRAM acceptance.
 overlay, and `/api/settings` (`paragraphAlignment: 5`). Existing values 0–4 and
 the default Justify are unchanged. Its preview deliberately uses Thai text.
 
-Dictionary wrapping still chooses lines. On non-final lines with eligible Thai
-slots, spare advance width is shared equally between complete Thai letter
-clusters and ordinary space/CJK gaps; integer remainders go left-to-right.
-Vowels and tone marks stay with their cluster. Native ligatures, ruby groups,
-and focus-split tokens are internally atomic. Numbers, punctuation, malformed
-spans, orphan marks, and script transitions do not create Thai slots.
-There is no spacing cap or compression; final and overwide lines stay natural.
+Dictionary wrapping still chooses lines. Non-final Thai-bearing lines use
+weighted, capped distribution: ordinary spaces have weight 4; Thai letter and
+existing CJK opportunities have weight 1. A Thai opportunity adds at most
+`floor(uncompressed font advanceY / 24)` pixels (half scale for SUP/SUB).
+Inter-token Thai/CJK edges use the smaller adjacent limit. An ordinary space
+adds at most half its natural space advance, excluding user word-spacing
+multipliers. Integer rounding is spread across opportunities.
+
+When these limits cannot fill a line, the remaining width stays at the trailing
+margin; no secondary gap or zero-capacity case falls back to unlimited spacing.
+Final and overwide lines stay natural, without glyph compression or scaling.
 English-only paragraphs use ordinary Justify.
+
+Spacing units are finer than line-break clusters: `ภาษาไทย` can expand between
+`ภ | า | ษ | า | ไ | ท | ย`, and `เพื่อ` between `เ | พื่ | อ`, without permitting
+new line breaks there. Attached marks, Sara Am recipes, native ligatures, ruby
+groups, and focus-split tokens remain internally atomic. Numbers, punctuation,
+malformed spans, orphan marks, and script transitions do not create Thai slots.
+Thai bidi classes preserve LTR Thai runs inside RTL paragraphs; Thai marks do
+not enter the renderer's Hebrew/Arabic overlay path.
 
 Thai-bearing paragraphs prepare exact rendered metrics, including native
 ligature outputs and kerning. Paired CPSHAPE, absent companions, and shaping
@@ -36,17 +48,36 @@ four-byte-per-maximum-line-word scratch allocation and a lazy analyzed-token
 provenance bit per token; it does not retain per-cluster records. Unusually long
 Thai-bearing tokens (over 210 bytes) also use one checked, token-sized buffer
 reused across exact prefix measurements and streaming layout calls. Ordinary
-dictionary words use the bounded stack buffer. Section v52 invalidates old
+dictionary words use the bounded stack buffer. Section v53 invalidates old
 rendered caches without changing progress or font formats.
 
 Host verification uses `ThaiRenderProbe --alignment thai-justify
 --cache-roundtrip on --verify-thai-placement on`: glyph-level checks cover
 normal/rotated and scaled drawing, cold/full prewarm, chained native ligatures,
 and allocation failure. Cache replay must match BW and both grayscale planes.
-On-device acceptance also requires checking both six-option menus and the Thai
-preview in all orientations, reopening at the same reading position, saving and
-rebooting with value 5, expanded selection/link hit boxes, and free heap above
-50 KiB without persistent growth across page turns.
+The report includes per-category capacities, allocated extra, trailing slack,
+cached inter-token spacing, and observed maximum glyph-translation increments.
+`--thai-space-weight 2|4|6` is host-only calibration; firmware always uses 4.
+
+The comparison fixtures are `test/language/Thai/distributed.xhtml` and
+`distributed-edges.xhtml`. The 2026-10-04 comparison covered Noto Sans Thai,
+Noto Serif Thai, and Sarabun at 12/18/26 pt and widths 320/480/800. All 27
+default-policy cases retained baseline line text and source offsets. Across 910
+non-final lines, 579 exhausted capacity and retained trailing slack; 318 had
+positive spare width and filled exactly. The largest observed internal gap
+addition was 4 px, versus 218 px under the previous unlimited allocator in this
+corpus; these are font/viewport-specific measurements, not universal pixel caps.
+The 101 renderer configurations also covered weights 2/4/6, all orientations,
+focus, missing companions, shape-allocation failure, and shaping-disabled builds.
+Visual comparison retained weight 4; this is not a pixel-identical Word claim.
+All 605 host tests passed, as did the `default` (C3) and `x4pro` (S3) firmware
+builds. The final production-renderer edge smoke passed after integration.
+
+On-device acceptance remains necessary: check both six-option menus and the
+Thai preview in all orientations, reopen at the same reading position, save and
+reboot with value 5, inspect expanded selection/link hit boxes, and keep free
+internal heap above 50 KiB without persistent growth across page turns. No
+packaged fonts or release binaries were replaced, and no device was flashed.
 
 
 ## Existing pipeline

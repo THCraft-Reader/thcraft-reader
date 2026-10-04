@@ -86,9 +86,8 @@ bool isTransparentMark(const uint32_t cp) {
   // harakat/Quranic annotation.  Transparent for Arabic joining (do_shape
   // skips them), zero-advance for measurement, and rendered as overlays on
   // the preceding base glyph when the active font carries their glyphs.
-  // The cp >= 0x0591 guard keeps Latin combining marks (U+0300-U+036F, also
-  // NSM) on their existing utf8IsCombiningMark() rendering path.
-  return cp >= 0x0591 && bidi_class(cp) == NSM;
+  // Latin marks use utf8IsCombiningMark; Thai marks use the Thai/native font path.
+  return cp >= 0x0591 && cp <= 0x08FF && bidi_class(cp) == NSM;
 }
 
 bool applyBidiVisual(const char* utf8, std::string& out, int paragraphLevel) {

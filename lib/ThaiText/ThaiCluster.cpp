@@ -284,33 +284,79 @@ size_t lastSafeBoundary(std::string_view text, size_t limit, bool endOfRun) {
   return safe;
 }
 
+namespace {
+// Spacing units are deliberately finer than TCCs. Only the conventional
+// base/mark stacks are admitted; malformed stacks exclude their whole TCC.
+bool spacingUnit(std::string_view text, size_t& offset) {
+  const auto first = detail::decode(text, offset, true);
+  if (!first.valid || !first.bytes) return false;
+  offset += first.bytes;
+  if (!isBase(first.value)) {
+    return isLeadingVowel(first.value) || (isSpacingVowel(first.value) && first.value != 0xE33);
+  }
+  auto next = detail::decode(text, offset, true);
+  // Decomposed Sara Am, including its reordered tone, stays with the base.
+  if (next.value == 0xE4D) {
+    size_t end = offset + next.bytes;
+    auto tone = detail::decode(text, end, true);
+    if (isTone(tone.value)) end += tone.bytes;
+    const auto aa = detail::decode(text, end, true);
+    if (aa.value == 0xE32) {
+      offset = end + aa.bytes;
+      return true;
+    }
+  }
+  size_t end = offset;
+  if (isTone(next.value)) end += next.bytes;
+  const auto am = detail::decode(text, end, true);
+  if (am.value == 0xE33) {
+    offset = end + am.bytes;
+    return true;
+  }
+  if (isAboveVowel(next.value) || isBelowVowel(next.value) || next.value == 0xE47 || next.value == 0xE4D) {
+    offset += next.bytes;
+    next = detail::decode(text, offset, true);
+  }
+  if (isTone(next.value) || next.value == 0xE4C || next.value == 0xE4E) offset += next.bytes;
+  return true;
+}
+}  // namespace
+
 bool isJustifiableLetterCluster(std::string_view text, const Cluster& cluster) {
   if (!cluster.valid || cluster.begin >= cluster.end || cluster.end > text.size()) return false;
   const auto first = detail::decode(text, cluster.begin, true);
   if (!first.valid || (!isBase(first.value) && !isLeadingVowel(first.value))) return false;
   bool hasBase = false;
+  // Restrict lookahead to this TCC; spacing never changes its admission or end.
+  const auto letters = text.substr(0, cluster.end);
   for (size_t offset = cluster.begin; offset < cluster.end;) {
-    const auto scalar = detail::decode(text, offset, true);
-    if (!scalar.valid || !scalar.bytes || scalar.bytes > cluster.end - offset) return false;
-    const auto cp = scalar.value;
-    if (!isBase(cp) && !isLeadingVowel(cp) && !isSpacingVowel(cp) && !isCombiningSign(cp)) return false;
-    hasBase |= isBase(cp);
-    offset += scalar.bytes;
+    const auto scalar = detail::decode(letters, offset, true);
+    hasBase |= isBase(scalar.value);
+    if (!spacingUnit(letters, offset)) return false;
   }
   return hasBase;
 }
 
 bool JustificationBoundaryCursor::next(size_t& byteOffset) {
-  Cluster cluster{};
-  while (nextCluster(text_, offset_, cluster, true)) {
+  for (;;) {
+    if (unitOffset_ < clusterEnd_) {
+      byteOffset = unitOffset_;
+      spacingUnit(text_.substr(0, clusterEnd_), unitOffset_);
+      return true;
+    }
+    Cluster cluster{};
+    if (!nextCluster(text_, offset_, cluster, true)) return false;
     const bool eligible = isJustifiableLetterCluster(text_, cluster);
     const bool boundary = previousEligible_ && eligible;
     previousEligible_ = eligible;
+    if (!eligible) continue;
+    clusterEnd_ = cluster.end;
+    unitOffset_ = cluster.begin;
+    spacingUnit(text_.substr(0, clusterEnd_), unitOffset_);
     if (boundary) {
       byteOffset = cluster.begin;
       return true;
     }
   }
-  return false;
 }
 }  // namespace thai

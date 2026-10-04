@@ -10,6 +10,10 @@ struct ThaiGlyphPlacement {
   int16_t xOffsetFP;
   int16_t yOffsetFP;
   uint8_t flags;
+  // Original byte span of one native scalar or atomic base/mark recipe.
+  // Every glyph of a reordered/decomposed recipe carries the same span.
+  size_t sourceBegin = 0;
+  size_t sourceEnd = 0;
   enum Flag : uint8_t { Native = 1, ClusterStart = 2, ClusterEnd = 4, RecipeStart = 8, RecipeEnd = 16 };
 };
 

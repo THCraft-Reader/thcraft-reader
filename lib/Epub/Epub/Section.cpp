@@ -63,7 +63,8 @@ namespace {
 // v50: Upstream paragraph indentation width in the header for cache validation.
 // v51: Combined Thai layout identity and paragraph indentation header.
 // v52: Optional per-word Thai cluster expansion budgets in the text arena.
-constexpr uint8_t SECTION_FILE_VERSION = 52;
+// v53: Bounded weighted Thai distribution and independent mark-safe spacing units.
+constexpr uint8_t SECTION_FILE_VERSION = 53;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects

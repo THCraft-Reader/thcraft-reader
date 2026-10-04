@@ -1,5 +1,6 @@
 #include <BidiUtils.h>
 #include <Epub/Page.h>
+#include <Epub/ParsedText.h>
 #include <Epub/parsers/ChapterHtmlSlimParser.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -35,6 +36,7 @@ struct Options {
   std::string font, xhtml, output, orientation = "portrait", glyphSheet;
   std::string alignment = "justify";
   int width = 480, height = 800, characterSpacing = 0, wordSpacing = 100;
+  int thaiSpaceWeight = 4;
   float compression = 1.0f;
   bool hyphenation = false, focus = false;
   bool failThaiAllocation = false;
@@ -97,7 +99,8 @@ Options options(int argc, char** argv) {
                    "portrait|inverted|cw|ccw --alignment justify|left|center|right|book|thai-justify "
                    "--character-spacing N --word-spacing-percent N --line-compression F --hyphenation on|off --focus "
                    "on|off --output DIR [--cache-roundtrip on|off] [--verify-thai-placement on|off] [--glyph-sheet "
-                   "normal|rotated90cw] [--fail-thai-allocation on|off] [--fail-shape-allocation on|off]\n";
+                   "normal|rotated90cw] [--fail-thai-allocation on|off] [--fail-shape-allocation on|off] "
+                   "[--thai-space-weight 2|4|6]\n";
       std::exit(0);
     }
     if (++i == argc) throw std::runtime_error("Missing value for " + key);
@@ -126,6 +129,8 @@ Options options(int argc, char** argv) {
       o.characterSpacing = integer(value);
     else if (key == "--word-spacing-percent")
       o.wordSpacing = integer(value);
+    else if (key == "--thai-space-weight")
+      o.thaiSpaceWeight = integer(value);
     else if (key == "--line-compression") {
       size_t end = 0;
       o.compression = std::stof(value, &end);
@@ -149,6 +154,8 @@ Options options(int argc, char** argv) {
     throw std::runtime_error("Viewport must be within 1..8192 pixels");
   if (o.characterSpacing < -128 || o.characterSpacing > 127 || o.wordSpacing < 0 || o.wordSpacing > 255)
     throw std::runtime_error("Spacing exceeds production setting storage");
+  if (o.thaiSpaceWeight != 2 && o.thaiSpaceWeight != 4 && o.thaiSpaceWeight != 6)
+    throw std::runtime_error("Thai space calibration weight must be 2, 4, or 6");
   if (!std::isfinite(o.compression) || o.compression <= 0 || o.compression > 4)
     throw std::runtime_error("Invalid line compression");
   if (o.orientation != "portrait" && o.orientation != "inverted" && o.orientation != "cw" && o.orientation != "ccw")
@@ -238,9 +245,9 @@ void verifyPlacement(GfxRenderer& renderer, int fontId, const char* text, const 
     auto draw = [&](std::vector<ObservedGlyph>& output, uint16_t extra) {
       renderer.setGlyphPlacementObserver(&output, observeGlyph);
       if (rotated)
-        renderer.drawTextRotated90CW(fontId, 80, 240, text, true, style, extra);
+        renderer.drawTextRotated90CW(fontId, 80, renderer.getScreenHeight() - 16, text, true, style, extra);
       else
-        renderer.drawText(fontId, 80, 80, text, true, style, BidiUtils::BidiBaseDir::AUTO, 0, extra);
+        renderer.drawText(fontId, 16, 80, text, true, style, BidiUtils::BidiBaseDir::AUTO, 0, extra);
       renderer.setGlyphPlacementObserver(nullptr, nullptr);
     };
     draw(natural, 0);
@@ -254,7 +261,7 @@ void verifyPlacement(GfxRenderer& renderer, int fontId, const char* text, const 
       const auto& b = expanded[i];
       const auto& c = repeat[i];
       const size_t preceding = std::upper_bound(slots.begin(), slots.end(), a.source) - slots.begin();
-      const int shift = count ? (budget / count) * preceding + std::min<size_t>(preceding, budget % count) : 0;
+      const int shift = count ? (budget * preceding + count / 2) / count : 0;
       if (a.source != b.source || a.codepoint != b.codepoint || b.x != a.x + (rotated ? 0 : shift) ||
           b.y != a.y - (rotated ? shift : 0) || a.source != c.source || a.codepoint != c.codepoint || a.x != c.x ||
           a.y != c.y) {
@@ -269,7 +276,7 @@ void verifyPlacement(GfxRenderer& renderer, int fontId, const char* text, const 
   if (expanded != natural + (count ? budget : 0)) throw std::runtime_error("Thai expanded advance differs from budget");
 }
 void verifyMarkedPlacement(GfxRenderer& renderer, SdCardFont& font) {
-  for (const char* text : {"กี่น้ำเพื่อญูฐุนํ้า", "ก่ี่ขกีีค"}) {
+  for (const char* text : {"กี่น้ำเพื่อญูฐุนํ้า", "ก่ี่ขกีีค", "ภาษาไทย", "ประเทศไทย", "เพื่อ", "เรื่อง"}) {
     const size_t length = strlen(text);
     if (!renderer.ensureSdCardFontReady(FONT_ID, &text, &length, 1, false, false, 1, true)) {
       throw std::runtime_error("Cannot prepare exact Thai metrics");
@@ -290,6 +297,44 @@ void verifyMarkedPlacement(GfxRenderer& renderer, SdCardFont& font) {
       verifyPlacement(renderer, FONT_ID, text, slots, style);
     }
   }
+}
+
+int observeAddedGap(GfxRenderer& renderer, const char* text, EpdFontFamily::Style style,
+                    BidiUtils::BidiBaseDir direction, int tracking, uint16_t budget) {
+  if (!budget) return 0;
+  std::vector<ObservedGlyph> natural, expanded;
+  natural.reserve(strlen(text));
+  expanded.reserve(strlen(text));
+  renderer.setGlyphPlacementObserver(&natural, observeGlyph);
+  renderer.drawText(FONT_ID, 0, 0, text, true, style, direction, tracking);
+  renderer.setGlyphPlacementObserver(&expanded, observeGlyph);
+  renderer.drawText(FONT_ID, 0, 0, text, true, style, direction, tracking, budget);
+  renderer.setGlyphPlacementObserver(nullptr, nullptr);
+  if (natural.size() != expanded.size()) throw std::runtime_error("Distribution changed glyph count");
+  const int limit = renderer.getThaiJustificationGapLimit(FONT_ID, text, style);
+  int previousShift = 0, maximum = 0;
+  size_t previousSource = 0;
+  for (size_t i = 0; i < natural.size(); ++i) {
+    const auto& a = natural[i];
+    const auto& b = expanded[i];
+    const int shift = b.x - a.x;
+    if (a.source != b.source || a.codepoint != b.codepoint || a.y != b.y)
+      throw std::runtime_error("Distribution changed glyph identity or vertical placement");
+    if (i && a.source == previousSource && shift != previousShift)
+      throw std::runtime_error("Distribution separated attached glyphs");
+    const int extra = shift - previousShift;
+    if (extra < 0 || extra > limit) {
+      throw std::runtime_error("Observed Thai spacing exceeds its limit: text=" + std::string(text) +
+                               " source=" + std::to_string(a.source) + " extra=" + std::to_string(extra) +
+                               " limit=" + std::to_string(limit) + " budget=" + std::to_string(budget) +
+                               " direction=" + std::to_string(static_cast<int>(direction)));
+    }
+    maximum = std::max(maximum, extra);
+    previousShift = shift;
+    previousSource = a.source;
+  }
+  if (previousShift != budget) throw std::runtime_error("Observed Thai expansion lost pixels");
+  return maximum;
 }
 void verifyNativeLigatures(const Options& options) {
   // A native-only CPFont exercises the same cold/mini/full cache transitions as an SD font.
@@ -495,6 +540,29 @@ class Probe {
              << line.yPos + r.getFontAscenderSize(FONT_ID) + block.getRubyShift(r.getFontAscenderSize(FONT_ID))
              << ",\"baseline_axis\":\"y\",\"source_offset\":" << lineOffset << ",\"ink_bounds\":";
       boundsJson(report, inkBounds(r));
+      const auto& distribution = block.probeThaiDistribution();
+      report << ",\"distribution\":{\"handled\":" << (distribution.handled ? "true" : "false");
+      if (distribution.handled) {
+        report << ",\"natural_width\":" << distribution.naturalWidth
+               << ",\"available_width\":" << distribution.availableWidth
+               << ",\"allocated_extra\":" << distribution.allocated << ",\"remaining_slack\":"
+               << distribution.availableWidth - distribution.naturalWidth - static_cast<int>(distribution.allocated)
+               << ",\"thai_capacity\":" << distribution.thaiCapacity
+               << ",\"space_capacity\":" << distribution.spaceCapacity
+               << ",\"other_capacity\":" << distribution.otherCapacity << ",\"gaps\":[";
+        for (size_t g = 0; g < distribution.gaps.size(); ++g) {
+          if (g) report << ',';
+          const auto& gap = distribution.gaps[g];
+          const int observed = block.wordXpos(gap.right) - block.wordXpos(gap.left) - gap.leftAdvance - gap.natural;
+          if (observed != gap.extra || observed < 0 || observed > gap.limit)
+            throw std::runtime_error("Cached inter-token spacing exceeds its limit");
+          report << "{\"left\":" << gap.left << ",\"right\":" << gap.right << ",\"natural\":" << gap.natural
+                 << ",\"extra\":" << observed << ",\"limit\":" << gap.limit
+                 << ",\"space\":" << (gap.space ? "true" : "false") << '}';
+        }
+        report << ']';
+      }
+      report << '}';
       report << ",\"tokens\":[";
       for (uint16_t i = 0; i < block.wordCount(); ++i) {
         if (i) report << ',';
@@ -514,6 +582,7 @@ class Probe {
         // Measure a single token through production TextBlock, retaining focus
         // prefix positioning and style handling rather than reimplementing it.
         const uint16_t expansion = block.thaiExpansion(i);
+        const int observedMaximum = observeAddedGap(r, measuredText, style, baseDir, tracking, expansion);
         TextBlock isolated({block.wordText(i)}, {block.wordXpos(i)}, {style}, {block.focusBoundary(i)},
                            {block.focusSuffixX(i)}, block.getBlockStyle(), {}, {}, std::span(&expansion, 1));
         r.clearScreen();
@@ -524,7 +593,8 @@ class Probe {
                << ",\"focus_boundary\":" << unsigned(block.focusBoundary(i))
                << ",\"focus_suffix_x\":" << block.focusSuffixX(i) << ",\"thai_extra_pixels\":" << expansion
                << ",\"thai_gap_count\":" << r.countThaiJustificationGaps(FONT_ID, measuredText, style, baseDir)
-               << ",\"advance\":"
+               << ",\"thai_gap_limit\":" << r.getThaiJustificationGapLimit(FONT_ID, measuredText, style)
+               << ",\"observed_max_added_gap\":" << observedMaximum << ",\"advance\":"
                << prefixAdvance + r.getTextAdvanceX(FONT_ID, measuredText, style, tracking, baseDir,
                                                     GfxRenderer::TextMeasureMode::Layout, expansion)
                << ",\"render_advance\":"
@@ -703,6 +773,7 @@ int main(int argc, char** argv) {
       return 0;
     }
     const Options o = options(argc, argv);
+    ParsedText::probeThaiSpaceWeight = static_cast<uint8_t>(o.thaiSpaceWeight);
     std::filesystem::create_directories(o.output);
     const bool portrait = o.orientation == "portrait" || o.orientation == "inverted";
     HalDisplay display(portrait ? o.height : o.width, portrait ? o.width : o.height);
@@ -746,9 +817,9 @@ int main(int argc, char** argv) {
            << ",\"orientation\":" << json(o.orientation) << ",\"alignment\":" << json(o.alignment)
            << ",\"character_spacing\":" << (o.glyphSheet == "rotated90cw" ? 0 : o.characterSpacing)
            << ",\"requested_character_spacing\":" << o.characterSpacing << ",\"word_spacing_percent\":" << o.wordSpacing
-           << ",\"line_compression\":" << o.compression << ",\"hyphenation\":" << json(o.hyphenation ? "on" : "off")
-           << ",\"focus\":" << json(o.focus ? "on" : "off") << ",\"glyph_sheet\":" << json(o.glyphSheet)
-           << ",\"output\":" << json(o.output)
+           << ",\"thai_space_weight\":" << o.thaiSpaceWeight << ",\"line_compression\":" << o.compression
+           << ",\"hyphenation\":" << json(o.hyphenation ? "on" : "off") << ",\"focus\":" << json(o.focus ? "on" : "off")
+           << ",\"glyph_sheet\":" << json(o.glyphSheet) << ",\"output\":" << json(o.output)
            << ",\"paragraph_settings_applied\":" << (o.glyphSheet.empty() ? "true" : "false")
            << ",\"font_ascender\":" << renderer.getFontAscenderSize(FONT_ID)
            << ",\"line_height\":" << renderer.getLineHeight(FONT_ID, o.compression)

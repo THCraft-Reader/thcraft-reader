@@ -48,6 +48,20 @@ class TextBlock final : public Block {
     int16_t width;
     int16_t topLift;
   };
+#ifdef THAI_RENDER_PROBE
+  struct ThaiDistributionProbe {
+    struct Gap {
+      uint16_t left, right;
+      int natural, extra, limit;
+      bool space;
+      int leftAdvance;
+    };
+    bool handled = false;
+    int naturalWidth = 0, availableWidth = 0;
+    uint32_t thaiCapacity = 0, spaceCapacity = 0, otherCapacity = 0, allocated = 0;
+    std::vector<Gap> gaps;
+  };
+#endif
 
  private:
   BlockStyle blockStyle;
@@ -74,6 +88,7 @@ class TextBlock final : public Block {
   std::vector<LinkSpan> linkSpans;
 #ifdef THAI_RENDER_PROBE
   std::vector<uint32_t> probeVisibleOffsets;
+  ThaiDistributionProbe probeDistribution;
 #endif
 
   TextBlock() = default;  // deserialize() fills the fields directly
@@ -116,6 +131,8 @@ class TextBlock final : public Block {
 #ifdef THAI_RENDER_PROBE
   void setProbeVisibleOffsets(std::vector<uint32_t> offsets) { probeVisibleOffsets = std::move(offsets); }
   uint32_t probeVisibleOffset(uint16_t i) const { return probeVisibleOffsets.at(i); }
+  void setProbeThaiDistribution(ThaiDistributionProbe value) { probeDistribution = std::move(value); }
+  const ThaiDistributionProbe& probeThaiDistribution() const { return probeDistribution; }
 #endif
 
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;

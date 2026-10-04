@@ -32,10 +32,10 @@ bool ThaiShapeView::validate(const uint8_t* bytes, size_t size, Coverage coverag
   const uint32_t dense = u32(bytes + 4), base = u32(bytes + 8);
   const uint32_t offsets = u32(bytes + 12), data = u32(bytes + 16);
   // Canonical contiguous sections eliminate overlaps and unused/unvalidated ranges.
-  if (!bases || !suffixes || bases > DENSE_COUNT || suffixes > DENSE_COUNT ||
-      dense != 28 || base != dense + DENSE_COUNT * 4 ||
-      offsets != base + bases * 8 || data != offsets + (suffixes + 1) * 4 || data > size ||
-      u16(bytes + 26) != 0 || !u16(bytes + 24)) return false;
+  if (!bases || !suffixes || bases > DENSE_COUNT || suffixes > DENSE_COUNT || dense != 28 ||
+      base != dense + DENSE_COUNT * 4 || offsets != base + bases * 8 || data != offsets + (suffixes + 1) * 4 ||
+      data > size || u16(bytes + 26) != 0 || !u16(bytes + 24))
+    return false;
   for (uint32_t i = 0; i < DENSE_COUNT; ++i) {
     const uint16_t b = u16(bytes + dense + i * 4), s = u16(bytes + dense + i * 4 + 2);
     if (b == UINT16_MAX && s == UINT16_MAX) continue;
@@ -71,12 +71,8 @@ bool ThaiShapeView::recipe(uint32_t key, uint16_t& base, uint16_t& suffix) const
   suffix = u16(p + 2);
   return base != UINT16_MAX;
 }
-ThaiGlyphPlacement ThaiShapeView::baseRecord(uint16_t id) const {
-  return glyph(bytes_ + u32(bytes_ + 8) + id * 8);
-}
-uint8_t ThaiShapeView::suffixCount(uint16_t id) const {
-  return bytes_[u32(bytes_ + u32(bytes_ + 12) + id * 4)];
-}
+ThaiGlyphPlacement ThaiShapeView::baseRecord(uint16_t id) const { return glyph(bytes_ + u32(bytes_ + 8) + id * 8); }
+uint8_t ThaiShapeView::suffixCount(uint16_t id) const { return bytes_[u32(bytes_ + u32(bytes_ + 12) + id * 4)]; }
 ThaiGlyphPlacement ThaiShapeView::suffixRecord(uint16_t id, uint8_t index) const {
   return glyph(bytes_ + u32(bytes_ + u32(bytes_ + 12) + id * 4) + 1 + index * 8);
 }
@@ -98,7 +94,10 @@ bool ThaiGlyphCursor::unit(size_t offset, size_t& end, uint32_t& key) const {
     size_t p = end + next.bytes;
     auto tone = at(p);
     uint32_t t = 0;
-    if (thai::isTone(tone.value)) { t = tone.value - 0xE48 + 1; p += tone.bytes; }
+    if (thai::isTone(tone.value)) {
+      t = tone.value - 0xE48 + 1;
+      p += tone.bytes;
+    }
     const auto aa = at(p);
     if (aa.value == 0xE32) {
       end = p + aa.bytes;
@@ -110,14 +109,20 @@ bool ThaiGlyphCursor::unit(size_t offset, size_t& end, uint32_t& key) const {
   // Sara-am is reordered/decomposed by the baked recipe, never by rewriting source bytes.
   size_t p = end;
   uint32_t amTone = 0;
-  if (thai::isTone(next.value)) { amTone = next.value - 0xE48 + 1; p += next.bytes; }
+  if (thai::isTone(next.value)) {
+    amTone = next.value - 0xE48 + 1;
+    p += next.bytes;
+  }
   auto am = at(p);
   if (am.value == 0xE33) {
     end = p + am.bytes;
     variant = 77 + amTone;
   } else {
     const int v = vowelIndex(next.value);
-    if (v) { end += next.bytes; next = at(end); }
+    if (v) {
+      end += next.bytes;
+      next = at(end);
+    }
     const int t = terminalIndex(next.value);
     if (t) end += next.bytes;
     variant = v * 7 + t;
@@ -163,6 +168,7 @@ bool ThaiGlyphCursor::begin(std::string_view text, const ThaiShapeView& shape) {
 
 bool ThaiGlyphCursor::next(ThaiGlyphPlacement& out) {
   if (!shape_ || offset_ >= consumed_) return false;
+  const size_t sourceBegin = offset_;
   if (!records_) {
     uint32_t key;
     if (!unit(offset_, unitEnd_, key)) return false;  // Already checked by begin().
@@ -184,7 +190,12 @@ bool ThaiGlyphCursor::next(ThaiGlyphPlacement& out) {
       offset_ = unitEnd_;
     }
   }
-  if (first_) { out.flags |= ThaiGlyphPlacement::ClusterStart; first_ = false; }
+  out.sourceBegin = sourceBegin;
+  out.sourceEnd = unitEnd_;
+  if (first_) {
+    out.flags |= ThaiGlyphPlacement::ClusterStart;
+    first_ = false;
+  }
   if (offset_ == consumed_) out.flags |= ThaiGlyphPlacement::ClusterEnd;
   return true;
 }

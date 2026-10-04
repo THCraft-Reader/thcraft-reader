@@ -90,6 +90,15 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 53
+
+The byte layout remains v52, but Thai Justify budgets now encode bounded,
+weighted spacing between independent Thai letter units rather than unlimited
+whole-cluster expansion. Both stored origins and internal budget replay changed.
+Version 52 and older finalized/partial caches are rebuilt; the derived partial
+version changes with the section version. Alignment values, reading progress,
+book metadata, Thai analysis identity, CPFont and CPSHAPE formats are unchanged.
+
 ### Version 52
 
 TextBlock's presence byte is now flags: bit 0 carries focus metadata and bit 1

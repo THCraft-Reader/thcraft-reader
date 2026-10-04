@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -358,7 +359,203 @@ int expandedEnd(const TextBlock& block, uint16_t i) {
                                                       GfxRenderer::TextMeasureMode::Rendered, block.thaiExpansion(i));
 }
 
-TEST(ThaiLayoutTest, ThaiJustifyAllocatesFivePixelsInsideDictionaryTokenOnlyOnNonfinalLine) {
+int internalCapacity(const TextBlock& block, uint16_t i) {
+  GfxRenderer renderer;
+  return renderer.countThaiJustificationGaps(0, block.wordText(i), block.wordStyle(i)) *
+         renderer.getThaiJustificationGapLimit(0, block.wordText(i), block.wordStyle(i));
+}
+
+int edgeLimit(const TextBlock& block, uint16_t left, uint16_t right) {
+  GfxRenderer renderer;
+  return std::min(renderer.getThaiJustificationGapLimit(0, block.wordText(left), block.wordStyle(left)),
+                  renderer.getThaiJustificationGapLimit(0, block.wordText(right), block.wordStyle(right)));
+}
+
+void expectInternalCaps(const TextBlock& block) {
+  for (uint16_t i = 0; i < block.wordCount(); ++i) EXPECT_LE(block.thaiExpansion(i), internalCapacity(block, i));
+}
+
+int addedEdge(const TextBlock& block, uint16_t left, uint16_t right, int natural = 0) {
+  return block.wordXpos(right) - expandedEnd(block, left) - natural;
+}
+
+void expectEdgeCap(const TextBlock& block, uint16_t left, uint16_t right, int natural, int cap) {
+  const int extra = addedEdge(block, left, right, natural);
+  EXPECT_GE(extra, 0);
+  EXPECT_LE(extra, cap);
+}
+
+struct FixtureMetrics {
+  const int advance = GfxRenderer::thaiAdvanceY;
+  const int space = GfxRenderer::naturalSpace;
+  ~FixtureMetrics() {
+    GfxRenderer::thaiAdvanceY = advance;
+    GfxRenderer::naturalSpace = space;
+  }
+};
+
+TEST(ThaiLayoutTest, WeightedSpacesSaturateBeforeThaiAndTotalExactlyFitsAvailableCapacity) {
+  GfxRenderer renderer;
+  const int rawSpace = renderer.getSpaceWidth(0, regular);
+  const int natural = renderer.getTextAdvanceX(0, "กขค123", regular) + rawSpace;
+  for (int spare = 1; spare <= 10; ++spare) {
+    SCOPED_TRACE(spare);
+    ParsedText text(false, false, BlockStyle(), 0);
+    configure(text, CssTextAlign::ThaiJustify);
+    add(text, "กขค", Kind::Space);
+    add(text, "123", Kind::Space);
+    add(text, "ประเทศไทยประเทศไทย", Kind::Word);
+    const auto lines = layout(text, natural + spare);
+    ASSERT_GE(lines.size(), 2u);
+    const auto& first = *lines[0].block;
+    ASSERT_EQ(first.wordCount(), 2u);
+    EXPECT_EQ(lines[0].text(), "กขค123");
+    expectInternalCaps(first);
+    expectEdgeCap(first, 0, 1, rawSpace, rawSpace / 2);
+    EXPECT_EQ(first.thaiExpansion(1), 0);
+    const int capacity = internalCapacity(first, 0) + rawSpace / 2;
+    EXPECT_EQ(expandedEnd(first, 1), natural + std::min(spare, capacity));
+    if (spare == 3) {
+      // The visible phrase space gets more than either of the two Thai gaps.
+      EXPECT_GT(addedEdge(first, 0, 1, rawSpace), first.thaiExpansion(0));
+    }
+    if (spare >= capacity) {
+      EXPECT_EQ(addedEdge(first, 0, 1, rawSpace), rawSpace / 2);
+      EXPECT_EQ(first.thaiExpansion(0), internalCapacity(first, 0));
+    }
+  }
+}
+
+TEST(ThaiLayoutTest, UserWordSpacingChangesNaturalGapButNeverItsExtraCeiling) {
+  GfxRenderer renderer;
+  const int rawSpace = renderer.getSpaceWidth(0, regular);
+  for (const uint8_t spacing : {100, 200}) {
+    ParsedText text(false, false, BlockStyle(), 0);
+    configure(text, CssTextAlign::ThaiJustify);
+    add(text, "กข", Kind::Space);
+    add(text, "123", Kind::Space);
+    add(text, "ประเทศไทยประเทศไทย", Kind::Word);
+    const int naturalSpace = (rawSpace * spacing + 50) / 100;
+    const int natural = renderer.getTextAdvanceX(0, "กข123", regular) + naturalSpace;
+    const auto lines = layout(text, natural + 15, true, 0, spacing);
+    ASSERT_GE(lines.size(), 2u);
+    const auto& first = *lines[0].block;
+    ASSERT_EQ(first.wordCount(), 2u);
+    EXPECT_EQ(addedEdge(first, 0, 1, naturalSpace), rawSpace / 2);
+    EXPECT_EQ(first.thaiExpansion(0), internalCapacity(first, 0));
+    EXPECT_LT(expandedEnd(first, 1), natural + 15);
+  }
+}
+
+TEST(ThaiLayoutTest, ZeroSafeCapacityIsHandledWithoutLegacyFallback) {
+  FixtureMetrics restore;
+  GfxRenderer::thaiAdvanceY = 23;
+  GfxRenderer::naturalSpace = 1;
+  for (const char* token : {"กข", "ก้้", "๑๒"}) {
+    GfxRenderer renderer;
+    const int naturalToken = renderer.getTextAdvanceX(0, token, regular);
+    ParsedText text(false, false, BlockStyle(), 0);
+    configure(text, CssTextAlign::ThaiJustify);
+    text.addWordWithBoundary(token, regular, false, Kind::Space, 10, 0);
+    text.addWordWithBoundary(token, regular, false, Kind::Space, 20, 0);
+    text.addWordWithBoundary("unbreakableword", regular, false, Kind::Space, 30, 0);
+    const int natural = naturalToken * 2 + GfxRenderer::naturalSpace;
+    const auto lines = layout(text, natural + 15);
+    ASSERT_GE(lines.size(), 2u);
+    const auto& first = *lines[0].block;
+    ASSERT_EQ(first.wordCount(), 2u);
+    EXPECT_TRUE(text.thaiJustificationMetrics);
+    EXPECT_EQ(first.thaiExpansion(0), 0);
+    EXPECT_EQ(first.thaiExpansion(1), 0);
+    EXPECT_EQ(addedEdge(first, 0, 1, GfxRenderer::naturalSpace), 0);
+    EXPECT_EQ(expandedEnd(first, 1), natural);
+    EXPECT_EQ(lines[0].offset, 10u);
+    EXPECT_EQ(lines[1].offset, 30u);
+  }
+}
+
+TEST(ThaiLayoutTest, AdjacentScaledStylesUseTheSmallerThaiCap) {
+  for (const auto style : {EpdFontFamily::SUP, EpdFontFamily::SUB}) {
+    ParsedText text(false, false, BlockStyle(), 0);
+    configure(text, CssTextAlign::ThaiJustify);
+    add(text, "กข", Kind::Space, 0);
+    add(text, "คง", Kind::Prohibited, 2, style);
+    add(text, "จฉชซฌญ", Kind::Word, 4);
+    const auto lines = layout(text, 45);
+    ASSERT_GE(lines.size(), 2u);
+    const auto& first = *lines[0].block;
+    ASSERT_EQ(first.wordCount(), 2u);
+    EXPECT_EQ(addedEdge(first, 0, 1), edgeLimit(first, 0, 1));
+    EXPECT_EQ(first.thaiExpansion(0), internalCapacity(first, 0));
+    EXPECT_EQ(first.thaiExpansion(1), internalCapacity(first, 1));
+    EXPECT_LT(expandedEnd(first, 1), 45);
+  }
+}
+
+TEST(ThaiLayoutTest, MixedCjkCannotBecomeAnUnlimitedSecondarySink) {
+  ParsedText text(false, false, BlockStyle(), 0);
+  configure(text, CssTextAlign::ThaiJustify);
+  add(text, "กข", Kind::Space);
+  text.addWord("中文", regular);
+  add(text, "ประเทศไทยประเทศไทย", Kind::Word);
+  const auto lines = layout(text, 60);
+  ASSERT_GE(lines.size(), 2u);
+  const auto& first = *lines[0].block;
+  ASSERT_EQ(first.wordCount(), 3u);
+  GfxRenderer renderer;
+  const int space = renderer.getSpaceWidth(0, regular);
+  EXPECT_EQ(addedEdge(first, 0, 1, space), space / 2);
+  EXPECT_EQ(addedEdge(first, 1, 2), edgeLimit(first, 1, 2));
+  EXPECT_EQ(first.thaiExpansion(0), internalCapacity(first, 0));
+  EXPECT_LT(expandedEnd(first, 2), 60);
+}
+
+TEST(ThaiLayoutTest, HarmlessInlinePartitionsKeepEveryInteriorOriginWithinOnePixel) {
+  const std::string source = "กขคงจฉชซฌญฎฏ";
+  GfxRenderer renderer;
+  const int natural = renderer.getTextAdvanceX(0, source.c_str(), regular);
+  const auto makeLines = [&](size_t partition, int spare) {
+    ParsedText text(false, false, BlockStyle(), 0);
+    configure(text, CssTextAlign::ThaiJustify);
+    for (size_t offset = 0; offset < source.size(); offset += partition * 3) {
+      add(text, std::string_view(source).substr(offset, partition * 3), offset ? Kind::Prohibited : Kind::Space,
+          100 + offset / 3);
+    }
+    add(text, source, Kind::Word, 112);
+    return layout(text, natural + spare);
+  };
+  const auto origins = [&](const TextBlock& block) {
+    std::vector<int> result;
+    for (uint16_t i = 0; i < block.wordCount(); ++i) {
+      const size_t gaps = renderer.countThaiJustificationGaps(0, block.wordText(i), block.wordStyle(i));
+      const std::string token = block.wordText(i);
+      for (size_t unit = 0; unit < token.size() / 3; ++unit) {
+        const std::string prefix = token.substr(0, unit * 3);
+        result.push_back(block.wordXpos(i) + renderer.getTextAdvanceX(0, prefix.c_str(), regular) +
+                         (gaps ? block.thaiExpansion(i) * unit / gaps : 0));
+      }
+    }
+    return result;
+  };
+  for (int spare = 1; spare <= 21; ++spare) {
+    const auto whole = makeLines(source.size() / 3, spare);
+    ASSERT_EQ(whole.size(), 2u);
+    const auto expected = origins(*whole[0].block);
+    for (size_t partition : {1u, 2u, 3u, 5u}) {
+      const auto split = makeLines(partition, spare);
+      ASSERT_EQ(split.size(), whole.size());
+      EXPECT_EQ(strings(split), strings(whole));
+      EXPECT_EQ(split[1].offset, whole[1].offset);
+      const auto actual = origins(*split[0].block);
+      ASSERT_EQ(actual.size(), expected.size());
+      for (size_t i = 0; i < actual.size(); ++i) EXPECT_LE(std::abs(actual[i] - expected[i]), 1);
+      EXPECT_EQ(expandedEnd(*split[0].block, split[0].block->wordCount() - 1), natural + spare);
+      expectInternalCaps(*split[0].block);
+    }
+  }
+}
+
+TEST(ThaiLayoutTest, ThaiJustifyStopsAtInternalCapacityAndKeepsFinalLineNatural) {
   GfxRenderer renderer;
   for (const auto alignment : {CssTextAlign::Justify, CssTextAlign::ThaiJustify}) {
     ParsedText text(false, false, BlockStyle(), 0);
@@ -373,20 +570,16 @@ TEST(ThaiLayoutTest, ThaiJustifyAllocatesFivePixelsInsideDictionaryTokenOnlyOnNo
     ASSERT_EQ(lines[0].block->wordCount(), 1u);
     const auto& first = *lines[0].block;
     EXPECT_EQ(first.wordXpos(0), 0);
-    EXPECT_EQ(first.thaiExpansion(0), alignment == CssTextAlign::ThaiJustify ? 5 : 0);
-    EXPECT_EQ(expandedEnd(first, 0), alignment == CssTextAlign::ThaiJustify ? 29 : 24);
+    const int extra = alignment == CssTextAlign::ThaiJustify ? std::min(5, internalCapacity(first, 0)) : 0;
+    EXPECT_EQ(first.thaiExpansion(0), extra);
+    EXPECT_EQ(expandedEnd(first, 0), renderer.getTextAdvanceX(0, first.wordText(0), regular) + extra);
+    EXPECT_LT(expandedEnd(first, 0), 29);
     EXPECT_EQ(lines[1].block->thaiExpansion(0), 0);
     EXPECT_EQ(expandedEnd(*lines[1].block, 0), 24);
-    if (alignment == CssTextAlign::ThaiJustify) {
-      // Fixed-metric origins implied by the cached budget's q/r contract.
-      ASSERT_EQ(renderer.countThaiJustificationGaps(0, first.wordText(0), regular), 2u);
-      EXPECT_EQ(renderer.getTextAdvanceX(0, "ก", regular) + 3, 11);
-      EXPECT_EQ(renderer.getTextAdvanceX(0, "กข", regular) + first.thaiExpansion(0), 21);
-    }
   }
 }
 
-TEST(ThaiLayoutTest, StyledProhibitedEdgeAndInternalSlotShareRemainderAndLinkExtent) {
+TEST(ThaiLayoutTest, StyledProhibitedEdgeAndInternalSlotsStayCappedWithMatchingLinkExtent) {
   for (const auto boundary : {Kind::Word, Kind::Prohibited}) {
     ParsedText text(false, false, BlockStyle(), 0);
     configure(text, CssTextAlign::ThaiJustify);
@@ -400,18 +593,18 @@ TEST(ThaiLayoutTest, StyledProhibitedEdgeAndInternalSlotShareRemainderAndLinkExt
     ASSERT_EQ(first.wordCount(), 2u);
     EXPECT_EQ(lines[0].text(), "กขค");
     EXPECT_EQ(first.wordXpos(0), 0);
-    EXPECT_EQ(first.wordXpos(1), 11);
+    EXPECT_EQ(addedEdge(first, 0, 1), edgeLimit(first, 0, 1));
     EXPECT_EQ(first.thaiExpansion(0), 0);
-    EXPECT_EQ(first.thaiExpansion(1), 2);
+    EXPECT_EQ(first.thaiExpansion(1), internalCapacity(first, 1));
     EXPECT_EQ(first.wordStyle(0), EpdFontFamily::BOLD);
     EXPECT_EQ(first.wordStyle(1), EpdFontFamily::ITALIC);
-    EXPECT_EQ(expandedEnd(first, 1), 29);
+    EXPECT_LT(expandedEnd(first, 1), 29);
     EXPECT_EQ(lines[1].offset, 103u);
     const auto spans = lines[0].block->takeLinkSpans();
     ASSERT_EQ(spans.size(), 1u);
     EXPECT_STREQ(spans[0].href, "#expanded");
     EXPECT_EQ(spans[0].x, 0);
-    EXPECT_EQ(spans[0].width, 29);
+    EXPECT_EQ(spans[0].width, expandedEnd(first, 1));
   }
 }
 
@@ -434,13 +627,13 @@ TEST(ThaiLayoutTest, GenericAttachmentsNeverManufactureAnalyzedThaiEdges) {
     ASSERT_EQ(lines.size(), 2u);
     ASSERT_EQ(lines[0].block->wordCount(), 2u);
     EXPECT_EQ(lines[0].block->wordXpos(1), 8);
-    EXPECT_EQ(lines[0].block->thaiExpansion(1), 5);
-    EXPECT_EQ(expandedEnd(*lines[0].block, 1), 29);
+    EXPECT_EQ(lines[0].block->thaiExpansion(1), internalCapacity(*lines[0].block, 1));
+    EXPECT_LT(expandedEnd(*lines[0].block, 1), 29);
     EXPECT_EQ(lines[1].offset, 53u);
   }
 }
 
-TEST(ThaiLayoutTest, MarkedClustersRemainWholeAndReceiveOnlyInterclusterExpansion) {
+TEST(ThaiLayoutTest, MarkedClustersRemainWholeWhileIndependentSpacingUnitsExpand) {
   GfxRenderer renderer;
   for (const char* marked : {"กี่", "น้ำ", "นํ้า", "เพื่อ"}) {
     SCOPED_TRACE(marked);
@@ -456,16 +649,10 @@ TEST(ThaiLayoutTest, MarkedClustersRemainWholeAndReceiveOnlyInterclusterExpansio
     EXPECT_EQ(lines[0].text(), token);
     EXPECT_EQ(lines[1].text(), token);
     EXPECT_EQ(lines[1].offset, 200u);
-    EXPECT_EQ(lines[0].block->thaiExpansion(0), 5);
+    EXPECT_EQ(lines[0].block->thaiExpansion(0), std::min(5, internalCapacity(*lines[0].block, 0)));
     EXPECT_EQ(lines[1].block->thaiExpansion(0), 0);
-    EXPECT_EQ(expandedEnd(*lines[0].block, 0), natural + 5);
-    thai::JustificationBoundaryCursor cursor(token);
-    size_t boundary = 0;
-    ASSERT_TRUE(cursor.next(boundary));
-    EXPECT_EQ(boundary, std::string(marked).size());
-    ASSERT_TRUE(cursor.next(boundary));
-    EXPECT_EQ(boundary, std::string(marked).size() + std::string("ข").size());
-    EXPECT_FALSE(cursor.next(boundary));
+    EXPECT_EQ(expandedEnd(*lines[0].block, 0), natural + lines[0].block->thaiExpansion(0));
+    expectInternalCaps(*lines[0].block);
   }
 }
 
@@ -519,15 +706,15 @@ TEST(ThaiLayoutTest, RubyGroupIsInternallyAtomicButItsOutsideEdgeCanExpand) {
   EXPECT_TRUE(first.hasRuby());
   EXPECT_EQ(first.wordXpos(0), 0);
   EXPECT_EQ(first.wordXpos(1), 16);
-  EXPECT_EQ(first.wordXpos(2), 35);
+  EXPECT_EQ(addedEdge(first, 1, 2), edgeLimit(first, 1, 2));
   EXPECT_EQ(first.thaiExpansion(0), 0);
   EXPECT_EQ(first.thaiExpansion(1), 0);
-  EXPECT_EQ(first.thaiExpansion(2), 2);
-  EXPECT_EQ(expandedEnd(first, 2), 53);
+  EXPECT_EQ(first.thaiExpansion(2), internalCapacity(first, 2));
+  EXPECT_LT(expandedEnd(first, 2), 53);
   EXPECT_EQ(lines[1].offset, 6u);
 }
 
-TEST(ThaiLayoutTest, NbspUsesOneLegacySpaceSlotWithoutThaiEdgesAcrossIt) {
+TEST(ThaiLayoutTest, NbspUsesOneBoundedSpaceSlotWithoutThaiEdgesAcrossIt) {
   ParsedText text(false, false, BlockStyle(), 0);
   configure(text, CssTextAlign::ThaiJustify);
   add(text, "กข", Kind::Space, 0);
@@ -540,11 +727,14 @@ TEST(ThaiLayoutTest, NbspUsesOneLegacySpaceSlotWithoutThaiEdgesAcrossIt) {
   ASSERT_EQ(first.wordCount(), 3u);
   EXPECT_EQ(lines[0].text(), "กข คง");
   EXPECT_EQ(first.wordXpos(0), 0);
-  EXPECT_EQ(first.wordXpos(1), 18);
-  EXPECT_EQ(first.wordXpos(2), 24);
-  EXPECT_EQ(first.thaiExpansion(0), 2);
+  EXPECT_EQ(first.wordXpos(1), expandedEnd(first, 0));
+  GfxRenderer renderer;
+  const int space = renderer.getSpaceWidth(0, regular);
+  const int extraSpace = first.wordXpos(2) - first.wordXpos(1) - space;
+  EXPECT_GE(extraSpace, 0);
+  EXPECT_LE(extraSpace, space / 2);
+  expectInternalCaps(first);
   EXPECT_EQ(first.thaiExpansion(1), 0);
-  EXPECT_EQ(first.thaiExpansion(2), 1);
   EXPECT_EQ(expandedEnd(first, 2), 41);
   EXPECT_EQ(lines[1].offset, 5u);
 }
@@ -563,9 +753,11 @@ TEST(ThaiLayoutTest, MixedFocusAndSpaceShareSlotsWithoutExpandingFocusTokenInter
   EXPECT_EQ(first.focusBoundary(0), 2);
   EXPECT_EQ(first.focusBoundary(1), 0);
   EXPECT_EQ(first.thaiExpansion(0), 0);
-  EXPECT_EQ(first.wordXpos(1), 47);
-  EXPECT_EQ(first.thaiExpansion(1), 2);
-  EXPECT_EQ(expandedEnd(first, 1), 65);
+  GfxRenderer renderer;
+  const int space = renderer.getSpaceWidth(0, regular);
+  expectEdgeCap(first, 0, 1, space, space / 2);
+  EXPECT_EQ(first.thaiExpansion(1), internalCapacity(first, 1));
+  EXPECT_LT(expandedEnd(first, 1), 65);
   EXPECT_EQ(lines[1].offset, 8u);
 }
 
@@ -580,13 +772,15 @@ TEST(ThaiLayoutTest, ExistingCjkSlotsAreCountedOnceInThaiUnion) {
   const auto& first = *lines[0].block;
   ASSERT_EQ(first.wordCount(), 3u);
   EXPECT_EQ(lines[0].text(), "กข中文");
-  EXPECT_EQ(first.thaiExpansion(0), 2);
-  EXPECT_EQ(first.wordXpos(1), 24);
-  EXPECT_EQ(first.wordXpos(2), 33);
+  GfxRenderer renderer;
+  const int space = renderer.getSpaceWidth(0, regular);
+  expectInternalCaps(first);
+  expectEdgeCap(first, 0, 1, space, space / 2);
+  expectEdgeCap(first, 1, 2, 0, edgeLimit(first, 1, 2));
   EXPECT_EQ(expandedEnd(first, 2), 41);
 }
 
-TEST(ThaiLayoutTest, RtlParagraphRetainsLtrThaiIdentityAndPhysicalRemainderOrder) {
+TEST(ThaiLayoutTest, RtlParagraphRetainsLtrThaiIdentityAndRightAnchoring) {
   ParsedText text(false, false, BlockStyle(), 0);
   configure(text, CssTextAlign::ThaiJustify);
   text.getBlockStyle().isRtl = true;
@@ -601,8 +795,10 @@ TEST(ThaiLayoutTest, RtlParagraphRetainsLtrThaiIdentityAndPhysicalRemainderOrder
   EXPECT_STREQ(first.wordText(0), "กขค");
   EXPECT_STREQ(first.wordText(1), "אב");
   EXPECT_EQ(first.wordXpos(0), 0);
-  EXPECT_EQ(first.thaiExpansion(0), 4);
-  EXPECT_EQ(first.wordXpos(1), 33);
+  expectInternalCaps(first);
+  GfxRenderer renderer;
+  const int space = renderer.getSpaceWidth(0, regular);
+  expectEdgeCap(first, 0, 1, space, space / 2);
   EXPECT_EQ(first.thaiExpansion(1), 0);
   EXPECT_EQ(expandedEnd(first, 1), 49);
   EXPECT_EQ(lines[0].offset, 100u);
@@ -620,9 +816,9 @@ TEST(ThaiLayoutTest, StreamingExtractionExpandsEmittedLinesAndRetainsProvenanceF
   const auto first = layout(text, 29, false);
   ASSERT_EQ(first.size(), 1u);
   EXPECT_EQ(first[0].text(), "กขค");
-  EXPECT_EQ(first[0].block->wordXpos(1), 11);
-  EXPECT_EQ(first[0].block->thaiExpansion(1), 2);
-  EXPECT_EQ(expandedEnd(*first[0].block, 1), 29);
+  EXPECT_EQ(addedEdge(*first[0].block, 0, 1), edgeLimit(*first[0].block, 0, 1));
+  EXPECT_EQ(first[0].block->thaiExpansion(1), internalCapacity(*first[0].block, 1));
+  EXPECT_LT(expandedEnd(*first[0].block, 1), 29);
   ASSERT_EQ(text.size(), 2u);
   ASSERT_EQ(text.wordThaiAnalyzed.size(), 2u);
   EXPECT_TRUE(text.wordThaiAnalyzed[0]);
@@ -632,9 +828,9 @@ TEST(ThaiLayoutTest, StreamingExtractionExpandsEmittedLinesAndRetainsProvenanceF
   ASSERT_EQ(second.size(), 1u);
   EXPECT_EQ(second[0].text(), "งจฉ");
   EXPECT_EQ(second[0].offset, 70003u);
-  EXPECT_EQ(second[0].block->wordXpos(1), 11);
-  EXPECT_EQ(second[0].block->thaiExpansion(1), 2);
-  EXPECT_EQ(expandedEnd(*second[0].block, 1), 29);
+  EXPECT_EQ(second[0].block->wordXpos(1), first[0].block->wordXpos(1));
+  EXPECT_EQ(second[0].block->thaiExpansion(1), first[0].block->thaiExpansion(1));
+  EXPECT_EQ(expandedEnd(*second[0].block, 1), expandedEnd(*first[0].block, 1));
   const auto last = layout(text, 29);
   ASSERT_EQ(last.size(), 1u);
   EXPECT_EQ(last[0].text(), "ชซฌ");
@@ -653,8 +849,8 @@ TEST(ThaiLayoutTest, ThaiIndentAndEnglishOnlyLegacyRemainderRemainUnchanged) {
   const auto lines = layout(indented, 37);
   ASSERT_EQ(lines.size(), 2u);
   EXPECT_EQ(lines[0].block->wordXpos(0), 8);
-  EXPECT_EQ(lines[0].block->thaiExpansion(0), 5);
-  EXPECT_EQ(expandedEnd(*lines[0].block, 0), 37);
+  EXPECT_EQ(lines[0].block->thaiExpansion(0), internalCapacity(*lines[0].block, 0));
+  EXPECT_LT(expandedEnd(*lines[0].block, 0), 37);
   EXPECT_EQ(lines[1].block->wordXpos(0), 0);
   for (auto alignment : {CssTextAlign::Justify, CssTextAlign::ThaiJustify}) {
     ParsedText english(false, false, BlockStyle(), 0);
@@ -672,33 +868,28 @@ TEST(ThaiLayoutTest, ThaiIndentAndEnglishOnlyLegacyRemainderRemainUnchanged) {
   }
 }
 
-TEST(ThaiLayoutTest, ReversedStyledThaiEdgesDoNotBecomeExpansionSlots) {
-  const auto makeLines = [](CssTextAlign alignment) {
-    ParsedText text(false, false, BlockStyle(), 0);
-    configure(text, alignment);
-    text.getBlockStyle().isRtl = true;
-    text.getBlockStyle().directionDefined = true;
-    text.addWord("אב", regular, false, false, 100);
-    const uint8_t link = text.addLinkTarget("#rtl-thai");
-    add(text, "ก", Kind::Space, 103, EpdFontFamily::BOLD, link);
-    add(text, "ขค", Kind::Prohibited, 104, EpdFontFamily::ITALIC, link);
-    add(text, "งจฉ", Kind::Word, 106);
-    return layout(text, 49);
-  };
-  const auto legacy = makeLines(CssTextAlign::Justify);
-  const auto lines = makeLines(CssTextAlign::ThaiJustify);
+TEST(ThaiLayoutTest, StyledThaiRunKeepsReadingOrderAndBoundedLinksInsideRtlParagraph) {
+  ParsedText text(false, false, BlockStyle(), 0);
+  configure(text, CssTextAlign::ThaiJustify);
+  text.getBlockStyle().isRtl = true;
+  text.getBlockStyle().directionDefined = true;
+  text.addWord("אב", regular, false, false, 100);
+  const uint8_t link = text.addLinkTarget("#rtl-thai");
+  add(text, "ก", Kind::Space, 103, EpdFontFamily::BOLD, link);
+  add(text, "ขค", Kind::Prohibited, 104, EpdFontFamily::ITALIC, link);
+  add(text, "งจฉ", Kind::Word, 106);
+  const auto lines = layout(text, 49);
   ASSERT_EQ(lines.size(), 2u);
-  ASSERT_EQ(legacy.size(), lines.size());
   const auto& first = *lines[0].block;
   ASSERT_EQ(first.wordCount(), 3u);
-  for (uint16_t i = 0; i < first.wordCount(); ++i) {
-    EXPECT_STREQ(first.wordText(i), legacy[0].block->wordText(i));
-  }
-  // Only the internal ข|ค edge and the existing space share the five spare pixels.
-  EXPECT_EQ(first.wordXpos(0), 0);
-  EXPECT_EQ(first.thaiExpansion(0), 3);
-  EXPECT_EQ(first.wordXpos(1), expandedEnd(first, 0));
-  EXPECT_EQ(first.thaiExpansion(1), 0);
+  EXPECT_STREQ(first.wordText(0), "ก");
+  EXPECT_STREQ(first.wordText(1), "ขค");
+  EXPECT_STREQ(first.wordText(2), "אב");
+  EXPECT_EQ(first.wordStyle(0), EpdFontFamily::BOLD);
+  EXPECT_EQ(first.wordStyle(1), EpdFontFamily::ITALIC);
+  EXPECT_GE(addedEdge(first, 0, 1), 0);
+  EXPECT_LE(addedEdge(first, 0, 1), edgeLimit(first, 0, 1));
+  EXPECT_LE(first.thaiExpansion(1), internalCapacity(first, 1));
   EXPECT_EQ(expandedEnd(first, 2), 49);
   const auto spans = lines[0].block->takeLinkSpans();
   ASSERT_EQ(spans.size(), 1u);
@@ -707,7 +898,7 @@ TEST(ThaiLayoutTest, ReversedStyledThaiEdgesDoNotBecomeExpansionSlots) {
   EXPECT_EQ(lines[1].offset, 106u);
 }
 
-TEST(ThaiLayoutTest, NoThaiSlotsFallBackToLegacySpacesWithSelectedRenderedMetrics) {
+TEST(ThaiLayoutTest, NoThaiInternalSlotsStillUseBoundedSpacesWithoutLegacyRoundingLoss) {
   ParsedText text(false, false, BlockStyle(), 0);
   configure(text, CssTextAlign::ThaiJustify);
   add(text, "ก", Kind::Space, 0);
@@ -719,9 +910,11 @@ TEST(ThaiLayoutTest, NoThaiSlotsFallBackToLegacySpacesWithSelectedRenderedMetric
   ASSERT_EQ(lines[0].block->wordCount(), 3u);
   EXPECT_TRUE(text.thaiJustificationMetrics);
   EXPECT_EQ(lines[0].block->wordXpos(0), 0);
-  EXPECT_EQ(lines[0].block->wordXpos(1), 13);
-  EXPECT_EQ(lines[0].block->wordXpos(2), 26);
-  EXPECT_EQ(expandedEnd(*lines[0].block, 2), 34);
+  GfxRenderer renderer;
+  const int space = renderer.getSpaceWidth(0, regular);
+  expectEdgeCap(*lines[0].block, 0, 1, space, space / 2);
+  expectEdgeCap(*lines[0].block, 1, 2, space, space / 2);
+  EXPECT_EQ(expandedEnd(*lines[0].block, 2), 35);
   for (uint16_t i = 0; i < 3; ++i) EXPECT_EQ(lines[0].block->thaiExpansion(i), 0);
 }
 
@@ -738,9 +931,11 @@ TEST(ThaiLayoutTest, GenericThaiFocusSplitRemainsAtomicAlongsideExpandableAnalyz
   EXPECT_EQ(first.focusBoundary(0), 3);
   EXPECT_EQ(first.focusSuffixX(0), 8);
   EXPECT_EQ(first.thaiExpansion(0), 0);
-  EXPECT_EQ(first.wordXpos(1), 31);
-  EXPECT_EQ(first.thaiExpansion(1), 2);
-  EXPECT_EQ(expandedEnd(first, 1), 49);
+  GfxRenderer renderer;
+  const int space = renderer.getSpaceWidth(0, regular);
+  expectEdgeCap(first, 0, 1, space, space / 2);
+  EXPECT_EQ(first.thaiExpansion(1), internalCapacity(first, 1));
+  EXPECT_LT(expandedEnd(first, 1), 49);
 }
 
 TEST(ThaiLayoutTest, IneligibleEndpointNeverCreatesStyledExpansionEdge) {
@@ -758,12 +953,12 @@ TEST(ThaiLayoutTest, IneligibleEndpointNeverCreatesStyledExpansionEdge) {
     EXPECT_EQ(lines[0].text(), left + "ขค");
     EXPECT_EQ(lines[0].block->wordXpos(1), naturalLeft);
     EXPECT_EQ(lines[0].block->thaiExpansion(0), 0);
-    EXPECT_EQ(lines[0].block->thaiExpansion(1), 5);
-    EXPECT_EQ(expandedEnd(*lines[0].block, 1), naturalLeft + 21);
+    EXPECT_EQ(lines[0].block->thaiExpansion(1), internalCapacity(*lines[0].block, 1));
+    EXPECT_LT(expandedEnd(*lines[0].block, 1), naturalLeft + 21);
   }
 }
 
-TEST(ThaiLayoutTest, RubyOverhangReservationIsKeptWhenOutsideThaiSlotsFillLine) {
+TEST(ThaiLayoutTest, RubyOverhangReservationSurvivesBoundedOutsideExpansion) {
   ParsedText text(false, false, BlockStyle(), 0);
   configure(text, CssTextAlign::ThaiJustify);
   add(text, "กข", Kind::Space, 0);
@@ -776,9 +971,9 @@ TEST(ThaiLayoutTest, RubyOverhangReservationIsKeptWhenOutsideThaiSlotsFillLine) 
   ASSERT_EQ(first.wordCount(), 2u);
   EXPECT_EQ(first.wordXpos(0), 8);
   EXPECT_EQ(first.thaiExpansion(0), 0);
-  EXPECT_EQ(first.wordXpos(1), 27);
-  EXPECT_EQ(first.thaiExpansion(1), 2);
-  EXPECT_EQ(expandedEnd(first, 1), 45);
+  EXPECT_EQ(addedEdge(first, 0, 1), edgeLimit(first, 0, 1));
+  EXPECT_EQ(first.thaiExpansion(1), internalCapacity(first, 1));
+  EXPECT_LT(expandedEnd(first, 1), 45);
   EXPECT_EQ(first.getRubyTexts()[0], "abcd");
   EXPECT_EQ(lines[1].offset, 4u);
 }
