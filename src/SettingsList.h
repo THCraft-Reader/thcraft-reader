@@ -316,7 +316,15 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                           StrId::STR_CAT_READER),
         SettingInfo::Toggle(StrId::STR_CLOCK_IN_READER, &CrossPointSettings::statusBarClock, "statusBarClock",
                             StrId::STR_CAT_READER),
-        // --- Controls ---
+    // --- Controls ---
+#if FREEINK_CAP_HAPTIC
+        SettingInfo::Enum(StrId::STR_VIBRATION, &CrossPointSettings::vibration,
+                          {StrId::STR_VIBRATION_TOUCH, StrId::STR_VIBRATION_TOUCH_PAGE, StrId::STR_STATE_OFF},
+                          "vibration", StrId::STR_CAT_CONTROLS),
+        SettingInfo::Enum(StrId::STR_HAPTIC_INTENSITY, &CrossPointSettings::hapticIntensity,
+                          {StrId::STR_HAPTIC_LOW, StrId::STR_HAPTIC_MEDIUM, StrId::STR_HAPTIC_HIGH}, "hapticIntensity",
+                          StrId::STR_CAT_CONTROLS),
+#endif
         SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
                           {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV, StrId::STR_DISABLED, StrId::STR_NEXT_NEXT,
                            StrId::STR_PREV_PREV},
