@@ -19,6 +19,7 @@ void Hyphenator::setPreferredLanguage(const std::string&) {}
 class SectionThaiCacheTestPeer {
  public:
   static ChapterHtmlSlimParser& parser(Section& section) { return *section.build_->parser; }
+  static bool finalize(Section& section) { return section.finalizeBuild(); }
 };
 
 namespace {
@@ -142,6 +143,54 @@ class ThaiSectionCacheTest : public testing::TestWithParam<bool> {
     expectPublicationPreserved();
   }
 };
+
+TEST_P(ThaiSectionCacheTest, ShapeFaultDuringIncrementalLayoutAbandonsCache) {
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.startBuild(spec));
+  renderer.shapeMeasurementsBeforeFailure = 0;
+  EXPECT_FALSE(section.buildSomeMore(1));
+  EXPECT_TRUE(renderer.hasThaiShapeError());
+  EXPECT_FALSE(section.isBuilding());
+  EXPECT_FALSE(std::filesystem::exists(root / "sections/0.bin"));
+  EXPECT_FALSE(std::filesystem::exists(root / "sections/0.bin.part"));
+  expectPublicationPreserved();
+}
+
+TEST_P(ThaiSectionCacheTest, ShapeFaultDuringFinalFlushAbandonsCache) {
+  // Keep the final text run open so finalization, rather than an XML end tag,
+  // performs its measurement. The parser peer drives callbacks as other fixtures do.
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.startBuild(spec));
+  auto& parser = SectionThaiCacheTestPeer::parser(section);
+  ChapterHtmlSlimParser::startElement(&parser, "html", nullptr);
+  ChapterHtmlSlimParser::startElement(&parser, "body", nullptr);
+  ChapterHtmlSlimParser::startElement(&parser, "p", nullptr);
+  ChapterHtmlSlimParser::characterData(&parser, sentence.c_str(), static_cast<int>(sentence.size()));
+  renderer.shapeMeasurementsBeforeFailure = 0;
+  EXPECT_FALSE(SectionThaiCacheTestPeer::finalize(section));
+  EXPECT_TRUE(renderer.hasThaiShapeError());
+  EXPECT_FALSE(section.isBuilding());
+  EXPECT_FALSE(std::filesystem::exists(root / "sections/0.bin"));
+  expectPublicationPreserved();
+}
+
+TEST_P(ThaiSectionCacheTest, ShapeFaultRejectsSuspendedCommitAndPreservesPriorCache) {
+  Section original(epub, 0, renderer);
+  ASSERT_TRUE(original.startBuild(spec));
+  completeOrSuspend(original);
+  ASSERT_FALSE(HasFatalFailure());
+  const auto previous = readBytes(root / "sections/0.bin");
+  {
+    Section replacement(epub, 0, renderer);
+    ASSERT_TRUE(replacement.startBuild(spec));
+    ASSERT_TRUE(replacement.buildSomeMore(1));
+    ASSERT_GT(replacement.pageCount, 0);
+    renderer.thaiShapeError = true;
+    // Destruction exercises the same suspended commit used by navigation.
+  }
+  EXPECT_EQ(readBytes(root / "sections/0.bin"), previous);
+  expectPublicationPreserved();
+}
 
 TEST_P(ThaiSectionCacheTest, SameIdentityReusesCommittedPagesAndOffsets) {
   Section built(epub, 0, renderer);

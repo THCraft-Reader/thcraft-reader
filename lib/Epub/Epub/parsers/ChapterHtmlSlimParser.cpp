@@ -6,12 +6,12 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <MemoryManager.h>
-#include <Utf8.h>
-#include <XmlParserUtils.h>
-#include <expat.h>
 #include <ThaiCluster.h>
 #include <ThaiSegmenter.h>
 #include <ThaiStats.h>
+#include <Utf8.h>
+#include <XmlParserUtils.h>
+#include <expat.h>
 
 #include <algorithm>
 #include <array>
@@ -328,10 +328,13 @@ void ChapterHtmlSlimParser::setCurrentPageVisibleOffset(const uint32_t offset) {
 EpdFontFamily::Style ChapterHtmlSlimParser::currentTextStyle() const {
   EpdFontFamily::Style style = EpdFontFamily::REGULAR;
   if (boldUntilDepth < depth || effectiveBold) style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::BOLD);
-  if (italicUntilDepth < depth || effectiveItalic) style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::ITALIC);
+  if (italicUntilDepth < depth || effectiveItalic)
+    style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::ITALIC);
   style = static_cast<EpdFontFamily::Style>(style | fontStyleForTextDecoration(effectiveTextDecoration));
-  if (effectiveSup) style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::SUP);
-  else if (effectiveSub) style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::SUB);
+  if (effectiveSup)
+    style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::SUP);
+  else if (effectiveSub)
+    style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::SUB);
   return style;
 }
 
@@ -364,7 +367,8 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
 
   const uint8_t linkId = currentTextLink();
   if (genericBoundarySet) {
-    currentTextBlock->addWordWithBoundary(partWordBuffer, fontStyle, false, genericBoundary, partWordVisibleOffset, linkId);
+    currentTextBlock->addWordWithBoundary(partWordBuffer, fontStyle, false, genericBoundary, partWordVisibleOffset,
+                                          linkId);
     genericBoundarySet = false;
   } else {
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, partWordVisibleOffset, linkId);
@@ -388,16 +392,17 @@ void ChapterHtmlSlimParser::resolveThaiFootnotes(uint16_t firstRecord, uint16_t 
     for (uint16_t i = firstRecord; i < thaiRun->count; ++i) {
       const auto& record = thaiRun->records[i];
       if (record.linkId != pending.linkId || record.visibleOffset >= pending.visibleEnd) continue;
-      if (i < endRecord) covered = true;
-      else retained = true;
+      if (i < endRecord)
+        covered = true;
+      else
+        retained = true;
     }
     if (covered && !retained) pending.wordIndex = tokenEnd;
   }
 }
 
-bool ChapterHtmlSlimParser::appendThaiCodepoint(std::string_view bytes, uint32_t cp,
-                                               EpdFontFamily::Style style, uint8_t linkId,
-                                               uint32_t visibleOffset) {
+bool ChapterHtmlSlimParser::appendThaiCodepoint(std::string_view bytes, uint32_t cp, EpdFontFamily::Style style,
+                                                uint8_t linkId, uint32_t visibleOffset) {
 #if THAI_WORD_BREAKING
   if (!thaiRun) {
     if (thaiAllocationAttempted) return false;
@@ -427,14 +432,14 @@ bool ChapterHtmlSlimParser::appendThaiCodepoint(std::string_view bytes, uint32_t
     // A zero-width opportunity preceding the first Thai scalar stayed on the
     // generic path until the run could be identified as Thai-bearing.
     const bool zeroWidthBefore = genericLastScalar == 0x200B && partWordBufferIndex >= 3 &&
-                                memcmp(partWordBuffer + partWordBufferIndex - 3, "\xE2\x80\x8B", 3) == 0;
+                                 memcmp(partWordBuffer + partWordBufferIndex - 3, "\xE2\x80\x8B", 3) == 0;
     if (zeroWidthBefore) partWordBufferIndex -= 3;
     const bool followsGeneric = genericPrefixBytes != 0;
     const bool glued = nextWordContinues;
     if (partWordBufferIndex) flushPartWordBuffer();
     run.before = followsGeneric ? (thai::isOpeningPunctuation(genericLastScalar) ? thai::BreakKind::Prohibited
-                                                                              : thai::BreakKind::Word)
-                               : (glued ? thai::BreakKind::Prohibited : thai::BreakKind::Space);
+                                                                                 : thai::BreakKind::Word)
+                                : (glued ? thai::BreakKind::Prohibited : thai::BreakKind::Space);
     if (genericBoundarySet) {
       run.before = genericBoundary;
       genericBoundarySet = false;
@@ -501,12 +506,14 @@ void ChapterHtmlSlimParser::flushThaiPending(bool endOfRun) {
         ++record;
         while (record < run.count && run.records[record].style == metadata.style &&
                run.records[record].linkId == metadata.linkId &&
-               run.records[record].byteOffset - metadata.byteOffset < MAX_WORD_SIZE) ++record;
+               run.records[record].byteOffset - metadata.byteOffset < MAX_WORD_SIZE)
+          ++record;
         const size_t end = record == run.count ? run.bytes : run.records[record].byteOffset;
         if (currentTextBlock) {
-          currentTextBlock->addWordWithBoundary(std::string(text.substr(metadata.byteOffset, end - metadata.byteOffset)),
-                                                static_cast<EpdFontFamily::Style>(metadata.style), false,
-                                                run.before, metadata.visibleOffset, metadata.linkId);
+          currentTextBlock->addWordWithBoundary(
+              std::string(text.substr(metadata.byteOffset, end - metadata.byteOffset)),
+              static_cast<EpdFontFamily::Style>(metadata.style), false, run.before, metadata.visibleOffset,
+              metadata.linkId);
           resolveThaiFootnotes(first, record, wordsExtractedInBlock + static_cast<int>(currentTextBlock->size()));
         }
         run.before = thai::BreakKind::Prohibited;
@@ -519,8 +526,8 @@ void ChapterHtmlSlimParser::flushThaiPending(bool endOfRun) {
     if (!run.first) {
       before = before == thai::BreakKind::Prohibited || segment.before == thai::BreakKind::Prohibited
                    ? thai::BreakKind::Prohibited
-                   : static_cast<thai::BreakKind>(std::min(static_cast<uint8_t>(before),
-                                                         static_cast<uint8_t>(segment.before)));
+                   : static_cast<thai::BreakKind>(
+                         std::min(static_cast<uint8_t>(before), static_cast<uint8_t>(segment.before)));
     } else if (before != thai::BreakKind::Space && segment.before == thai::BreakKind::Prohibited) {
       before = thai::BreakKind::Prohibited;
     }
@@ -552,8 +559,7 @@ void ChapterHtmlSlimParser::flushThaiPending(bool endOfRun) {
               before == thai::BreakKind::Prohibited ? "~" : "|", static_cast<int>(shown), text.data() + pieceBegin,
               shown < pieceBytes ? "..." : "");
 #endif
-      resolveThaiFootnotes(pieceRecord, endRecord,
-                          wordsExtractedInBlock + static_cast<int>(currentTextBlock->size()));
+      resolveThaiFootnotes(pieceRecord, endRecord, wordsExtractedInBlock + static_cast<int>(currentTextBlock->size()));
       if (insideTableCell && !tableRowStacked) {
         tableCellTextBytes += pieceBytes;
         if (currentTextBlock->size() > MAX_GRID_TABLE_CELL_WORDS) fallbackTableRowToStacked();
@@ -579,9 +585,8 @@ void ChapterHtmlSlimParser::flushThaiPending(bool endOfRun) {
         ++record;
       }
       const auto& metadata = run.records[base];
-      const bool sourceGap = first > pieceRecord &&
-                             run.records[first].visibleOffset !=
-                                 run.records[pieceRecord].visibleOffset + (first - pieceRecord);
+      const bool sourceGap = first > pieceRecord && run.records[first].visibleOffset !=
+                                                        run.records[pieceRecord].visibleOffset + (first - pieceRecord);
       if (havePiece && (pieceStyle != metadata.style || pieceLink != metadata.linkId || sourceGap)) {
         emitPiece(cluster.begin, first);
         pieceBegin = cluster.begin;
@@ -671,15 +676,16 @@ void ChapterHtmlSlimParser::consumeCodepoint(std::string_view bytes, uint32_t cp
     nextWordContinues = false;
     return;
   }
-  const bool analyzedScalar = (thai::isThai(cp) && !thai::isDigit(cp)) ||
-                             (thaiRun && thaiRun->active &&
-                              (thai::isOpeningPunctuation(cp) || thai::isClosingPunctuation(cp)));
+  const bool analyzedScalar =
+      (thai::isThai(cp) && !thai::isDigit(cp)) ||
+      (thaiRun && thaiRun->active && (thai::isOpeningPunctuation(cp) || thai::isClosingPunctuation(cp)));
   if (analyzedScalar && !genericUrl &&
-      appendThaiCodepoint(bytes, cp, currentTextStyle(), currentTextLink(), visibleOffset)) return;
+      appendThaiCodepoint(bytes, cp, currentTextStyle(), currentTextLink(), visibleOffset))
+    return;
   if (thaiRun && thaiRun->active && !thaiRun->malformed) {
     flushThaiPending(true);
-    genericBoundary = thaiRun->before == thai::BreakKind::Prohibited ? thai::BreakKind::Prohibited
-                                                                   : thai::BreakKind::Word;
+    genericBoundary =
+        thaiRun->before == thai::BreakKind::Prohibited ? thai::BreakKind::Prohibited : thai::BreakKind::Word;
     genericBoundarySet = true;
     thaiRun->active = false;
   }
@@ -1151,8 +1157,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
   // Structural transitions are true run ends; inline style/link changes are
   // not. Drain before testing block emptiness, moving cells, or inserting images.
-  if (isHeaderOrBlock(name) || isTableStructuralTag(name) ||
-      matches(name, IMAGE_TAGS, std::size(IMAGE_TAGS)) || strcmp(name, "hr") == 0) {
+  if (isHeaderOrBlock(name) || isTableStructuralTag(name) || matches(name, IMAGE_TAGS, std::size(IMAGE_TAGS)) ||
+      strcmp(name, "hr") == 0) {
     self->endTextRun(true);
   } else {
     self->flushThaiPending(false);
@@ -2021,8 +2027,8 @@ void ChapterHtmlSlimParser::softFlushTextBlock() {
   const uint16_t width = inset < viewportWidth ? static_cast<uint16_t>(viewportWidth - inset) : viewportWidth;
   currentTextBlock->layoutAndExtractLines(
       renderer, fontId, width,
-      [this](std::unique_ptr<TextBlock> line, uint32_t offset) { addLineToPage(std::move(line), offset); },
-      false, characterSpacing, wordSpacingPercent);
+      [this](std::unique_ptr<TextBlock> line, uint32_t offset) { addLineToPage(std::move(line), offset); }, false,
+      characterSpacing, wordSpacingPercent);
 }
 
 void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const XML_Char* s, const int len) {
@@ -2105,7 +2111,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   const bool tableStructuralTag = isTableStructuralTag(name);
   const bool insideSkippedSubtree = self->depth - 1 >= self->skipUntilDepth;
   if (!insideSkippedSubtree && (headerOrBlockTag || tableStructuralTag ||
-      matches(name, IMAGE_TAGS, std::size(IMAGE_TAGS)) || self->depth == 1)) {
+                                matches(name, IMAGE_TAGS, std::size(IMAGE_TAGS)) || self->depth == 1)) {
     self->endTextRun(true);
   } else if (!insideSkippedSubtree) {
     self->flushThaiPending(false);
@@ -2171,8 +2177,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
           }
         }
       }
-      self->pendingFootnotes.push_back(
-          {wordIndex, entry, self->visibleTextOffset, self->currentFootnoteLinkId});
+      self->pendingFootnotes.push_back({wordIndex, entry, self->visibleTextOffset, self->currentFootnoteLinkId});
     }
     self->insideFootnoteLink = false;
     self->currentFootnoteLinkId = 0;
@@ -2346,6 +2351,10 @@ bool ChapterHtmlSlimParser::beginParse() {
 }
 
 ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
+  if (renderer.hasThaiShapeError()) {
+    LOG_ERR("EHP", "CPShape failed; failing section build");
+    return ParseStatus::Error;
+  }
   // Layout OOM latched during the previous buffer's callbacks: fail the build
   // instead of emitting pages with silently missing text.
   if (layoutOom || (currentTextBlock && currentTextBlock->hadDroppedWords())) {
@@ -2368,7 +2377,12 @@ ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
 
   const int done = parseFile_.available() == 0;
 
-  if (XML_ParseBuffer(xmlParser_, static_cast<int>(len), done) == XML_STATUS_ERROR) {
+  const auto parseStatus = XML_ParseBuffer(xmlParser_, static_cast<int>(len), done);
+  if (renderer.hasThaiShapeError()) {
+    LOG_ERR("EHP", "CPShape failed during layout; failing section build");
+    return ParseStatus::Error;
+  }
+  if (parseStatus == XML_STATUS_ERROR) {
     if (htmlEnded_) {
       LOG_DBG("EHP", "Ignoring trailing data after </html>: %s", XML_ErrorString(XML_GetErrorCode(xmlParser_)));
       return ParseStatus::Done;
@@ -2399,6 +2413,10 @@ bool ChapterHtmlSlimParser::finishParse() {
     scalarCarryBytes = 0;
   }
   endTextRun();
+  if (renderer.hasThaiShapeError()) {
+    LOG_ERR("EHP", "CPShape failed during final text flush; failing section build");
+    return false;
+  }
   // Same check as parseStep(): drops in the final buffer would otherwise slip
   // through because Done is returned before the next step's check runs.
   if (layoutOom || (currentTextBlock && currentTextBlock->hadDroppedWords())) {
@@ -2416,6 +2434,10 @@ bool ChapterHtmlSlimParser::finishParse() {
   // Process last page if there is still text
   if (currentTextBlock) {
     makePages();
+    if (renderer.hasThaiShapeError()) {
+      LOG_ERR("EHP", "CPShape failed during final layout; failing section build");
+      return false;
+    }
     // Re-check: makePages() latches layoutOom for lines dropped DURING this
     // final layout, which the entry check above cannot have seen.
     if (layoutOom) {
@@ -2427,6 +2449,10 @@ bool ChapterHtmlSlimParser::finishParse() {
       pendingAnchorId.clear();
     }
     setCurrentPageVisibleOffset(visibleTextOffset);
+    if (renderer.hasThaiShapeError()) {
+      LOG_ERR("EHP", "CPShape failed; refusing trailing page");
+      return false;
+    }
     completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
     completedPageCount++;
     currentPage.reset();

@@ -9,6 +9,8 @@
 #include "EpdFontData.h"
 #include "ThaiShape.h"
 
+struct ThaiShapeStorage;
+
 struct ThaiShapeBufferDeleter {
   void operator()(uint8_t* bytes) const;
 };
@@ -32,7 +34,7 @@ class SdCardFont {
   static constexpr int PREWARM_ARENA_TOO_LARGE = -2;
   static constexpr uint8_t MAX_STYLES = 4;
 
-  SdCardFont() = default;
+  SdCardFont();
   ~SdCardFont();
   // Owns raw buffers freed in dtor — no shallow-copy semantics. Make any
   // accidental pass-by-value or move a compile-time error.
@@ -107,9 +109,10 @@ class SdCardFont {
   // mini glyph/kern arenas, kern/ligature class tables, the overflow ring, and
   // the persistent advance tables. Coverage intervals stay so hasCodepoint()
   // and reloads keep working; glyphs fault back in on demand and the next
-  // prewarm rebuilds the arenas. For heap-critical transitions (e.g. starting
-  // WiFi + the web server), where retained font data is the difference between
-  // a clean start and an OOM abort.
+  // prewarm rebuilds the arenas. Validated shaping sources/indexes and admitted
+  // clusters remain resident; only this font's paged shape blocks are invalidated.
+  // For heap-critical transitions (e.g. starting WiFi + the web server), where
+  // retained font data is the difference between a clean start and an OOM abort.
   void releaseResidentCaches();
 
   // Returns pointer to the managed EpdFont for a given style.
@@ -153,6 +156,9 @@ class SdCardFont {
   // Header/TOC identity plus shaping flag/state and validated metrics/payload CRCs.
   // Used to generate deterministic font IDs for section cache invalidation.
   uint32_t contentHash() const { return contentHash_; }
+
+  // Runtime companion I/O/structure faults remain latched until a validated reload.
+  bool hasThaiShapeError() const;
 
  private:
   // Per-style metadata (parsed from file header/TOC)
@@ -285,7 +291,7 @@ class SdCardFont {
 
   PerStyle styles_[MAX_STYLES] = {};
   uint8_t styleCount_ = 0;
-  std::unique_ptr<uint8_t[], ThaiShapeBufferDeleter> thaiShapeBuffer_;
+  std::unique_ptr<ThaiShapeStorage> thaiShapeStorage_;
   void loadThaiShape();
   bool collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count, uint32_t limit, uint8_t styleMask,
                              bool shapeText, bool nativeLigatures = false) const;

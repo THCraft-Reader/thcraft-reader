@@ -31,8 +31,8 @@ void ReaderActivity::beginThaiStatsWindow() {
   thaiSdCallsPrevious = reads.calls;
   thaiSdBytesPrevious = reads.bytes;
   thaiWindowStartedMs = static_cast<uint32_t>(millis());
-  thaiMinimumInternal = std::min(thaiMinimumInternal,
-                                 static_cast<uint32_t>(HalMemory::getInternal8BitHeap().freeBytes));
+  thaiMinimumInternal =
+      std::min(thaiMinimumInternal, static_cast<uint32_t>(HalMemory::getInternal8BitHeap().freeBytes));
 }
 
 void ReaderActivity::logThaiStatsPhase(const char* phase) {
@@ -58,7 +58,8 @@ void ReaderActivity::logThaiStatsPhase(const char* phase) {
           static_cast<unsigned>(stats.words - thaiStatsPrevious.words),
           static_cast<unsigned>(stats.unknown_clusters - thaiStatsPrevious.unknown_clusters),
           static_cast<unsigned>(stats.max_pending_bytes));
-  LOG_INF("THAI", "phase=%s sample=%u internal_free=%u internal_largest=%u internal_min_observed=%u internal_min_since_boot=%u",
+  LOG_INF("THAI",
+          "phase=%s sample=%u internal_free=%u internal_largest=%u internal_min_observed=%u internal_min_since_boot=%u",
           phase, sample, static_cast<unsigned>(internal.freeBytes), static_cast<unsigned>(internal.largestBlockBytes),
           static_cast<unsigned>(thaiMinimumInternal), static_cast<unsigned>(internal.minFreeBytes));
   if (psram.totalBytes) {
@@ -67,8 +68,8 @@ void ReaderActivity::logThaiStatsPhase(const char* phase) {
   } else {
     LOG_INF("THAI", "phase=%s sample=%u psram_available=0 psram_free=null psram_largest=null", phase, sample);
   }
-  LOG_INF("THAI", "phase=%s sample=%u sd_read_calls=%llu sd_read_bytes=%llu dictionary_id=%u font_id=%u",
-          phase, sample, static_cast<unsigned long long>(reads.calls - thaiSdCallsPrevious),
+  LOG_INF("THAI", "phase=%s sample=%u sd_read_calls=%llu sd_read_bytes=%llu dictionary_id=%u font_id=%u", phase, sample,
+          static_cast<unsigned long long>(reads.calls - thaiSdCallsPrevious),
           static_cast<unsigned long long>(reads.bytes - thaiSdBytesPrevious),
           static_cast<unsigned>(thai::dictionaryDataId()), static_cast<unsigned>(SETTINGS.getReaderFontId()));
   thaiStatsPrevious = stats;
@@ -126,9 +127,15 @@ void ReaderActivity::onEnter() {
   thaiOpenStartedMs = static_cast<uint32_t>(millis());
   beginThaiStatsWindow();
   logThaiStatsPhase("open_start");
-  LOG_INF("THAI", "scope=device_cumulative_snapshot_deltas heap_scope=INTERNAL|8BIT,SPIRAM min_scope=lifecycle_and_turn_samples");
-  LOG_INF("THAI", "segment_scope=nextSegment draw_scope=glyph_loops_excludes_scan_and_batch_prewarm sd_scope=HAL_requests_not_sectors");
-  LOG_INF("THAI", "refresh_scope=HAL_refresh_gray_service_start_to_observed_completion_includes_transfer_settle_async_observation_delay_not_BUSY_edge");
+  LOG_INF(
+      "THAI",
+      "scope=device_cumulative_snapshot_deltas heap_scope=INTERNAL|8BIT,SPIRAM min_scope=lifecycle_and_turn_samples");
+  LOG_INF("THAI",
+          "segment_scope=nextSegment draw_scope=glyph_loops_excludes_scan_and_batch_prewarm "
+          "sd_scope=HAL_requests_not_sectors");
+  LOG_INF("THAI",
+          "refresh_scope=HAL_refresh_gray_service_start_to_observed_completion_includes_transfer_settle_async_"
+          "observation_delay_not_BUSY_edge");
 #endif
 
   // Heap ledger for field crash reports: free vs largest block distinguishes a
@@ -339,6 +346,10 @@ void ReaderActivity::render(RenderLock&&) {
   }
 
   renderBook();
+  if (renderer.hasThaiShapeError()) {
+    readerSession.noteTurn(false, false);
+    return;
+  }
   readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
 }
 

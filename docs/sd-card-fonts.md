@@ -272,10 +272,16 @@ Copy **both** `MyThaiFont_16.cpfont` and `MyThaiFont_16.cpshape` into the same f
 folder on the SD card. The `.cpshape.json` report is desktop provenance, not needed
 by the reader. Use manual SD copying for the companion file.
 
-CPFont stays version 4, including its original Unicode glyphs. Older firmware can
-still use the font without positioning. Missing, incompatible, corrupt or
-memory-constrained companions fall back to native rendering; no desktop shaping
-library runs on the device. Reload the font after replacing a companion.
+CPFont stays version 4, including its original Unicode glyphs; CPSHAPE stays
+version 1. Older firmware can still use the font without positioning. Current
+firmware selects resident or SD-backed shaping automatically: low memory or a
+failed whole-file/index allocation uses one shared working cache below 8 KiB,
+plus per-font metadata and HAL overhead. No setting or repackaged font is needed.
+Missing, incompatible, corrupt or minimum-resource-OOM companions still leave
+the native font usable; no desktop shaping library runs on the device.
+An actual companion read failure stops layout/rendering rather than saving native
+fallback geometry under a shaped cache identity. Back/reopen or a settings reload
+performs fresh validation. Reload the font after replacing either paired file.
 Omitting `--thai-shaping` keeps ordinary converter output unchanged.
 
 Resident page glyphs retain their Latin kerning and ligatures across UI prewarms.

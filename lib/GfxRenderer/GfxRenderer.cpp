@@ -301,6 +301,13 @@ const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const Ep
   return &fontData->bitmap[glyph->dataOffset];
 }
 
+bool GfxRenderer::hasThaiShapeError() const {
+  for (const auto& entry : sdCardFonts_) {
+    if (entry.second && entry.second->hasThaiShapeError()) return true;
+  }
+  return false;
+}
+
 void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask) const {
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {

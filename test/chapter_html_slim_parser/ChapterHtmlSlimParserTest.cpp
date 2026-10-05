@@ -4,6 +4,7 @@
 
 #include <array>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <set>
 #include <string>
@@ -42,6 +43,37 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
 
   void SetUp() override { parser.currentTextBlock = std::make_unique<ParsedText>(); }
 };
+
+TEST_F(ChapterHtmlSlimParserTest, ShapeFaultAtEntryRejectsParsing) {
+  renderer.thaiShapeError = true;
+  EXPECT_EQ(parser.parseStep(), ChapterHtmlSlimParser::ParseStatus::Error);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, ShapeFaultDuringFinalLayoutRejectsTrailingPage) {
+  unsigned pages = 0;
+  parser.completePageFn = [&](std::unique_ptr<Page>, auto, auto, auto) { ++pages; };
+  parser.currentTextBlock->addWord("final", EpdFontFamily::REGULAR);
+  renderer.shapeMeasurementsBeforeFailure = 0;
+  EXPECT_FALSE(parser.finishParse());
+  EXPECT_TRUE(renderer.hasThaiShapeError());
+  EXPECT_EQ(pages, 0u);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, ShapeFaultInCallbacksOverridesTrailingHtmlDone) {
+  const auto path = std::filesystem::temp_directory_path() / "crosspoint_shape_fault_trailing.xhtml";
+  filepath = path.string();
+  {
+    std::ofstream output(path);
+    output << "<html><body><p>measured text</p></body></html>trailing";
+  }
+  parser.completePageFn = [](std::unique_ptr<Page>, auto, auto, auto) {};
+  ASSERT_TRUE(parser.beginParse());
+  renderer.shapeMeasurementsBeforeFailure = 0;
+  EXPECT_EQ(parser.parseStep(), ChapterHtmlSlimParser::ParseStatus::Error);
+  EXPECT_TRUE(renderer.hasThaiShapeError());
+  parser.abortParse();
+  std::filesystem::remove(path);
+}
 
 TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
   ParsedText text;

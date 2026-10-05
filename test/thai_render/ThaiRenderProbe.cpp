@@ -6,6 +6,7 @@
 #include <FontDecompressor.h>
 #include <FontPsram.h>
 #include <GfxRenderer.h>
+#include <HalMemory.h>
 #include <SdCardFont.h>
 #include <ThaiCluster.h>
 #include <ThaiDictionary.h>
@@ -41,6 +42,8 @@ struct Options {
   bool hyphenation = false, focus = false;
   bool failThaiAllocation = false;
   bool failShapeAllocation = false;
+  size_t shapeInternalFree = 256u * 1024u * 1024u;
+  std::string shapeFailReadPhase = "none";
   bool cacheRoundtrip = false, verifyThaiPlacement = false;
 };
 std::string json(const std::string& text) {
@@ -78,6 +81,13 @@ int integer(const std::string& value) {
   if (end != value.size()) throw std::runtime_error("Invalid integer: " + value);
   return result;
 }
+size_t byteCount(const std::string& value) {
+  if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos)
+    throw std::runtime_error("Invalid byte count: " + value);
+  const auto result = std::stoull(value);
+  if (result > std::numeric_limits<size_t>::max()) throw std::runtime_error("Byte count exceeds size_t");
+  return static_cast<size_t>(result);
+}
 bool toggle(const std::string& value) {
   if (value == "on") return true;
   if (value == "off") return false;
@@ -100,6 +110,7 @@ Options options(int argc, char** argv) {
                    "--character-spacing N --word-spacing-percent N --line-compression F --hyphenation on|off --focus "
                    "on|off --output DIR [--cache-roundtrip on|off] [--verify-thai-placement on|off] [--glyph-sheet "
                    "normal|rotated90cw] [--fail-thai-allocation on|off] [--fail-shape-allocation on|off] "
+                   "[--shape-internal-free BYTES] [--shape-fail-read-phase none|layout|bw|gray-msb|gray-lsb] "
                    "[--thai-space-weight 2|4|6]\n";
       std::exit(0);
     }
@@ -143,6 +154,10 @@ Options options(int argc, char** argv) {
       o.failThaiAllocation = toggle(value);
     else if (key == "--fail-shape-allocation")
       o.failShapeAllocation = toggle(value);
+    else if (key == "--shape-internal-free")
+      o.shapeInternalFree = byteCount(value);
+    else if (key == "--shape-fail-read-phase")
+      o.shapeFailReadPhase = value;
     else
       throw std::runtime_error("Unknown option " + key);
   }
@@ -162,6 +177,9 @@ Options options(int argc, char** argv) {
     throw std::runtime_error("Invalid orientation");
   if (!o.glyphSheet.empty() && o.glyphSheet != "normal" && o.glyphSheet != "rotated90cw")
     throw std::runtime_error("Invalid glyph-sheet mode");
+  if (o.shapeFailReadPhase != "none" && o.shapeFailReadPhase != "layout" && o.shapeFailReadPhase != "bw" &&
+      o.shapeFailReadPhase != "gray-msb" && o.shapeFailReadPhase != "gray-lsb")
+    throw std::runtime_error("Invalid shape read failure phase");
   alignmentValue(o.alignment);
   return o;
 }
@@ -505,19 +523,69 @@ std::vector<SheetLine> readSheet(const std::string& path) {
   return sheet.lines;
 }
 
+class ShapeReadFault {
+ public:
+  ShapeReadFault(const Options& options, SdCardFont& font, GfxRenderer& renderer)
+      : options_(options), font_(font), renderer_(renderer) {}
+  void enter(std::string_view phase) {
+    check();
+    if (armed_ && options_.shapeFailReadPhase != phase)
+      throw std::runtime_error("Requested companion read failure was not exercised during " +
+                               options_.shapeFailReadPhase);
+    if (armed_ || options_.shapeFailReadPhase != phase) return;
+    font_.releaseResidentCaches();
+    failuresBefore_ = probe::shapeReadFailures;
+    readsBefore_ = probe::shapeReadCalls;
+    probe::shapeFailReadAt = readsBefore_ + 1;
+    armed_ = true;
+  }
+  void check() const {
+    const bool failed = font_.hasThaiShapeError() || renderer_.hasThaiShapeError();
+    if (armed_ && probe::shapeReadFailures != failuresBefore_) {
+      if (!failed) throw std::runtime_error("Companion read failed without latching a shaping fault");
+      throw std::runtime_error("Exercised companion read failure during " + options_.shapeFailReadPhase +
+                               " (HAL read attempts: " + std::to_string(probe::shapeReadCalls - readsBefore_) + ")");
+    }
+    if (failed) throw std::runtime_error("Latched shaping source fault");
+  }
+  void leave(std::string_view phase) const {
+    check();
+    if (armed_ && options_.shapeFailReadPhase == phase)
+      throw std::runtime_error("Requested companion read failure was not exercised during " +
+                               options_.shapeFailReadPhase);
+  }
+  void finish() const {
+    check();
+    if (options_.shapeFailReadPhase != "none")
+      throw std::runtime_error("Requested companion read failure was not exercised during " +
+                               options_.shapeFailReadPhase);
+  }
+
+ private:
+  const Options& options_;
+  SdCardFont& font_;
+  GfxRenderer& renderer_;
+  uint64_t failuresBefore_ = 0, readsBefore_ = 0;
+  bool armed_ = false;
+};
+
 class Probe {
  public:
-  Probe(const Options& options, GfxRenderer& renderer, FontCacheManager& cache, std::ostream& report)
-      : o(options), r(renderer), cache(cache), report(report) {}
+  Probe(const Options& options, GfxRenderer& renderer, FontCacheManager& cache, std::ostream& report,
+        ShapeReadFault& fault)
+      : o(options), r(renderer), cache(cache), report(report), fault(fault) {}
   uint64_t drawUs = 0, callbackUs = 0;
+  std::array<uint64_t, 3> shapeDrawCalls{}, shapeDrawBytes{};
   size_t pageCount = 0;
   bool cacheRoundtripEqual = true;
   void page(Page& page, uint32_t sourceOffset) {
+    fault.check();
     const uint64_t callbackStart = hostMicros();
     auto draw = [&] { page.render(r, FONT_ID, 0, 0); };
     auto prewarm = cache.createPrewarmScope();
     draw();
     prewarm.endScanAndPrewarm();
+    fault.check();
     if (o.cacheRoundtrip) verifyCacheRoundtrip(page);
     beginPage(sourceOffset, draw);
     bool first = true;
@@ -630,6 +698,7 @@ class Probe {
     for (size_t start = 0; start < lines.size(); start += perPage) {
       const size_t end = std::min(lines.size(), start + perPage);
       for (size_t i = start; i < end; ++i) cache.prewarmCache(FONT_ID, lines[i].text.c_str(), 1, i != start);
+      fault.check();
       auto drawLine = [&](size_t i) {
         const int offset = 16 + static_cast<int>(i - start) * step;
         if (rotated)
@@ -680,6 +749,7 @@ class Probe {
   GfxRenderer& r;
   FontCacheManager& cache;
   std::ostream& report;
+  ShapeReadFault& fault;
   void verifyCacheRoundtrip(Page& fresh) {
     const auto path = (std::filesystem::path(o.output) / "roundtrip.bin").string();
     {
@@ -707,9 +777,11 @@ class Probe {
       r.setRenderMode(mode);
       r.clearScreen(mode == GfxRenderer::BW ? 0xff : 0);
       fresh.render(r, FONT_ID, 0, 0);
+      fault.check();
       const std::vector<uint8_t> pixels(r.getFrameBuffer(), r.getFrameBuffer() + r.getBufferSize());
       r.clearScreen(mode == GfxRenderer::BW ? 0xff : 0);
       replay->render(r, FONT_ID, 0, 0);
+      fault.check();
       cacheRoundtripEqual &= std::equal(pixels.begin(), pixels.end(), r.getFrameBuffer());
     }
     r.setRenderMode(GfxRenderer::BW);
@@ -721,23 +793,38 @@ class Probe {
     name << "page-" << std::setw(3) << std::setfill('0') << pageCount++;
     const auto prefix = std::filesystem::path(o.output) / name.str();
     const uint64_t started = hostMicros();
+    fault.enter("bw");
+    const uint64_t bwCalls = probe::shapeReadCalls, bwBytes = probe::shapeReadBytes;
     r.setRenderMode(GfxRenderer::BW);
     r.clearScreen();
     draw();
+    fault.leave("bw");
+    shapeDrawCalls[0] += probe::shapeReadCalls - bwCalls;
+    shapeDrawBytes[0] += probe::shapeReadBytes - bwBytes;
     const uint64_t elapsed = hostMicros() - started;
     drawUs += elapsed;
     const std::vector<uint8_t> bw(r.getFrameBuffer(), r.getFrameBuffer() + r.getBufferSize());
     const auto bounds = inkBounds(r);
-    std::ofstream pbm(prefix.string() + ".pbm", std::ios::binary);
-    pbm << "P4\n" << r.getDisplayWidth() << ' ' << r.getDisplayHeight() << '\n';
-    for (uint8_t byte : bw) pbm.put(static_cast<char>(~byte));
+    fault.enter("gray-msb");
+    const uint64_t msbCalls = probe::shapeReadCalls, msbBytes = probe::shapeReadBytes;
     r.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
     r.clearScreen(0);
     draw();
+    fault.leave("gray-msb");
+    shapeDrawCalls[1] += probe::shapeReadCalls - msbCalls;
+    shapeDrawBytes[1] += probe::shapeReadBytes - msbBytes;
     const std::vector<uint8_t> msb(r.getFrameBuffer(), r.getFrameBuffer() + r.getBufferSize());
+    fault.enter("gray-lsb");
+    const uint64_t lsbCalls = probe::shapeReadCalls, lsbBytes = probe::shapeReadBytes;
     r.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
     r.clearScreen(0);
     draw();
+    fault.leave("gray-lsb");
+    shapeDrawCalls[2] += probe::shapeReadCalls - lsbCalls;
+    shapeDrawBytes[2] += probe::shapeReadBytes - lsbBytes;
+    std::ofstream pbm(prefix.string() + ".pbm", std::ios::binary);
+    pbm << "P4\n" << r.getDisplayWidth() << ' ' << r.getDisplayHeight() << '\n';
+    for (uint8_t byte : bw) pbm.put(static_cast<char>(~byte));
     std::ofstream pgm(prefix.string() + ".pgm", std::ios::binary);
     pgm << "P5\n" << r.getDisplayWidth() << ' ' << r.getDisplayHeight() << "\n255\n";
     for (int y = 0; y < r.getDisplayHeight(); ++y)
@@ -773,6 +860,9 @@ int main(int argc, char** argv) {
       return 0;
     }
     const Options o = options(argc, argv);
+    probe::internalHeadroomBytes = o.shapeInternalFree;
+    probe::resetInternalHeapSamples();
+    probe::resetShapeFaults();
     ParsedText::probeThaiSpaceWeight = static_cast<uint8_t>(o.thaiSpaceWeight);
     std::filesystem::create_directories(o.output);
     const bool portrait = o.orientation == "portrait" || o.orientation == "inverted";
@@ -785,18 +875,36 @@ int main(int argc, char** argv) {
     const auto engineBefore = thai::statsSnapshot();
 #endif
     const uint64_t sdCallsBefore = probe::readCalls, sdBytesBefore = probe::readBytes;
+    const uint64_t shapeCallsBefore = probe::shapeReadCalls, shapeBytesBefore = probe::shapeReadBytes;
     const uint64_t loadStart = hostMicros();
-    if (o.failShapeAllocation) {
+    bool loaded = false;
+#if THAI_SHAPING
+    const bool rejectResident =
+        o.failShapeAllocation || (o.shapeFailReadPhase != "none" && o.shapeInternalFree > 50u * 1024u);
+    if (rejectResident) {
       auto companion = std::filesystem::path(o.font);
       companion.replace_extension(".cpshape");
-      probe::failFontAllocationBytes = std::filesystem::file_size(companion);
+      probe::ScopedNullableAllocationFailure failFull(std::filesystem::file_size(companion), 1,
+                                                      probe::NullableAllocationKind::Array);
+      loaded = font.load(o.font.c_str());
+      if (probe::nullableAllocationFailure().failures != 1)
+        throw std::runtime_error("Requested companion allocation failure was not exercised");
+    } else {
+      loaded = font.load(o.font.c_str());
     }
-    if (!font.load(o.font.c_str()) || !font.getEpdFont())
-      throw std::runtime_error("Cannot load regular CPFont " + o.font);
+#else
+    if (o.shapeFailReadPhase != "none")
+      throw std::runtime_error("Companion read fault injection requires THAI_SHAPING");
+    loaded = font.load(o.font.c_str());
+#endif
+    if (!loaded || !font.getEpdFont()) throw std::runtime_error("Cannot load regular CPFont " + o.font);
     const uint64_t loadUs = hostMicros() - loadStart;
-    if (o.failShapeAllocation && probe::failFontAllocationBytes != 0) {
-      throw std::runtime_error("Requested companion allocation failure was not exercised");
-    }
+    const uint64_t shapeLoadCalls = probe::shapeReadCalls - shapeCallsBefore;
+    const uint64_t shapeLoadBytes = probe::shapeReadBytes - shapeBytesBefore;
+#if THAI_SHAPING
+    if ((o.failShapeAllocation || o.shapeFailReadPhase != "none") && !font.getEpdFont()->getThaiShape())
+      throw std::runtime_error("Requested cached companion mode did not preserve active shaping");
+#endif
     renderer.insertFont(FONT_ID,
                         EpdFontFamily(font.getEpdFont(), font.getEpdFont(1), font.getEpdFont(2), font.getEpdFont(3)));
     renderer.registerSdCardFont(FONT_ID, &font);
@@ -805,12 +913,15 @@ int main(int argc, char** argv) {
     FontCacheManager cache(renderer.getFontMap(), renderer.getSdCardFonts(), renderer.getTtfFonts());
     cache.setFontDecompressor(&decompressor);
     renderer.setFontCacheManager(&cache);
+    ShapeReadFault shapeFault(o, font, renderer);
     if (o.verifyThaiPlacement) {
       verifyMarkedPlacement(renderer, font);
       verifyNativeLigatures(o);
     }
-    std::ofstream report(std::filesystem::path(o.output) / "report.json");
-    if (!report) throw std::runtime_error("Cannot create report.json");
+    shapeFault.check();
+    const auto pendingReport = std::filesystem::path(o.output) / "report.pending.json";
+    std::ofstream report(pendingReport);
+    if (!report) throw std::runtime_error("Cannot create pending report");
     report << "{\"schema_version\":1,\"settings\":{\"font\":" << json(o.font) << ",\"xhtml\":" << json(o.xhtml)
            << ",\"width\":" << o.width << ",\"height\":" << o.height
            << ",\"panel_width\":" << renderer.getDisplayWidth() << ",\"panel_height\":" << renderer.getDisplayHeight()
@@ -830,7 +941,8 @@ int main(int argc, char** argv) {
               "\"line_text_convention\":\"concatenated tokens; no inferred spaces\","
               "\"ink_bounds_unit\":\"logical clipped pixels [x,y,width,height]\","
               "\"pages\":[";
-    Probe probe(o, renderer, cache, report);
+    Probe probe(o, renderer, cache, report, shapeFault);
+    shapeFault.enter("layout");
     uint64_t layoutUs = 0;
     bool analysisUnavailable = false;
     if (o.glyphSheet.empty()) {
@@ -843,7 +955,9 @@ int main(int argc, char** argv) {
       parser.setTextSpacing(static_cast<int8_t>(o.characterSpacing), static_cast<uint8_t>(o.wordSpacing));
       parser.failThaiAllocation = o.failThaiAllocation;
       const uint64_t started = hostMicros();
-      if (!parser.parseAndBuildPages()) throw std::runtime_error("Production chapter parse/layout failed");
+      const bool parsed = parser.parseAndBuildPages();
+      shapeFault.check();
+      if (!parsed) throw std::runtime_error("Production chapter parse/layout failed");
       layoutUs = hostMicros() - started - probe.callbackUs;
       analysisUnavailable = parser.thaiAnalysisUnavailable();
     } else {
@@ -852,6 +966,7 @@ int main(int argc, char** argv) {
       layoutUs = hostMicros() - started;
       probe.sheets(lines);
     }
+    shapeFault.finish();
     if (!probe.pageCount) throw std::runtime_error("No pages produced");
 #if THAI_ENGINE_STATS
     thai::recordLayoutMicros(static_cast<uint32_t>(layoutUs));
@@ -881,8 +996,22 @@ int main(int argc, char** argv) {
         << thai::dictionaryDataId() << ",\"font_id\":" << font.contentHash()
         << ",\"sd_read_calls\":" << (probe::readCalls - sdCallsBefore)
         << ",\"sd_read_bytes\":" << (probe::readBytes - sdBytesBefore)
+        << ",\"shape_hal_read_calls\":" << (probe::shapeReadCalls - shapeCallsBefore)
+        << ",\"shape_hal_read_bytes\":" << (probe::shapeReadBytes - shapeBytesBefore)
+        << ",\"shape_load_hal_read_calls\":" << shapeLoadCalls << ",\"shape_load_hal_read_bytes\":" << shapeLoadBytes
+        << ",\"shape_bw_hal_read_calls\":" << probe.shapeDrawCalls[0]
+        << ",\"shape_bw_hal_read_bytes\":" << probe.shapeDrawBytes[0]
+        << ",\"shape_gray_msb_hal_read_calls\":" << probe.shapeDrawCalls[1]
+        << ",\"shape_gray_msb_hal_read_bytes\":" << probe.shapeDrawBytes[1]
+        << ",\"shape_gray_lsb_hal_read_calls\":" << probe.shapeDrawCalls[2]
+        << ",\"shape_gray_lsb_hal_read_bytes\":" << probe.shapeDrawBytes[2]
+        << ",\"shape_simulated_internal_free_bytes\":" << o.shapeInternalFree
+        << ",\"shape_scope\":\"companion-only HAL requests including failed attempts; not physical SD transactions; "
+           "draw phase counters exclude prewarm, cache replay and diagnostics\""
         << ",\"host_allocation_high_water_bytes\":" << probe::allocationHighWater()
         << ",\"host_allocation_live_bytes\":" << probe::allocationLive()
+        << ",\"host_allocation_calls\":" << probe::allocationCalls()
+        << ",\"host_allocation_live_count\":" << probe::allocationLiveCount()
         << ",\"host_allocation_scope\":\"host-only C++ new/new[] and font allocator; excludes libc/Expat and device "
            "heap; sampled before font teardown\","
            "\"measurement_scope\":\"host run; cumulative counter snapshot deltas; max_pending_bytes is process "
@@ -899,6 +1028,9 @@ int main(int argc, char** argv) {
            "not physical sectors\"}}\n";
     report.flush();
     if (!report) throw std::runtime_error("Failed writing report.json");
+    report.close();
+    if (!report) throw std::runtime_error("Failed closing pending report");
+    std::filesystem::rename(pendingReport, std::filesystem::path(o.output) / "report.json");
     std::cout << "Rendered " << probe.pageCount << " pages to " << o.output << '\n';
     return 0;
   } catch (const std::exception& e) {

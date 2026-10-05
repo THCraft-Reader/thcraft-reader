@@ -5,6 +5,8 @@
 
 class SdCardFont {
  public:
+  bool thaiShapeError = false;
+  bool hasThaiShapeError() const { return thaiShapeError; }
   struct PrewarmCall {
     char text[32] = {};
     uint8_t styleMask = 0;

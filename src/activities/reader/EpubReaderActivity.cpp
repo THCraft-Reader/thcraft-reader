@@ -1302,7 +1302,14 @@ void EpubReaderActivity::renderBook() {
     renderer.clearScreen();
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    GUI.drawPopup(renderer, tr(STR_INDEX_FAILED));
+    if (renderer.hasThaiShapeError()) {
+      currentPageFootnotes.clear();
+      pageBufferStale = true;
+      sdFontSystem.markRegistryDirty();
+      GUI.drawPopup(renderer, tr(STR_PAGE_LOAD_ERROR));
+    } else {
+      GUI.drawPopup(renderer, tr(STR_INDEX_FAILED));
+    }
     automaticPageTurnActive = false;
   };
 
@@ -1588,7 +1595,17 @@ void EpubReaderActivity::renderBook() {
     discardOverlayPage();
 
     const auto start = millis();
-    renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
+    if (!renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom,
+                        orientedMarginLeft)) {
+      currentPageLinks.clear();
+      currentPageFootnotes.clear();
+      automaticPageTurnActive = false;
+      pageBufferStale = true;
+      sdFontSystem.markRegistryDirty();
+      renderer.clearScreen();
+      GUI.drawPopup(renderer, tr(STR_PAGE_LOAD_ERROR));
+      return;
+    }
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
     lastRenderCompleteMs = millis();
     markPageRendered();
@@ -1706,7 +1723,7 @@ void EpubReaderActivity::rememberCurrentContentOffset() {
   }
 }
 
-void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
+bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
@@ -1717,6 +1734,19 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     ~PxcSlotGuard() { ImageBlock::releaseRenderCache(); }
   } pxcSlotGuard;
 
+  bool storedBw = false;
+  bool grayscaleStarted = false;
+  bool completed = false;
+  const ScopedCleanup cleanup{[&] {
+    if (completed) return;
+    renderer.endStripTarget();
+    renderer.waitRefreshComplete();
+    renderer.setRenderMode(GfxRenderer::BW);
+    if (storedBw) renderer.restoreBwBuffer(false);
+    if (grayscaleStarted) renderer.cleanupGrayscaleWithFrameBuffer();
+  }};
+  if (renderer.hasThaiShapeError()) return false;
+
   auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
@@ -1725,6 +1755,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // its own SD pass after the scope ends.
   renderStatusBar();
   scope.endScanAndPrewarm();
+  if (renderer.hasThaiShapeError()) return false;
   const auto tPrewarm = millis();
 
   const bool pageHasImages = page->hasImages();
@@ -1759,12 +1790,14 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   if (pageHasImagesNeedingDecode) {
     page->renderWithImagePlaceholders(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     renderStatusBar();
+    if (renderer.hasThaiShapeError()) return false;
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     renderer.clearScreen();
   }
 
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   renderStatusBar();
+  if (renderer.hasThaiShapeError()) return false;
   const auto tBwRender = millis();
 
   if (absoluteImageGrayscale) {
@@ -1772,7 +1805,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     if (!renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Absolute, baseMode)) {
       LOG_ERR("ERS", "Could not start absolute image page; displaying B/W");
       ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
-      return;
+      return true;
     }
     LOG_DBG("ERS", "UC8279 image page: absolute quality waveform");
     pagesUntilFullRefresh = 1;
@@ -1803,6 +1836,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
   const auto tDisplay = millis();
+  grayscaleStarted = needsAnyGrayscale;
 
   if (tiledGrayscale) {
     constexpr int STRIP_ROWS = 80;
@@ -1818,7 +1852,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.clearScreen(0x00);
         renderGrayscalePass();
         renderer.endStripTarget();
+        if (renderer.hasThaiShapeError()) return false;
       }
+      return true;
     };
 
     constexpr size_t PLANE_BUF_HEADROOM = 60000;
@@ -1831,8 +1867,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     auto msbPlaneBuf = (lsbPlaneBuf && planeBufFits()) ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
 
     if (lsbPlaneBuf) {
-      renderPlaneToBuffer(true, lsbPlaneBuf.get());
-      if (msbPlaneBuf) renderPlaneToBuffer(false, msbPlaneBuf.get());
+      if (!renderPlaneToBuffer(true, lsbPlaneBuf.get())) return false;
+      if (msbPlaneBuf && !renderPlaneToBuffer(false, msbPlaneBuf.get())) return false;
       const auto tGrayRender = millis();
 
       renderer.waitRefreshComplete();
@@ -1842,7 +1878,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       if (msbPlaneBuf) {
         renderer.writeGrayscalePlaneStrip(false, msbPlaneBuf.get(), 0, gh);
       } else {
-        renderPlaneToBuffer(false, lsbPlaneBuf.get());
+        if (!renderPlaneToBuffer(false, lsbPlaneBuf.get())) return false;
         renderer.writeGrayscalePlaneStrip(false, lsbPlaneBuf.get(), 0, gh);
       }
       const auto tGrayWrite = millis();
@@ -1881,6 +1917,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           renderer.clearScreen(0x00);
           renderGrayscalePass();
           renderer.endStripTarget();
+          if (renderer.hasThaiShapeError()) return false;
           renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
         }
         const auto tGrayLsb = millis();
@@ -1892,6 +1929,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           renderer.clearScreen(0x00);
           renderGrayscalePass();
           renderer.endStripTarget();
+          if (renderer.hasThaiShapeError()) return false;
           renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
         }
         const auto tGrayMsb = millis();
@@ -1916,19 +1954,22 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       if (!renderer.storeBwBuffer()) {
         LOG_ERR("ERS", "Failed to store BW buffer for grayscale render; skipping grayscale this page");
         if (absoluteImageGrayscale) renderer.setRenderMode(GfxRenderer::BW);
-        return;
+        return true;
       }
+      storedBw = true;
       const auto tBwStore = millis();
 
       renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
       renderGrayscalePass();
+      if (renderer.hasThaiShapeError()) return false;
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
       renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       renderGrayscalePass();
+      if (renderer.hasThaiShapeError()) return false;
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
 
@@ -1936,6 +1977,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       const auto tGrayDisplay = millis();
       renderer.setRenderMode(GfxRenderer::BW);
       renderer.restoreBwBuffer();
+      storedBw = false;
       const auto tBwRestore = millis();
 
       const auto tEnd = millis();
@@ -1950,6 +1992,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
               tBwRender - tPrewarm, tDisplay - tBwRender, tEnd - t0);
     }
   }
+  completed = true;
+  return true;
 }
 
 void EpubReaderActivity::renderStatusBar() const {
@@ -2573,11 +2617,11 @@ void EpubReaderActivity::paintOverlayPopup() {
 
 void EpubReaderActivity::applyReaderTextSettings() {
   SETTINGS.saveToFile();
+  RenderLock lock;
   // (Re)load or unload the selected SD-card font for the current family/size.
   // The reader otherwise only loads SD fonts on book open, so without this an
   // in-reader font change wouldn't take effect until re-opening the book.
   sdFontSystem.ensureLoaded(renderer);
-  RenderLock lock;
   if (section) {
     rememberCurrentContentOffset();
     cachedSpineIndex = currentSpineIndex;

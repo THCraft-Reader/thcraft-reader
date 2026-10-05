@@ -401,13 +401,50 @@ CPFont header/TOC, intervals, glyph metadata, kerning and ligatures in file orde
 (excluding bitmaps). Counts, offsets, glyph coverage and metrics are checked before
 publishing any style. Limits are 96 KiB/style and 384 KiB/family.
 
-One RAII-owned family payload prefers PSRAM and is accepted only with more than
-50 KiB byte-addressable internal headroom. Cache eviction retains it; font
-destruction releases it. Missing, corrupt, incompatible or OOM companions keep
-the native font usable, with availability fixed for that load. Font identity
-includes native metrics CRC, accepted payload CRC, version and active/disabled
-state. Layout/render mini-kerning coverage is checked independently of resident
-glyphs, and both descriptors are republished after rebuild/failure.
+Storage is selected once per font load, without a setting or font conversion.
+The whole companion prefers PSRAM and is retained only when internal free memory
+is greater than 50 KiB before and after allocation. Otherwise the validated
+companion stays open through HAL and uses one shared cache across all fonts,
+sizes and styles. Minimum cached admission depends on actual nullable allocations,
+not the 50 KiB reserve. Missing, corrupt, incompatible or genuinely unaffordable
+companions leave the native font usable.
+
+The shared object contains eight 512-byte MRU blocks and two complete-cluster
+stages. Its compiled size is **7,484 bytes on C3/S3** and **7,520 bytes on macOS
+arm64**, enforced below 8 KiB by a static assertion. Two stages hold 32 byte-packed
+51-byte units each (3,264 bytes total), including at most six encoded records per
+unit. Cache misses and cursor admission/iteration allocate nothing after load.
+Cached admission reads the entire cluster before exposing placements; cursor
+copies share immutable stage leases. Iteration performs no further SD reads.
+
+Optional dense indexes cost **15,088 bytes per present style**, at most 60,352
+bytes for four styles. They are retained only as a complete set that preserves
+greater than 50 KiB internal headroom; failure falls back to fully paged lookup.
+Firmware ELF type information reports per-font storage of 68 bytes (including the
+32-byte source, 12-byte HAL handle and buffer/index ownership), four 44-byte style
+views, a four-byte owning pointer, and an additional 80-byte retained HAL file
+implementation in cached mode. Allocator overhead and ordinary CPFont caches are
+extra. The host storage object is 168 bytes including its 56-byte source and
+64-byte synthetic HAL handle; that handle is not device-memory evidence.
+The shared working object is heap-owned because it cannot fit the render stack.
+
+CRC and structural validation stream through bounded scratch before publishing
+any style. Font identity still includes exactly the accepted native metrics CRC,
+payload CRC, version and active/disabled state; backing mode and cache warmth
+never enter it. CPFont v4, CPSHAPE v1 and healthy rendered-cache versions are
+unchanged. Ordinary glyph-cache clears retain shaping; resident-cache release
+invalidates this font's SD blocks without invalidating staged cursors, indexes,
+views or identity. The last cached owner and last stage lease release the shared
+allocation.
+
+Actual read/seek/structure failures latch until a fully validated reload, log
+once, and prevent further companion reads. Unsupported recipes still fall back
+as whole native clusters, but storage faults do not commit fallback measurements:
+prewarm/layout fail, final and suspended section commits are refused, and the
+reader displays the existing page-load error without successful-page accounting,
+progress saving or screenshot capture. Failed grayscale rendering is never
+activated; cleanup restores stored BW and settles outstanding refresh/controller
+state. An already-started BW waveform cannot be physically rolled back.
 
 Observed regular companion file sizes across 12/14/16/18 pt:
 
@@ -417,10 +454,10 @@ Observed regular companion file sizes across 12/14/16/18 pt:
 | Noto Serif Thai | 50,203 | 53,005 |
 | Sarabun | 25,983 | 27,941 |
 
-Seven offline baker tests pass, including every-key HarfBuzz oracle checks,
-determinism, original bitmap preservation and byte-identical conversion without
-the option. All 499 host tests pass, including real paired-font prewarm/eviction,
-corrupt/OOM/headroom fallback and same-size native metric identity changes.
+Initial positioning verification: seven offline baker tests passed, including
+every-key HarfBuzz oracle checks, determinism, original bitmap preservation and
+byte-identical conversion without the option. The original 499-test host suite
+covered paired-font eviction, native binding and resident-allocation fallback.
 Actual Noto Sans Thai 16pt glyph sheets match reference ink exactly for all
 18 supplied rows after applying the specified 12.4/outer-cluster rounding.
 Sarabun 16pt and superscript/subscript smoke output also match reference ink;
@@ -438,6 +475,58 @@ The reference uses production analyzer cluster spans, desktop HarfBuzz/FreeType,
 the converter's quantization and the prescribed cluster rounding. Comparisons
 match glyph-sheet source rows across metric-driven repagination, not unrelated
 pages with the same page number. Exact desktop typography is not required.
+
+### Adaptive storage verification
+
+The adaptive cutover passes 637 host tests, including four distinct styles and
+all 3,772 keys, exactly-50-KiB/45-KiB simulated headroom, resident/index/shared-cache
+allocation failures, retained-owner/stage lifetimes, cross-block reads, eviction,
+zero-allocation admission and faulted final/suspended cache commits.
+Both firmware profiles build successfully: `default` (X3/X4 C3) reports 58,976
+bytes static RAM and 6,212,267 bytes app flash; `x4pro` reports 103,320 bytes static
+RAM and 6,255,018 bytes app flash. These link-time totals are not runtime heap
+measurements. The builds retain wolfSSL macro-redefinition warnings.
+
+Before/after production-probe comparisons cover 1,728 configurations each in
+resident, indexed-cache and fully paged modes: Noto Sans Thai 16, Mali 26 and
+JS Jindara 26; both distributed XHTML fixtures; all four orientations; 480×800
+and 800×480; tracking 0/2; focus off/on; left/justify/Thai Justify; paragraph,
+normal-sheet and rotated-sheet rendering. Each mode preserves all 6,864 pages,
+13,728 PBM/PGM files byte-for-byte, non-timing geometry/source/link reports and
+active content hashes. Marked-placement and cache-roundtrip checks pass.
+
+Host-only probe controls:
+
+- `--fail-shape-allocation on`: fail whole-file allocation, require active cached shaping.
+- `--shape-internal-free 46080`: simulate 45 KiB internal headroom, selecting fully paged access.
+- `--shape-fail-read-phase layout|bw|gray-msb|gray-lsb`: invalidate cached blocks and
+  fail the next real companion read at that phase. All four exercised phases exit
+  nonzero after one failed HAL request, without publishing a successful report.
+- `THAI_SHAPING=0`: native production-render smoke passes with zero companion reads.
+
+For Noto Sans Thai 16, distributed-edges, portrait 480×800, Thai Justify, tracking
+0 and focus off (two pages), companion HAL requests were:
+
+| Backing | Load calls / bytes | BW calls / bytes | Each gray plane calls / bytes |
+| --- | ---: | ---: | ---: |
+| Resident | 2 / 56,878 | 0 / 0 | 0 / 0 |
+| Indexed cache | 256 / 129,596 | 108 / 55,296 | 108 / 55,296 |
+| Fully paged | 226 / 114,236 | 362 / 185,344 | 362 / 185,344 |
+
+Draw columns exclude prewarm, cache replay and diagnostic renders. These are HAL
+requests, not physical SD transactions or device timings. A fitting repeated
+cluster adds zero reads after warmup; ordinary mixed text need not fit eight blocks.
+Simulated heap samples do not establish usable device headroom.
+
+Physical acceptance remains unverified: no reader was enumerated by `pio device
+list`, and no flashing was performed. On X3 and X4, plus a PSRAM comparison when
+available, use the paired fonts and `test_thai_reading.epub`; verify all orientations,
+AA on/off, mixed styles, font/size changes and cache reopen. Record actual internal
+free/minimum/largest-block bytes at load, pagination, prewarm, drawing and exit;
+run 50 turns and five open/turn/exit cycles without progressive leaks. Controlled
+development-build read faults must show the page error, leave progress unchanged,
+balance AA/strip resources on the real panel, and recover on clean reload. Physical
+refresh recovery and cold/warm device costs cannot be established by host probes.
 
 ## Acceptance evidence
 

@@ -105,6 +105,10 @@ Section::Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRen
 Section::~Section() { suspendBuild(); }
 
 uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
+  if (renderer.hasThaiShapeError()) {
+    LOG_ERR("SCT", "CPShape failed; refusing page serialization");
+    return 0;
+  }
   if (!file) {
     LOG_ERR("SCT", "File not open for writing page %d", builtPageCount_);
     return 0;
@@ -599,6 +603,10 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
     Storage.remove(binTmpPath().c_str());
     return false;
   };
+  if (renderer.hasThaiShapeError()) {
+    LOG_ERR("SCT", "CPShape failed; refusing section cache commit");
+    return failCommit();
+  }
 
   const uint32_t lutOffset = file.position();
   for (const auto& entry : build_->lut) {
@@ -713,7 +721,7 @@ bool Section::finalizeBuild() {
   if (build_->cssParser) build_->cssParser->clear();
   build_.reset();
   if (!committed) {
-    // commitBuildFile removed filePath before the failed swap, so nothing valid remains.
+    // A rejected commit preserves the previous file; a failed swap may have removed it.
     partial_ = false;
     partialPageCount_ = 0;
     pageCount = 0;
