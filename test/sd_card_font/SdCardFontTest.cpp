@@ -684,6 +684,44 @@ TEST(SdCardFontTest, LowHeadroomKeepsShapingAndIdentityAcrossCacheReleaseAndRelo
   }
 }
 
+TEST(SdCardFontTest, FontSizeReloadsPreserveRecipesAcrossBackingTransitions) {
+  ShapeTestScope guard;
+  const auto liveBefore = nullableLiveBytes;
+  {
+    SdCardFont font;
+    uint32_t previousHash = 0;
+    constexpr uint8_t sizes[] = {16, 18, 20, 26, 16};
+    for (size_t i = 0; i < std::size(sizes); ++i) {
+      makeFont();
+      makeShape();
+      const uint8_t size = sizes[i];
+      sdFontTestFile[44] = size;
+      put16(45, size);
+      shapePut16(44 + 20, size);
+      shapePut16(44 + 24, size);
+      shapePut16(44 + 28 + ThaiShapeView::DENSE_COUNT * 4 + 2, size << 4);
+      updateShapeCrc();
+      probe::internalHeadroomBytes = i == 2 || i == 3 ? 45 * 1024 : guard.headroom;
+      ASSERT_TRUE(font.load("fixture.cpfont"));
+      const auto* shape = font.getEpdFont()->getThaiShape();
+      ASSERT_NE(nullptr, shape);
+      EXPECT_EQ(size, shape->lineAdvance());
+      EXPECT_NE(previousHash, font.contentHash());
+      previousHash = font.contentHash();
+      ThaiGlyphCursor cursor;
+      ASSERT_TRUE(cursor.begin("กี่", *shape));
+      ThaiGlyphPlacement placement;
+      ASSERT_TRUE(cursor.next(placement));
+      EXPECT_EQ(FIRST, placement.codepoint);
+      EXPECT_EQ(size << 4, placement.advanceFP);
+      EXPECT_FALSE(cursor.next(placement));
+      EXPECT_EQ(i == 2 || i == 3 ? 1u : 0u, sdFontTestShapeOpenHandles);
+    }
+  }
+  EXPECT_EQ(0u, sdFontTestShapeOpenHandles);
+  EXPECT_EQ(liveBefore, nullableLiveBytes);
+}
+
 TEST(SdCardFontTest, PagesKernWithTheFontsClassMatrix) {
   makeKerningFont();
   SdCardFont font;

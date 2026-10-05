@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -37,14 +38,16 @@ inline uint32_t millis() { return 0; }
 class HalFile {
  public:
   HalFile() = default;
-  ~HalFile() { close(); }
+  ~HalFile() {
+    if (bytes_) close();
+  }
   HalFile(const HalFile&) = delete;
   HalFile& operator=(const HalFile&) = delete;
   HalFile(HalFile&& other) noexcept { *this = std::move(other); }
   HalFile& operator=(HalFile&& other) noexcept {
     if (this == &other) return *this;
-    close();
-    bytes_ = other.bytes_;
+    if (bytes_) close();
+    bytes_ = std::exchange(other.bytes_, nullptr);
     position_ = other.position_;
     opened_ = std::exchange(other.opened_, false);
     return *this;
@@ -88,12 +91,14 @@ class HalFile {
     return static_cast<int>(count);
   }
   void close() {
+    if (!bytes_) std::abort();  // Production HAL asserts on an uninitialized handle.
     if (opened_ && shape()) --sdFontTestShapeOpenHandles;
     opened_ = false;
   }
+  bool isOpen() const { return opened_; }
   size_t size() const { return shape() ? std::min(bytes_->size(), sdFontTestShapeEof) : bytes_->size(); }
   void open(const std::vector<uint8_t>* bytes = &sdFontTestFile) {
-    close();
+    if (bytes_) close();
     bytes_ = bytes;
     opened_ = true;
     position_ = 0;
@@ -102,7 +107,7 @@ class HalFile {
 
  private:
   bool shape() const { return bytes_ == &sdFontTestCompanion; }
-  const std::vector<uint8_t>* bytes_ = &sdFontTestFile;
+  const std::vector<uint8_t>* bytes_ = nullptr;
   size_t position_ = 0;
   bool opened_ = false;
 };

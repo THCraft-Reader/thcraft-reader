@@ -107,7 +107,7 @@ struct ThaiShapeStorage {
 
   ~ThaiShapeStorage() {
     source.reset();
-    file.close();
+    if (file.isOpen()) file.close();
     for (auto& index : indexes) index.reset();
     buffer.reset();
 #if THAI_SHAPING

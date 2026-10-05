@@ -478,7 +478,7 @@ pages with the same page number. Exact desktop typography is not required.
 
 ### Adaptive storage verification
 
-The adaptive cutover passes 637 host tests, including four distinct styles and
+The adaptive cutover passes 638 host tests, including four distinct styles and
 all 3,772 keys, exactly-50-KiB/45-KiB simulated headroom, resident/index/shared-cache
 allocation failures, retained-owner/stage lifetimes, cross-block reads, eviction,
 zero-allocation admission and faulted final/suspended cache commits.
@@ -486,6 +486,16 @@ Both firmware profiles build successfully: `default` (X3/X4 C3) reports 58,976
 bytes static RAM and 6,212,267 bytes app flash; `x4pro` reports 103,320 bytes static
 RAM and 6,255,018 bytes app flash. These link-time totals are not runtime heap
 measurements. The builds retain wolfSSL macro-redefinition warnings.
+
+Font-size reload teardown closes the companion handle only when it is open;
+resident shaping owns no retained HAL file. Both host HAL adapters reject
+`close()` on default or moved-from handles, matching the device precondition.
+The size/backing-transition regression aborts without this guard. A real-font
+smoke completes 45 BaiJamjuree 16/18/20 loads over five font lifetimes through
+resident/paged/resident backing, with tracked C++ allocations returning to zero.
+Production rendering, marked-placement checks and cache roundtrips pass at
+16 and 18 pt. Recheck font-size changes on X4 Pro hardware after installing the
+corrected firmware; host verification does not establish panel/overlay recovery.
 
 Before/after production-probe comparisons cover 1,728 configurations each in
 resident, indexed-cache and fully paged modes: Noto Sans Thai 16, Mali 26 and

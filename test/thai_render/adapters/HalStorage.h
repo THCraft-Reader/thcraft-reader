@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -36,20 +37,24 @@ inline std::filesystem::path hostPath(const char* path) {
 class HalFile {
  public:
   HalFile() = default;
-  ~HalFile() { close(); }
+  ~HalFile() {
+    if (initialized_) close();
+  }
   HalFile(const HalFile&) = delete;
   HalFile& operator=(const HalFile&) = delete;
   HalFile(HalFile&& other) noexcept
       : file_(std::exchange(other.file_, nullptr)),
         shape_(std::exchange(other.shape_, false)),
+        initialized_(std::exchange(other.initialized_, false)),
         path_(std::move(other.path_)),
         directory_(std::exchange(other.directory_, false)),
         next_(std::move(other.next_)) {}
   HalFile& operator=(HalFile&& other) noexcept {
     if (this != &other) {
-      close();
+      if (initialized_) close();
       file_ = std::exchange(other.file_, nullptr);
       shape_ = std::exchange(other.shape_, false);
+      initialized_ = std::exchange(other.initialized_, false);
       path_ = std::move(other.path_);
       directory_ = std::exchange(other.directory_, false);
       next_ = std::move(other.next_);
@@ -57,7 +62,8 @@ class HalFile {
     return *this;
   }
   bool open(const char* path, const char* mode) {
-    close();
+    if (initialized_) close();
+    initialized_ = true;
     path_ = probe::hostPath(path);
     shape_ = path_.extension() == ".cpshape";
     std::error_code error;
@@ -127,6 +133,7 @@ class HalFile {
   bool seek(size_t offset) { return seekSet(offset); }
   bool seekCur(size_t offset) { return file_ && std::fseek(file_, static_cast<long>(offset), SEEK_CUR) == 0; }
   bool close() {
+    if (!initialized_) std::abort();  // Production HAL asserts on an uninitialized handle.
     const bool wasOpen = isOpen();
     directory_ = false;
     shape_ = false;
@@ -151,6 +158,7 @@ class HalFile {
   bool isShape() const { return shape_; }
   std::FILE* file_ = nullptr;
   bool shape_ = false;
+  bool initialized_ = false;
   std::filesystem::path path_;
   bool directory_ = false;
   std::filesystem::directory_iterator next_;
