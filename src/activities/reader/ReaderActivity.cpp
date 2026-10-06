@@ -22,6 +22,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "XtcReaderActivity.h"
+#include "util/BookCoverPreparation.h"
 #include "util/PluginEvents.h"
 
 #if THAI_ENGINE_STATS
@@ -154,7 +155,16 @@ void ReaderActivity::onEnter() {
     APP_STATE.saveToFile();
   }
 
-  sdFontSystem.ensureLoaded(renderer);
+  {
+    RenderLock lock(*this);
+    if (bookcovers::prepareForReader(renderer, bookPath)) {
+      // Preparation already restored the selection; do not retry a failed
+      // temporary restore through the normal loader's clearing policy.
+      disableFastInitialRefresh();
+    } else {
+      sdFontSystem.ensureLoaded(renderer);
+    }
+  }
   applyInitialOrientation();
 
   if (!loadBook()) {

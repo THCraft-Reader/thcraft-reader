@@ -23,6 +23,7 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontSystem.h"
 #include "activities/plugins/PluginCatalogActivity.h"  // anyPluginInstalled()
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -98,7 +99,7 @@ void HomeActivity::fillCoverGridFromLibrary() {
   }
 }
 
-void HomeActivity::resolveGridCoverPaths() {
+void HomeActivity::resolveCoverPaths() {
   for (auto& book : recentBooks) {
     if (!book.coverBmpPath.empty()) continue;
     // Constructors only derive cache paths; no metadata parsing or image generation.
@@ -121,9 +122,7 @@ void HomeActivity::resolveGridCoverPaths() {
   }
 }
 
-void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect) {
-  if (!book.coverBmpPath.empty() && Storage.exists(UITheme::getCoverThumbPath(book.coverBmpPath, height).c_str()))
-    return;
+void HomeActivity::loadRecentCover(RecentBook& book, int height) {
   // Only one parser lives at a time; EPUB/XTC objects exceed the stack budget.
   if (FsHelpers::hasReflowableBookExtension(book.path)) {
     auto epub = makeUniqueNoThrow<Epub>(book.path, "/.crosspoint");
@@ -132,14 +131,8 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
     book.coverBmpPath = epub->getThumbBmpPath();
-    if (Storage.exists(epub->getThumbBmpPath(height).c_str())) return;
-    if (!showingLoading) {
-      showingLoading = true;
-      popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-      GUI.fillPopupProgress(renderer, popupRect, 0);
-    }
-    if (epub->generateThumbBmpFromSource(height)) {
-      return;
+    if (!epub->generateThumbBmpFromSource(height)) {
+      LOG_ERR("HOME", "Failed to generate EPUB thumbnail: %s", book.path.c_str());
     }
   } else if (FsHelpers::hasXtcExtension(book.path)) {
     auto xtc = makeUniqueNoThrow<Xtc>(book.path, "/.crosspoint");
@@ -148,87 +141,55 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
     book.coverBmpPath = xtc->getThumbBmpPath();
-    if (Storage.exists(xtc->getThumbBmpPath(height).c_str())) return;
-    if (!showingLoading) {
-      showingLoading = true;
-      popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-      GUI.fillPopupProgress(renderer, popupRect, 0);
-    }
-    if (xtc->load() && xtc->generateThumbBmp(height)) {
-      return;
+    if (!Storage.exists(xtc->getThumbBmpPath(height).c_str()) && (!xtc->load() || !xtc->generateThumbBmp(height))) {
+      LOG_ERR("HOME", "Failed to generate XTC thumbnail: %s", book.path.c_str());
     }
   }
-  book.coverBmpPath.clear();
 }
 
-void HomeActivity::loadRecentCovers(int coverHeight) {
+bool HomeActivity::loadRecentCovers(int coverHeight) {
   recentsLoading = true;
   bool showingLoading = false;
-  Rect popupRect;
+  // The grid shares one slot size; keep the existing theme-specific heights.
+  const int thumbHeight = coverGridUi ? coverGridUi->thumbHeightFor() : coverHeight;
+  {
+    // render() owns RenderLock throughout this batch, including font restoration.
+    SdCardFontSystem::CoverDecodeScope fonts(sdFontSystem, renderer);
+    for (RecentBook& book : recentBooks) {
+      if (!FsHelpers::hasReflowableBookExtension(book.path) && !FsHelpers::hasXtcExtension(book.path)) continue;
+      if (!book.coverBmpPath.empty() &&
+          Storage.exists(UITheme::getCoverThumbPath(book.coverBmpPath, thumbHeight).c_str()))
+        continue;
 
-  int progress = 0;
-  for (RecentBook& book : recentBooks) {
-    // The cover grid shares one slot size; generating at any other height
-    // would rescale the dithered thumb at draw time and alias badly.
-    const int thumbHeight = coverGridUi ? coverGridUi->thumbHeightFor() : coverHeight;
-    if (coverGridUi) {
-      loadGridCover(book, thumbHeight, showingLoading, popupRect);
-      ++progress;
-      if (showingLoading) GUI.fillPopupProgress(renderer, popupRect, progress * 100 / recentBooks.size());
-      continue;
-    }
-    if (!book.coverBmpPath.empty()) {
-      std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, thumbHeight);
-      if (!Storage.exists(coverPath.c_str())) {
-        // If epub/txt/md, try to load the metadata for title/author and cover
-        if (FsHelpers::hasReflowableBookExtension(book.path)) {
-          Epub epub(book.path, "/.crosspoint");
-          // Skip loading css since we only need metadata here
-          epub.load(false, true);
-
-          // Try to generate thumbnail image for Continue Reading card
-          if (!showingLoading) {
-            showingLoading = true;
-            popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-          }
-          GUI.fillPopupProgress(renderer, popupRect, 10 + progress * (90 / recentBooks.size()));
-          bool success = epub.generateThumbBmp(thumbHeight);
-          if (!success) {
-            RECENT_BOOKS.updateBook(book.path, book.title, book.author, "");
-            book.coverBmpPath = "";
-          }
-          coverRendered = false;
-          requestUpdate();
-        } else if (FsHelpers::hasXtcExtension(book.path)) {
-          // Handle XTC file
-          Xtc xtc(book.path, "/.crosspoint");
-          if (xtc.load()) {
-            // Try to generate thumbnail image for Continue Reading card
-            if (!showingLoading) {
-              showingLoading = true;
-              popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-            }
-            GUI.fillPopupProgress(renderer, popupRect, 10 + progress * (90 / recentBooks.size()));
-            bool success = xtc.generateThumbBmp(thumbHeight);
-            if (!success) {
-              RECENT_BOOKS.updateBook(book.path, book.title, book.author, "");
-              book.coverBmpPath = "";
-            }
-            coverRendered = false;
-            requestUpdate();
-          }
-        }
+      if (!showingLoading) {
+        showingLoading = true;
+        GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+        freeCoverBuffer();
+        coverRendered = false;
+        fonts.releaseFonts();
       }
+      // The panel keeps the popup while the framebuffer supplies decode scratch.
+      // No GUI calls here: the loan returns a white framebuffer, not the popup.
+      // loadRecentCover destroys its parser before this loan and the font scope.
+      GfxRenderer::FrameBufferLoan loan(renderer);
+      loadRecentCover(book, thumbHeight);
     }
-    progress++;
   }
+  // Keep failed paths for a later home visit, but never retry on every redraw.
+  // Fonts and the framebuffer are restored before the next Thai UI draw.
+  if (showingLoading) requestUpdate();
 
   recentsLoaded = true;
   recentsLoading = false;
+  return showingLoading;
 }
 
 void HomeActivity::onEnter() {
   Activity::onEnter();
+  recentsLoaded = false;
+  recentsLoading = false;
+  firstRenderDone = false;
+  coverRendered = false;
 
   hasOpdsServers = OPDS_STORE.hasServers();
   hasPlugins = anyPluginInstalled();
@@ -241,9 +202,9 @@ void HomeActivity::onEnter() {
   }
   loadRecentBooks(coverGridUi ? CoverGridHomeUi::MAX_BOOKS : metrics.homeRecentBooksCount);
   hasContinueReading = !recentBooks.empty();
+  if (coverGridUi) fillCoverGridFromLibrary();
+  resolveCoverPaths();
   if (coverGridUi) {
-    fillCoverGridFromLibrary();
-    resolveGridCoverPaths();
     coverGridUi->begin(recentBooks, hasLibrarySlot(), hasContinueReading);
   }
 
@@ -485,9 +446,7 @@ void HomeActivity::render(RenderLock&&) {
       firstRenderDone = true;
       requestUpdate();
     } else if (!recentsLoaded && !recentsLoading) {
-      loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT);
-      coverGridUi->refreshCoverPaths();
-      requestUpdate();
+      if (loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT)) coverGridUi->refreshCoverPaths();
     }
     return;
   }

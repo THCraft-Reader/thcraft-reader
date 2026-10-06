@@ -131,6 +131,35 @@ firmware can read CPFont but ignores the positioning companion. The pack include
 only a regular face; existing reader style fallback still applies. Packaging
 success does not establish physical-device rendering or performance acceptance.
 
+### Book covers with SD fonts
+
+Missing home thumbnails and book-cover sleep images are prepared without keeping
+the selected SD fonts, UI fallback fonts, or `.cpshape` data in memory. The firmware
+shows the loading popup, releases those fonts, generates the required BMP files
+one at a time, then reloads the selection before drawing text again. Decompression
+can borrow the existing framebuffer while the popup remains on the panel; there
+is no second framebuffer allocation.
+
+This applies to every home theme, including Lyra Extended and Cover Grid on
+supported devices. Opening a book prepares the current home thumbnail and the
+selected book-cover sleep variant when missing. Grid thumbnails wait until the
+home layout knows their actual slot size. Cached images skip font unloading and
+conversion. Theme/cover-setting changes are handled when their new cache is
+needed; the firmware does not generate every possible variant at startup.
+
+A failed home conversion keeps the book's cover identity and retries on the next
+home visit, not every redraw. Older empty cover paths are reconstructed
+automatically. Temporary font-restoration failures do not erase the selected
+family or point size. This lifecycle does not change inline EPUB image handling,
+supported image formats, or source-image size limits.
+
+On X3/X4, verify with an installed Thai font pair: open a book with uncached
+covers, return home, and sleep with **Book Cover** selected. Check that the cover
+appears and Thai titles still render, then repeat with another book and a changed
+cover mode without rebooting. Debug logs distinguish JPEG heap rejection,
+`Inflate ... OOM`, unsupported images, and SD failures. Do not delete reading
+progress to retry cover generation.
+
 ### Direct TTF/OTF/TTC fonts
 
 If CrossPoint enables external RAM on your device, copy a `.ttf`, `.otf`, or
