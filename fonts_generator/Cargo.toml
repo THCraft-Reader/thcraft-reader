@@ -1,0 +1,21 @@
+[package]
+name = "fonts_generator"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.81"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ttf-parser = "=0.25.1"
+crc32fast = "1.4"
+sha2 = "0.10"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

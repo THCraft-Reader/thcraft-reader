@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src blob:; style-src 'unsafe-inline'; img-src blob: data:; connect-src @@CONNECT@@; font-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Font workshop — THCraft Reader</title>
+<style>
+:root{--paper:#f4f7fb;--white:#fff;--ink:#182a42;--muted:#586b82;--blue:#2455d6;--line:#cbd6e5;--wash:#e8efff;--error:#a12437;--success:#18654d;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}
+*{box-sizing:border-box}body{margin:0}header,main,footer{max-width:1180px;margin:auto;padding:28px 36px}header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:20px}.brand{font-weight:750;letter-spacing:.06em;font-size:13px}.intro{margin:8px 0 30px;max-width:750px}h1{font-size:clamp(32px,5vw,52px);line-height:1.08;letter-spacing:-.045em;margin:0 0 14px;font-weight:750}h2{font-size:20px;letter-spacing:-.02em;margin:0 0 18px}h3{font-size:14px;margin:0 0 12px}.intro p{font-size:17px;line-height:1.6;color:var(--muted);margin:0}.workspace{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);gap:24px;align-items:start}.panel{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:24px;margin-bottom:20px}.panel-title{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.meta{font:12px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted)}label,.label{font-size:13px;font-weight:650;display:block;margin-bottom:8px}input[type=text],input[type=file],select{width:100%;color:var(--ink);font:inherit;font-size:14px;border:1px solid var(--line);border-radius:6px;background:var(--white);padding:10px}input[type=file]{padding:8px;font-size:12px}input::file-selector-button{border:0;border-radius:4px;padding:7px 10px;margin-right:10px;background:var(--wash);color:var(--blue);font-weight:650;cursor:pointer}.field{margin-bottom:18px}.field:last-child{margin-bottom:0}.hint{font-size:12px;line-height:1.6;color:var(--muted);margin:7px 0 0}.checks{display:flex;flex-wrap:wrap;gap:8px}.check{display:flex;align-items:center;gap:7px;margin:0;font-weight:500;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:13px}.check:has(input:checked){border-color:var(--blue);background:var(--wash);color:var(--blue)}input[type=checkbox]{accent-color:var(--blue);margin:0;width:15px;height:15px}.option{display:flex;align-items:flex-start;gap:10px;font-size:14px;font-weight:600;line-height:1.4}.option input{margin-top:2px;flex-shrink:0}.option small{display:block;color:var(--muted);font-size:12px;font-weight:400;margin-top:5px}details{border-top:1px solid var(--line);padding-top:16px;margin-top:18px}summary{cursor:pointer;font-size:13px;font-weight:650;margin-bottom:12px}details .field{margin-top:16px}.style-grid{display:grid;gap:16px}.style-row{padding-bottom:14px;border-bottom:1px solid var(--line)}.style-row:last-child{border:0;padding-bottom:0}.style-row .hint{overflow-wrap:anywhere}button,.download{font:inherit;font-weight:650;border:1px solid transparent;border-radius:6px;padding:12px 18px;cursor:pointer;text-decoration:none;display:inline-flex;justify-content:center;align-items:center;gap:8px}.primary,.download{color:var(--white);background:var(--blue)}.secondary{background:var(--white);border-color:var(--line);color:var(--ink)}button:disabled{opacity:.5;cursor:not-allowed}button:hover:not(:disabled),.download:hover{filter:brightness(.94)}:focus-visible{outline:3px solid var(--blue);outline-offset:3px}.actions{display:flex;gap:10px;margin-top:20px}.actions .primary{flex:1}.proof{position:sticky;top:24px}.proof .panel{padding:0;overflow:hidden}.proof-head{padding:22px 24px 16px;border-bottom:1px solid var(--line)}.proof-head h2{margin-bottom:5px}.specimen{min-height:290px;display:flex;align-items:center;justify-content:center;background:var(--white);padding:20px;position:relative}.specimen:before{content:"";position:absolute;top:0;left:20px;right:20px;height:8px;background:repeating-linear-gradient(90deg,var(--line) 0,var(--line) 1px,transparent 1px,transparent 10px)}.empty{text-align:center;max-width:300px;color:var(--muted);font-size:14px;line-height:1.7}.empty-symbol{display:block;font-family:Georgia,"Times New Roman",serif;color:var(--line);font-size:76px;line-height:1.2;margin-bottom:8px}canvas{max-width:100%;height:auto;image-rendering:pixelated;display:block}.proof-controls{padding:0 24px 18px}.proof-caption{background:var(--paper);padding:14px 24px;font-size:12px;line-height:1.6;color:var(--muted);border-top:1px solid var(--line)}#status{font-size:14px;line-height:1.5;margin:0;overflow-wrap:anywhere}#status[data-state=error]{color:var(--error)}#status[data-state=success]{color:var(--success)}progress{width:100%;height:6px;accent-color:var(--blue);margin:14px 0}#log{font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;max-height:160px;overflow:auto;color:var(--muted);margin:0}#files{list-style:none;padding:0;margin:14px 0;font:12px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}#warnings{font-size:12px;color:var(--error);line-height:1.6;padding-left:18px}#download{width:100%;margin:5px 0 14px}.install{font-size:13px;color:var(--muted);line-height:1.7;margin:0}footer{border-top:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.7}footer details{border:0;padding:0;margin:8px 0}footer pre{white-space:pre-wrap;max-height:300px;overflow:auto;font-size:11px}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.95em}fieldset{border:0;padding:0;margin:0;min-width:0}legend{font-size:13px;font-weight:650;margin-bottom:8px;padding:0}[hidden]{display:none!important}@media(max-width:800px){header,main,footer{padding:22px}.workspace{grid-template-columns:1fr}.proof{position:static}.intro{margin-bottom:24px}.panel{padding:20px}}@media(prefers-reduced-motion:no-preference){button,.download{transition:filter .15s}}
+.site-nav{display:flex;flex-wrap:wrap;align-items:center;gap:14px}.site-nav a{font-size:13px;color:var(--ink);text-decoration:none;font-weight:650}.site-nav a:hover{text-decoration:underline}
+:root{--paper:#fff8fb;--ink:#20141d;--muted:#786b75;--blue:#243c77;--line:#e9d9e2;--wash:#ffe1ec;font-family:"IBM Plex Sans Thai","Manrope",system-ui,-apple-system,"Segoe UI",sans-serif}h1{color:#20141d}.brand{color:#da3347}.panel{border-radius:20px}.primary,.download{background:#4a283d}.check:has(input:checked){border-color:#ba3b67;color:#832747}.intro{border-left:4px solid #ff6f9d;padding-left:20px}
+#presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}#presets .check{border:0;background:none;padding:4px 0;align-items:flex-start;font-size:12px}#presets input{flex-shrink:0;margin-top:2px}@media(max-width:420px){#presets{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}}
+.proof .panel[aria-label="Conversion results"]{padding:24px}
+.intro{display:flex;align-items:center;justify-content:space-between;gap:24px;max-width:none}.intro-copy{max-width:750px}.intro-mascot{display:block;width:140px;height:210px;object-fit:contain;flex-shrink:0;margin:0 24px 0 0}@media(max-width:600px){.intro{display:grid;grid-template-columns:minmax(0,1fr) 84px;gap:12px}.intro-copy{display:contents}.intro h1{grid-column:1;grid-row:1;margin:0}.intro p{grid-column:1 / -1;grid-row:2}.intro-mascot{grid-column:2;grid-row:1;width:84px;height:126px;margin:0}}
+</style>
+</head>
+<body>
+<header><a class="brand" href="@@HOME@@" style="text-decoration:none">THCRAFT / FONT WORKSHOP</a><nav class="site-nav" aria-label="Primary"><a href="@@HOME@@" lang="th">กลับหน้าแรก</a><a href="https://epubcraft.com" target="_blank" rel="noopener noreferrer">EpubCraft ↗</a></nav></header>
+<main>
+<section class="intro">
+<div class="intro-copy"><h1>Your type, ready for e-ink.</h1><p>Turn font files into an SD-card font family. Choose your sizes and character coverage; this page does the conversion on your computer.</p></div>
+<img class="intro-mascot" src="data:image/webp;base64,@@MASCOT@@" width="140" height="210" alt="THCraft mascot holding the Thai flag">
+</section>
+<div class="workspace">
+<form id="generator">
+<fieldset id="settings">
+<section class="panel">
+<div class="panel-title"><h2>Font family</h2><span class="meta">TTF / OTF → CPFont v4</span></div>
+<div class="field"><label for="family">Family name on the reader</label><input id="family" type="text" value="MyFont" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" required autocomplete="off"><p class="hint">Letters A–Z, numbers, hyphens and underscores. Use a new name to keep an existing family.</p></div>
+<div class="field"><label for="regular">Regular font</label><input id="regular" type="file" accept=".ttf,.otf" required><p class="hint">Use a static font face. Thai positioning requires all supported Thai characters in each primary style.</p></div>
+<div class="field"><label for="fallback-0">Regular fallback fonts <span class="meta">optional</span></label><input id="fallback-0" type="file" accept=".ttf,.otf" multiple><p class="hint" id="fallback-order-0">Used in the displayed order when the primary font lacks a character.</p></div>
+<details><summary>Add bold, italic or bold italic</summary><div id="extra-styles" class="style-grid"></div><p class="hint">Styles are optional. Each style has its own fallback list; regular fallbacks are not applied to other styles.</p></details>
+<details><summary>Include font licenses</summary><label for="licenses">License files to include in the ZIP</label><input id="licenses" type="file" accept=".txt,.md" multiple><p class="hint">Conversion does not grant redistribution rights. Include the font’s license if you share the generated files.</p></details>
+</section>
+<section class="panel">
+<h2>Sizes &amp; coverage</h2>
+<div class="field"><fieldset><legend>Point sizes · 150 DPI</legend><div id="sizes" class="checks"></div></fieldset><p class="hint">8, 10 and 12 pt also supply size-matched UI fallback. Only the selected sizes are included.</p></div>
+<div class="field"><fieldset><legend>Additional Unicode coverage</legend><p class="hint" style="margin:0 0 12px">Base coverage is always included. Check the extra scripts and symbols your readers need.</p><div id="presets" class="checks"></div></fieldset><p class="hint">Base: Basic Latin (U+0020–007E), punctuation (U+2000–206F), and replacement character U+FFFD. Presets overlap; duplicate ranges are merged.</p><p class="hint">Upload fallback fonts above to fill missing coverage. Selection cannot create glyphs absent from your fonts; unavailable codepoints are omitted and counted in the report. Chinese variants share Han ranges—the source font determines regional glyph forms. Wider coverage makes larger files.</p></div>
+<div class="field"><label for="ranges">Additional Unicode ranges <span class="meta">optional</span></label><input id="ranges" type="text" placeholder="0300-036F, 2190-21FF" autocomplete="off"><p class="hint">Comma-separated hexadecimal ranges, optionally prefixed with U+.</p></div>
+<label class="option"><input id="thai" type="checkbox" checked><span>Bake Thai positioning <small>Create a matching CPSHAPE v1 companion for each size. This is Thai-specific, not a shaping engine for every script.</small></span></label>
+<details><summary>Rasterization options</summary><label class="option"><input id="autohint" type="checkbox"><span>Force FreeType auto-hinting <small>Leave off to use the source font’s default hinting.</small></span></label></details>
+</section>
+</fieldset>
+<div class="actions"><button id="generate" class="primary" type="submit">Generate font pack</button><button id="cancel" class="secondary" type="button" hidden>Cancel</button></div>
+<p class="hint">Conversion runs on your computer. Large character sets can take longer and use more browser memory.</p>
+</form>
+<aside class="proof">
+<section class="panel" aria-label="Generated bitmap proof">
+<div class="proof-head"><h2>Bitmap proof</h2><span class="meta">GENERATED PIXELS · 4 GRAY LEVELS</span></div>
+<div class="specimen"><div id="empty-proof" class="empty"><span class="empty-symbol" aria-hidden="true">Ag</span>Your generated glyphs and Thai clusters will appear here. No browser font substitution.</div><canvas id="preview" hidden aria-label="Generated bitmap glyph and Thai cluster samples"></canvas></div>
+<div class="proof-controls" id="proof-controls" hidden><label for="proof-file">Preview size</label><select id="proof-file"></select><label for="proof-style" style="margin-top:12px">Preview style</label><select id="proof-style"></select></div>
+<div class="proof-caption">Actual CPFont bitmaps with companion offsets when present. Each tile is an independent glyph or cluster—not a reader page-layout simulation. Empty tiles indicate missing coverage.</div>
+</section>
+<section class="panel" aria-label="Conversion results">
+<h2>Output</h2>
+<p id="status" role="status" aria-live="polite">Choose a regular font to begin.</p>
+<progress id="progress" value="0" max="1" hidden aria-label="Conversion progress"></progress>
+<details id="warning-details" hidden>
+<summary id="warning-summary">Warnings</summary>
+<p class="hint">Conversion completed. These warnings describe missing coverage or font-format limits; they do not prevent downloading the font pack.</p>
+<ul id="warnings"></ul>
+</details>
+<ul id="files"></ul>
+<a id="download" class="download" hidden>Download font pack</a>
+<p id="install" class="install" hidden>Extract the ZIP and copy its <code>fonts</code> folder to your SD-card root. Keep each <code>.cpfont</code> beside its matching <code>.cpshape</code>. Restart the reader, then select your family in Settings → Reader → Font Family.</p>
+<details id="log-details" hidden><summary>Conversion log</summary><pre id="log"></pre></details>
+</section>
+</aside>
+</div>
+</main>
+<footer>CPFont v4 / CPSHAPE v1 · FreeType + HarfBuzz · Rust / WebAssembly<br>Shaping companions require compatible THCraft firmware. This tool does not change your reader or write to your SD card.
+<details><summary>Software licenses &amp; build information</summary>@@LICENSE_NOTICE@@</details></footer>
+<script id="engine-source" type="application/octet-stream">@@ENGINE@@</script>
+<script id="wasm-source" type="application/octet-stream" data-url="@@WASM_URL@@">@@WASM@@</script>
+<script id="worker-source" type="application/octet-stream">@@WORKER@@</script>
+<script id="license-source" type="application/octet-stream">@@LICENSES@@</script>
+<script>@@APP@@</script>
+</body>
+</html>
