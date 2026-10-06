@@ -90,6 +90,14 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 54
+
+The byte layout remains v52. Soft-flushed paragraphs preserve first-line
+indentation and apply top spacing once, with bottom spacing only when finalized.
+Version 53 and older finalized/partial caches are rebuilt to use the corrected
+layout. The derived partial version is `0xFE - (54 - 28)` = 228.
+Reading progress, book metadata, and Thai layout identity are unchanged.
+
 ### Version 53
 
 The byte layout remains v52, but Thai Justify budgets now encode bounded,

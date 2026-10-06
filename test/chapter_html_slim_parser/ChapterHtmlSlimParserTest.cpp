@@ -102,6 +102,40 @@ TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
   EXPECT_EQ(lines, 2u);
 }
 
+TEST_F(ChapterHtmlSlimParserTest, SoftFlushPreservesParagraphIndentationAndSpacing) {
+  parser.viewportWidth = 40;
+  parser.viewportHeight = 10000;
+  parser.extraParagraphSpacing = true;
+  auto& style = parser.currentTextBlock->getBlockStyle();
+  style.alignment = CssTextAlign::Left;
+  style.marginTop = 6;
+  style.paddingTop = 3;
+  style.marginBottom = 7;
+  style.paddingBottom = 5;
+  for (int i = 0; i < 800; ++i) parser.currentTextBlock->addWord("a", EpdFontFamily::REGULAR);
+
+  parser.softFlushTextBlock();
+  ASSERT_NE(parser.currentPage, nullptr);
+  const size_t partialLines = parser.currentPage->elements.size();
+  ASSERT_GT(partialLines, 0u);
+  EXPECT_EQ(parser.currentPageNextY, 9 + 16 * partialLines);
+  EXPECT_FALSE(parser.currentTextBlock->isEmpty());
+
+  parser.makePages();
+  const auto& lines = parser.currentPage->elements;
+  EXPECT_GT(lines.size(), partialLines);
+  size_t words = 0;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    ASSERT_EQ(lines[i]->getTag(), TAG_PageLine);
+    const auto& line = static_cast<const PageLine&>(*lines[i]);
+    EXPECT_EQ(line.yPos, 9 + 16 * i);
+    EXPECT_EQ(line.getBlock()->wordXpos(0), i == 0 ? 8 : 0);
+    words += line.getBlock()->wordCount();
+  }
+  EXPECT_EQ(words, 800u);
+  EXPECT_EQ(parser.currentPageNextY, 9 + 16 * lines.size() + 12 + 8);
+}
+
 TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
   parser.viewportWidth = 240;
   parser.viewportHeight = 32;

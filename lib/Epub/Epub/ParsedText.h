@@ -80,6 +80,7 @@ class ParsedText {
   bool thaiJustificationMetrics = false;
   std::unique_ptr<char[]> thaiPrefixScratch;
   size_t thaiPrefixCapacity = 0;
+  bool firstLineConsumed = false;
   std::vector<std::string> reorderedWordsScratch;
   std::vector<EpdFontFamily::Style> reorderedStylesScratch;
   std::vector<uint16_t> reorderedWidthsScratch;

@@ -265,7 +265,7 @@ TEST_P(ThaiSectionCacheTest, PriorFinalAndPartialVersionsAreRejected) {
   ASSERT_FALSE(HasFatalFailure());
   auto bytes = readBytes(root / "sections/0.bin");
   ASSERT_FALSE(bytes.empty());
-  for (const uint8_t version : {48, 49, 50, 51, 52}) {
+  for (const uint8_t version : {48, 49, 50, 51, 52, 53}) {
     SCOPED_TRACE(version);
     bytes[0] = static_cast<char>(GetParam() ? 0xFE - (version - 28) : version);
     writeBytes(root / "sections/0.bin", bytes);
@@ -405,7 +405,7 @@ TEST_P(ThaiSectionCacheTest, TextBlockExpansionRoundTripsAlongsideOptionalFocusA
   EXPECT_EQ(block.thaiExpansion(1), 2);
   const auto path = root / "block.bin";
   HalFile file;
-  ASSERT_TRUE(file.open(path.c_str(), "w+b"));
+  ASSERT_TRUE(file.open(path.string().c_str(), "w+b"));
   ASSERT_TRUE(block.serialize(file));
   ASSERT_TRUE(file.seek(0));
   auto replayed = TextBlock::deserialize(file);
@@ -436,7 +436,7 @@ TEST_P(ThaiSectionCacheTest, TextBlockExpansionRoundTripsAlongsideOptionalFocusA
     auto corrupt = bytes;
     corrupt[2] = static_cast<char>(static_cast<uint8_t>(bytes[2]) | unknown);
     writeBytes(path, corrupt);
-    ASSERT_TRUE(file.open(path.c_str(), "rb"));
+    ASSERT_TRUE(file.open(path.string().c_str(), "rb"));
     EXPECT_FALSE(TextBlock::deserialize(file));
     file.close();
   }
@@ -445,7 +445,7 @@ TEST_P(ThaiSectionCacheTest, TextBlockExpansionRoundTripsAlongsideOptionalFocusA
   for (size_t end = expansionStart; end < expansionStart + words.size() * 2; ++end) {
     SCOPED_TRACE(end);
     writeBytes(path, bytes.substr(0, end));
-    ASSERT_TRUE(file.open(path.c_str(), "rb"));
+    ASSERT_TRUE(file.open(path.string().c_str(), "rb"));
     EXPECT_FALSE(TextBlock::deserialize(file));
     file.close();
   }
@@ -465,7 +465,7 @@ TEST_P(ThaiSectionCacheTest, PageRoundTripPreservesExpandedWordsAndLinkHitExtent
       7, 13));
   ASSERT_TRUE(page.addLink("#target", 18, 13, 18, 16));
   HalFile file;
-  ASSERT_TRUE(file.open((root / "page.bin").c_str(), "w+b"));
+  ASSERT_TRUE(file.open((root / "page.bin").string().c_str(), "w+b"));
   ASSERT_TRUE(page.serialize(file));
   ASSERT_TRUE(file.seek(0));
   auto replayed = Page::deserialize(file);
@@ -507,10 +507,10 @@ TEST_P(ThaiSectionCacheTest, TextBlockZeroExpansionIsAbsentAndMismatchedSpansCan
   const auto absentPath = root / "absent.bin";
   const auto zeroPath = root / "zero.bin";
   HalFile file;
-  ASSERT_TRUE(file.open(absentPath.c_str(), "w+b"));
+  ASSERT_TRUE(file.open(absentPath.string().c_str(), "w+b"));
   ASSERT_TRUE(absent.serialize(file));
   ASSERT_TRUE(file.close());
-  ASSERT_TRUE(file.open(zeroPath.c_str(), "w+b"));
+  ASSERT_TRUE(file.open(zeroPath.string().c_str(), "w+b"));
   ASSERT_TRUE(zero.serialize(file));
   ASSERT_TRUE(file.seek(0));
   auto replayed = TextBlock::deserialize(file);
@@ -529,7 +529,7 @@ TEST_P(ThaiSectionCacheTest, TextBlockZeroExpansionIsAbsentAndMismatchedSpansCan
     TextBlock invalid(words, positions, styles, {}, {}, BlockStyle(), {}, {}, mismatch);
     EXPECT_FALSE(invalid.valid());
     EXPECT_TRUE(invalid.isEmpty());
-    ASSERT_TRUE(file.open((root / "invalid.bin").c_str(), "w+b"));
+    ASSERT_TRUE(file.open((root / "invalid.bin").string().c_str(), "w+b"));
     EXPECT_FALSE(invalid.serialize(file));
     EXPECT_EQ(file.size(), 0);
     file.close();
