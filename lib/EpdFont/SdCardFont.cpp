@@ -306,16 +306,9 @@ bool SdCardFont::hasThaiShapeError() const {
 #endif
 }
 
-bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count, uint32_t limit,
-                                       uint8_t styleMask, bool shapeText, bool nativeLigatures) const {
+bool SdCardFont::visitTextCodepoints(const char* text, uint8_t styleMask, bool shapeText, bool nativeLigatures,
+                                     CodepointVisitor visitor, void* context) const {
   if (hasThaiShapeError()) return false;
-  const auto add = [&](uint32_t cp) -> bool {
-    for (uint32_t i = 0; i < count; ++i)
-      if (codepoints[i] == cp) return false;
-    if (count == limit) return true;
-    codepoints[count++] = cp;
-    return false;
-  };
   uint8_t shapedStyles = 0;
   if (shapeText) {
     for (uint8_t i = 0; i < MAX_STYLES; ++i)
@@ -327,7 +320,7 @@ bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, u
     while (*p) {
       const uint32_t cp = utf8NextCodepoint(&p);
       if (!cp) break;
-      if (add(cp)) return true;
+      if (visitor(context, cp)) return true;
     }
     if (!shapedStyles && !nativeLigatures) return false;
   }
@@ -343,7 +336,7 @@ bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, u
           cursor.begin(source.substr(offset), styles_[i].thaiShape)) {
         ThaiGlyphPlacement placement;
         while (cursor.next(placement))
-          if (add(placement.codepoint)) return true;
+          if (visitor(context, placement.codepoint)) return true;
         offset += cursor.consumedBytes();
       } else {
         if (hasThaiShapeError()) return false;
@@ -361,12 +354,72 @@ bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, u
           cp = scalar.value;
           next += scalar.bytes;
         }
-        if (add(cp)) return true;
+        if (visitor(context, cp)) return true;
         offset = static_cast<size_t>(next - text);
       }
     }
   }
   return false;
+}
+
+bool SdCardFont::collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count, uint32_t limit,
+                                       uint8_t styleMask, bool shapeText, bool nativeLigatures) const {
+  struct Context {
+    uint32_t* codepoints;
+    uint32_t& count;
+    uint32_t limit;
+  } context{codepoints, count, limit};
+  return visitTextCodepoints(
+      text, styleMask, shapeText, nativeLigatures,
+      [](void* opaque, uint32_t cp) {
+        auto& out = *static_cast<Context*>(opaque);
+        for (uint32_t i = 0; i < out.count; ++i)
+          if (out.codepoints[i] == cp) return false;
+        if (out.count == out.limit) return true;
+        out.codepoints[out.count++] = cp;
+        return false;
+      },
+      &context);
+}
+
+uint32_t SdCardFont::metricCodepointCapacity(const char* const* segments, const size_t* segmentLens,
+                                             size_t segmentCount, uint8_t styleMask, const char* extraText,
+                                             bool loadKernLig) const {
+  // Remember only a small alphabet. Later unremembered repeats can overcount,
+  // never undercount; saturation sizes scratch but does not signal overflow.
+  struct Context {
+    uint32_t seen[32] = {};
+    uint32_t seenCount = 0;
+    uint32_t bound = 0;
+  } context;
+  const auto count = [](void* opaque, uint32_t cp) {
+    auto& out = *static_cast<Context*>(opaque);
+    for (uint32_t i = 0; i < out.seenCount; ++i)
+      if (out.seen[i] == cp) return false;
+    ++out.bound;
+    if (out.seenCount < 32) out.seen[out.seenCount++] = cp;
+    return out.bound == 4096;
+  };
+  bool full = false;
+  for (size_t seg = 0; seg < segmentCount && !full; ++seg) {
+    const char* p = segments[seg];
+    const char* const end = p + segmentLens[seg];
+    while (p < end && !full) {
+      full = visitTextCodepoints(p, styleMask, true, loadKernLig, count, &context);
+      if (hasThaiShapeError()) return context.bound;
+      p += strlen(p) + 1;
+    }
+  }
+  if (extraText && !full) visitTextCodepoints(extraText, styleMask, true, loadKernLig, count, &context);
+  // Each loaded pair adds at most one closure output, even in a reverse-ordered chain.
+  if (loadKernLig && context.bound) {
+    for (uint8_t si = 0; si < MAX_STYLES; ++si) {
+      const auto& s = styles_[si];
+      if ((styleMask & (1u << si)) && s.present && s.kernLigLoaded && s.ligaturePairs)
+        context.bound = std::min<uint32_t>(4096, context.bound + s.header.ligaturePairCount);
+    }
+  }
+  return context.bound;
 }
 
 bool SdCardFont::completeLigatureCoverage(uint32_t* codepoints, uint32_t& count, const uint32_t limit,
@@ -1874,17 +1927,7 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
 
   unsigned long startMs = millis();
 
-  // +2 reserved slots for space and hyphen injected after the main scan.
   static constexpr uint32_t MAX_UNIQUE_CODEPOINTS = 4096;
-  std::unique_ptr<uint32_t[]> scratch(new (std::nothrow) uint32_t[MAX_UNIQUE_CODEPOINTS + 2]);
-  uint32_t* const codepoints = scratch.get();
-  if (!codepoints) {
-    LOG_ERR("SDCF", "buildAdvanceTable: failed to allocate codepoint buffer (%u bytes)", MAX_UNIQUE_CODEPOINTS * 4);
-    return -1;
-  }
-  uint32_t cpCount = 0;
-  bool hitCap = false;
-
   // Native output collection must see the same ligature tables as rendering.
   if (loadKernLig) {
     for (uint8_t si = 0; si < MAX_STYLES; ++si) {
@@ -1892,22 +1935,40 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
     }
   }
 
+  const uint32_t capacity =
+      metricCodepointCapacity(segments, segmentLens, segmentCount, styleMask, extraText, loadKernLig);
+  if (hasThaiShapeError()) return -1;
+  // +2 reserved slots for space and hyphen injected after the main scan.
+  auto scratch = makeUniqueNoThrow<uint32_t[]>(capacity + 2);
+  uint32_t* const codepoints = scratch.get();
+  if (!codepoints) {
+    LOG_ERR("SDCF", "buildAdvanceTable: failed to allocate codepoint buffer (%u bytes)",
+            static_cast<unsigned>((capacity + 2) * sizeof(uint32_t)));
+    return -1;
+  }
+  uint32_t cpCount = 0;
+  bool hitCap = false;
+
   // Each segment holds consecutive NUL-terminated words; walk word by word.
   for (size_t seg = 0; seg < segmentCount && !hitCap; ++seg) {
     const char* p = segments[seg];
     const char* const end = p + segmentLens[seg];
     while (p < end && !hitCap) {
-      hitCap = collectTextCodepoints(p, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask, true, loadKernLig);
+      hitCap = collectTextCodepoints(p, codepoints, cpCount, capacity, styleMask, true, loadKernLig);
       if (hasThaiShapeError()) return -1;
       p += strlen(p) + 1;
     }
   }
   if (extraText && !hitCap) {
-    hitCap = collectTextCodepoints(extraText, codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask, true, loadKernLig);
+    hitCap = collectTextCodepoints(extraText, codepoints, cpCount, capacity, styleMask, true, loadKernLig);
     if (hasThaiShapeError()) return -1;
   }
   if (loadKernLig && !hitCap) {
-    hitCap = completeLigatureCoverage(codepoints, cpCount, MAX_UNIQUE_CODEPOINTS, styleMask);
+    hitCap = completeLigatureCoverage(codepoints, cpCount, capacity, styleMask);
+  }
+  if (hitCap && capacity < MAX_UNIQUE_CODEPOINTS) {
+    LOG_ERR("SDCF", "Metric codepoint capacity exceeded");
+    return -1;
   }
 
   if (includeSpace && std::none_of(codepoints, codepoints + cpCount, [](uint32_t c) { return c == ' '; }))

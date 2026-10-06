@@ -40,4 +40,6 @@ class HalMemory {
     const size_t free = probe::internalHeadroomBytes;
     return {free, free, free, free};
   }
+  static HeapStats getDefaultHeap() { return getInternal8BitHeap(); }
+  static HeapStats getPsramHeap() { return {0, 0, 0, 0}; }
 };

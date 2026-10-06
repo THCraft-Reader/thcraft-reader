@@ -84,6 +84,8 @@ class SdCardFont {
   // Packed variant: each segment holds consecutive NUL-terminated words
   // (paragraph word-arena chunks), scanned without per-word string objects.
   // loadKernLig prepares exact rendered metrics, including native ligature outputs.
+  // Scratch is sized from emitted codepoints and possible ligature closure,
+  // capped at 4096 main entries plus the two optional separator slots.
   // Returns -1 on requested kern/ligature preparation failure or codepoint-cap overflow.
   int buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
                               bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
@@ -293,6 +295,11 @@ class SdCardFont {
   uint8_t styleCount_ = 0;
   std::unique_ptr<ThaiShapeStorage> thaiShapeStorage_;
   void loadThaiShape();
+  using CodepointVisitor = bool (*)(void* context, uint32_t codepoint);
+  bool visitTextCodepoints(const char* text, uint8_t styleMask, bool shapeText, bool nativeLigatures,
+                           CodepointVisitor visitor, void* context) const;
+  uint32_t metricCodepointCapacity(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
+                                   uint8_t styleMask, const char* extraText, bool loadKernLig) const;
   bool collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count, uint32_t limit, uint8_t styleMask,
                              bool shapeText, bool nativeLigatures = false) const;
   bool completeLigatureCoverage(uint32_t* codepoints, uint32_t& count, uint32_t limit, uint8_t styleMask) const;

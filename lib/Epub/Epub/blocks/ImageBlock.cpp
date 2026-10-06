@@ -304,6 +304,39 @@ void ImageBlock::clearRenderFailures() { failedImageCount = 0; }
 
 void ImageBlock::releaseRenderCache() { releasePxcSlot(); }
 
+bool ImageBlock::prepare(GfxRenderer& renderer, const int x, const int y) const {
+  if (imageFailedThisRender(imagePath)) return false;
+  const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
+  if (x < 0 || y < 0 || x + width > screenWidth || y + height > screenHeight) {
+    LOG_ERR("IMG", "Invalid prepare position: (%d,%d) size (%dx%d) screen (%dx%d)", x, y, width, height, screenWidth,
+            screenHeight);
+    rememberImageFailure(imagePath);
+    return false;
+  }
+  if (hasValidCache()) return true;
+
+  if (!Storage.exists(imagePath.c_str())) {
+    if (srcPath.empty() || !extractFn) {
+      LOG_ERR("IMG", "No source extractor for image: %s", imagePath.c_str());
+      rememberImageFailure(imagePath);
+      return false;
+    }
+    bool extracted;
+    {
+      GfxRenderer::FrameBufferLoan loan(renderer);
+      extracted = extractFn(extractCtx, srcPath.c_str(), imagePath.c_str());
+    }
+    if (!extracted) {
+      LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
+      if (Storage.exists(imagePath.c_str())) Storage.remove(imagePath.c_str());
+      rememberImageFailure(imagePath);
+      return false;
+    }
+  }
+  return decode(renderer, x, y);
+}
+
 void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y) const {
   renderer.fillRect(x, y, width, height, true);
   if (width > 2 && height > 2) {
@@ -312,11 +345,7 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 }
 
 void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
-  // The font-prewarm scan pass only accumulates glyphs; an image contributes
-  // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
-  // suppression, so it would otherwise do a full (discarded) cache render every
-  // page view. Skip it here. The image still draws in the real BW/grayscale
-  // passes; on first view this just moves the one-time decode to the BW pass.
+  // Image drawing bypasses text scan suppression and contributes no glyphs.
   FontCacheManager* fcm = renderer.getFontCacheManager();
   if (fcm && fcm->isScanning()) return;
 
@@ -354,32 +383,29 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
     return;  // Successfully rendered from cache
   }
 
-  // The build only header-probed the image for dimensions; pull the actual
-  // file out of the book now, on first visit to the page.
-  if (!srcPath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {
-    LOG_DBG("IMG", "Lazy-extracting %s -> %s", srcPath.c_str(), imagePath.c_str());
-    if (!extractFn(extractCtx, srcPath.c_str(), imagePath.c_str())) {
-      LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
-    }
-  }
-
-  // No cache - need to decode the image
-  // Check if image file exists
-  HalFile file;
-  if (!Storage.openFileForRead("IMG", imagePath, file)) {
-    LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
-    rememberImageFailure(imagePath);
+  if (decode(renderer, x, y)) {
+    renderer.preserveImagePolarity(x, y, width, height);
+  } else {
     renderPlaceholder(renderer, x, y);
-    return;
   }
-  size_t fileSize = file.size();
-  file.close();
+}
+
+bool ImageBlock::decode(GfxRenderer& renderer, const int x, const int y) const {
+  size_t fileSize;
+  {
+    HalFile file;
+    if (!Storage.openFileForRead("IMG", imagePath, file)) {
+      LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
+      rememberImageFailure(imagePath);
+      return false;
+    }
+    fileSize = file.size();
+  }
 
   if (fileSize == 0) {
     LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
-    renderPlaceholder(renderer, x, y);
-    return;
+    return false;
   }
 
   LOG_DBG("IMG", "Decoding and caching: %s", imagePath.c_str());
@@ -393,14 +419,13 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   config.useDithering = true;
   config.performanceMode = false;
   config.useExactDimensions = true;  // Use pre-calculated dimensions to avoid rounding mismatches
-  config.cachePath = cachePath;      // Enable caching during decode
+  config.cachePath = getCachePath(imagePath);
 
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
   if (!decoder) {
     LOG_ERR("IMG", "No decoder found for image: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
-    renderPlaceholder(renderer, x, y);
-    return;
+    return false;
   }
 
   LOG_DBG("IMG", "Using %s decoder", decoder->getFormatName());
@@ -409,12 +434,11 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   if (!success) {
     LOG_ERR("IMG", "Failed to decode image: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
-    renderPlaceholder(renderer, x, y);
-    return;
+    return false;
   }
 
-  renderer.preserveImagePolarity(x, y, width, height);
   LOG_DBG("IMG", "Decode successful");
+  return true;
 }
 
 bool ImageBlock::serialize(HalFile& file) {

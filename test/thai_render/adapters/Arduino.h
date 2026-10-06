@@ -12,6 +12,7 @@ inline uint64_t hostMicros() {
 inline uint32_t micros() { return static_cast<uint32_t>(hostMicros()); }
 inline uint32_t millis() { return static_cast<uint32_t>(hostMicros() / 1000); }
 inline void delay(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+inline void vTaskDelay(uint32_t) { std::this_thread::yield(); }
 struct HostEsp {
   uint32_t getFreeHeap() const { return 256U * 1024 * 1024; }
   uint32_t getMaxAllocHeap() const { return getFreeHeap(); }

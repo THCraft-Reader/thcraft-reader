@@ -288,6 +288,18 @@ Resident page glyphs retain their Latin kerning and ligatures across UI prewarms
 When Thai layout preparation replaces the kerning subset, the next page prewarm
 restores kerning for all resident glyphs without reloading their bitmaps.
 
+Metric preparation sizes its temporary codepoint array from the request's raw
+and shaped emissions, including a conservative bound for native ligature closure.
+The sizing pass remembers up to 32 identities; further repeated emissions may
+overestimate capacity but never count as exact-mode overflow. The array uses
+`(capacity + 2) * sizeof(uint32_t)` heap bytes, up to 16,392 bytes, rather than
+allocating that maximum for every request. Large requests cannot fit the small
+task-stack budget, so the workspace remains one checked, short-lived heap allocation.
+The 4,096 main-codepoint cap, two reserved space/hyphen slots, 768-entry persistent
+advance cache and 512-glyph render prewarm limit remain separate and unchanged.
+Sizing and filling share the same emission visitor; shaping, native fallback,
+ligature closure and whole-request kerning retain their existing semantics.
+
 ### Available Unicode interval presets
 
 | Preset | Coverage |

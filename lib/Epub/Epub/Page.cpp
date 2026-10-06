@@ -56,10 +56,6 @@ void PageImage::render(GfxRenderer& renderer, const int fontId, const int xOffse
   imageBlock->render(renderer, xPos + xOffset, yPos + yOffset);
 }
 
-void PageImage::renderPlaceholder(GfxRenderer& renderer, const int xOffset, const int yOffset) const {
-  imageBlock->renderPlaceholder(renderer, xPos + xOffset, yPos + yOffset);
-}
-
 bool PageImage::serialize(HalFile& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
@@ -137,13 +133,11 @@ void Page::renderImages(GfxRenderer& renderer, const int fontId, const int xOffs
                              [](const PageElement& element) { return element.getTag() == TAG_PageImage; });
 }
 
-void Page::renderWithImagePlaceholders(GfxRenderer& renderer, const int fontId, const int xOffset,
-                                       const int yOffset) const {
+void Page::prepareImages(GfxRenderer& renderer, const int xOffset, const int yOffset) const {
   for (const auto& element : elements) {
     if (element->getTag() == TAG_PageImage) {
-      static_cast<const PageImage&>(*element).renderPlaceholder(renderer, xOffset, yOffset);
-    } else {
-      element->render(renderer, fontId, xOffset, yOffset);
+      const auto& image = static_cast<const PageImage&>(*element);
+      image.getImageBlock().prepare(renderer, image.xPos + xOffset, image.yPos + yOffset);
     }
   }
 }

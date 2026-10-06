@@ -26,6 +26,7 @@ bool ImageToFramebufferDecoder::validateAndStoreDimensions(int64_t, int64_t, Ima
 }
 
 void ImageBlock::render(GfxRenderer&, int, int) {}
+bool ImageBlock::prepare(GfxRenderer&, int, int) const { return false; }
 void ImageBlock::renderPlaceholder(GfxRenderer&, int, int) const {}
 bool ImageBlock::needsDecode() const { return false; }
 bool ImageBlock::serialize(HalFile&) { return false; }

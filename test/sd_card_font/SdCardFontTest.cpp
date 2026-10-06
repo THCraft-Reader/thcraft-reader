@@ -17,6 +17,7 @@ size_t failScalarOrdinal = 1;
 size_t nullableCalls = 0;
 size_t allAllocationCalls = 0;
 size_t cacheAllocationCalls = 0;
+size_t maximumNullableAllocation = static_cast<size_t>(-1);
 struct Allocation {
   void* pointer = nullptr;
   size_t size = 0;
@@ -29,6 +30,7 @@ void* allocateNullable(size_t size, bool array) {
   ++nullableCalls;
   ++allAllocationCalls;
   if (!array && size == sizeof(ThaiShapeCache)) ++cacheAllocationCalls;
+  if (size > maximumNullableAllocation) return nullptr;
   size_t& failSize = array ? failNextArraySize : failNextScalarSize;
   size_t& ordinal = array ? failArrayOrdinal : failScalarOrdinal;
   if (failSize && size == failSize && --ordinal == 0) {
@@ -137,24 +139,26 @@ void makeFont() {
 // holds their pairs. `extraEntries` appends entries for U+0100 onwards to both
 // class tables, so the tables span several read blocks. They use `extraClass`,
 // or classes 3..classCount in turn when it is 0. A `classCount` of 0 writes no
-// kern data. `ligature` adds one pair, E+F -> A.
-void makeKerningFont(uint16_t extraEntries = 0, uint8_t classCount = 2, uint8_t extraClass = 2, bool ligature = false) {
+// kern data. `ligature` adds one pair, E+F -> A. `metricFixture` additionally
+// covers separators, Thai/CJK and the reverse-dependency chain A+B -> C, E+F -> A.
+void makeKerningFont(uint16_t extraEntries = 0, uint8_t classCount = 2, uint8_t extraClass = 2, bool ligature = false,
+                     bool metricFixture = false) {
   sdFontTestCompanion.clear();
-  constexpr uint32_t KERN_GLYPHS = 7;
-  constexpr size_t GLYPH_OFFSET = 64 + 24;
-  constexpr size_t KERN_OFFSET = GLYPH_OFFSET + KERN_GLYPHS * sizeof(EpdGlyph);
+  const uint32_t KERN_GLYPHS = metricFixture ? 14 : 7;
+  const size_t GLYPH_OFFSET = 64 + (metricFixture ? 6 : 2) * sizeof(EpdUnicodeInterval);
+  const size_t KERN_OFFSET = GLYPH_OFFSET + KERN_GLYPHS * sizeof(EpdGlyph);
   constexpr uint8_t LEFT[][2] = {{'A', 1}, {'C', 2}};
   constexpr uint8_t RIGHT[][2] = {{'B', 1}, {'D', 2}};
   constexpr int8_t MATRIX[2][2] = {{-3, 0}, {4, -5}};
   const uint16_t entries = classCount ? 2 + extraEntries : 0;
   const size_t matrixBytes = static_cast<size_t>(classCount) * classCount;
   const size_t ligatureOffset = KERN_OFFSET + entries * 3 * 2 + matrixBytes;
-  const size_t bitmapOffset = ligatureOffset + (ligature ? 8 : 0);
+  const size_t bitmapOffset = ligatureOffset + (metricFixture ? 16 : ligature ? 8 : 0);
   sdFontTestFile.assign(bitmapOffset + KERN_GLYPHS * BITMAP_BYTES, 0);
   std::memcpy(sdFontTestFile.data(), "CPFONT\0\0", 8);
   put16(8, CPFONT_VERSION);
   sdFontTestFile[12] = 1;
-  put32(36, 2);
+  put32(36, metricFixture ? 6 : 2);
   put32(40, KERN_GLYPHS);
   sdFontTestFile[44] = 32;
   put16(45, 32);
@@ -162,18 +166,24 @@ void makeKerningFont(uint16_t extraEntries = 0, uint8_t classCount = 2, uint8_t 
   put16(51, entries);  // right class entries
   sdFontTestFile[53] = classCount;
   sdFontTestFile[54] = classCount;
-  sdFontTestFile[55] = ligature ? 1 : 0;
+  sdFontTestFile[55] = metricFixture ? 2 : ligature ? 1 : 0;
   put32(56, 64);
-  put32(64, 'A');
-  put32(68, 'F');
-  put32(76, 0xFFFD);
-  put32(80, 0xFFFD);
-  put32(84, KERN_GLYPHS - 1);
+  if (metricFixture) {
+    constexpr EpdUnicodeInterval intervals[] = {{' ', ' ', 0},     {'-', '-', 1},        {'A', 'F', 2},
+                                                {0xE01, 0xE04, 8}, {0x4E00, 0x4E00, 12}, {0xFFFD, 0xFFFD, 13}};
+    std::memcpy(sdFontTestFile.data() + 64, intervals, sizeof(intervals));
+  } else {
+    put32(64, 'A');
+    put32(68, 'F');
+    put32(76, 0xFFFD);
+    put32(80, 0xFFFD);
+    put32(84, KERN_GLYPHS - 1);
+  }
   for (uint32_t i = 0; i < KERN_GLYPHS; ++i) {
     EpdGlyph glyph{};
     glyph.width = 32;
     glyph.height = 32;
-    glyph.advanceX = 32 << 4;
+    glyph.advanceX = metricFixture ? (10 + i) << 4 : 32 << 4;
     glyph.top = 32;
     glyph.dataLength = BITMAP_BYTES;
     glyph.dataOffset = i * BITMAP_BYTES;
@@ -194,9 +204,63 @@ void makeKerningFont(uint16_t extraEntries = 0, uint8_t classCount = 2, uint8_t 
   for (size_t row = 0; classCount > 0 && row < 2; ++row) {
     std::memcpy(sdFontTestFile.data() + at + row * classCount, MATRIX[row], sizeof(MATRIX[row]));
   }
-  if (ligature) {
+  if (metricFixture) {
+    put32(ligatureOffset, 'A' << 16 | 'B');
+    put32(ligatureOffset + 4, 'C');
+    put32(ligatureOffset + 8, 'E' << 16 | 'F');
+    put32(ligatureOffset + 12, 'A');
+  } else if (ligature) {
     put32(ligatureOffset, 'E' << 16 | 'F');
     put32(ligatureOffset + 4, 'A');
+  }
+}
+
+// Duplicate a native fixture's style payload so emission really traverses four
+// active styles rather than resolving four missing styles to regular.
+void duplicateNativeStyles() {
+  const auto regular = sdFontTestFile;
+  const size_t styleBytes = regular.size() - 64;
+  sdFontTestFile.assign(160 + 4 * styleBytes, 0);
+  std::memcpy(sdFontTestFile.data(), regular.data(), 32);
+  sdFontTestFile[12] = 4;
+  for (uint8_t style = 0; style < 4; ++style) {
+    const size_t toc = 32 + style * 32;
+    std::memcpy(sdFontTestFile.data() + toc, regular.data() + 32, 32);
+    sdFontTestFile[toc] = style;
+    put32(toc + 24, 160 + style * styleBytes);
+    std::memcpy(sdFontTestFile.data() + 160 + style * styleBytes, regular.data() + 64, styleBytes);
+  }
+}
+
+void makeMetricRangeFont(uint32_t count, bool nativeLigatures = false) {
+  sdFontTestCompanion.clear();
+  constexpr size_t glyphOffset = 64 + 4 * sizeof(EpdUnicodeInterval);
+  const size_t ligatureOffset = glyphOffset + (count + 3) * sizeof(EpdGlyph);
+  const size_t bitmapOffset = ligatureOffset + (nativeLigatures ? sizeof(EpdLigaturePair) : 0);
+  sdFontTestFile.assign(bitmapOffset + 1, 0);
+  std::memcpy(sdFontTestFile.data(), "CPFONT\0\0", 8);
+  put16(8, CPFONT_VERSION);
+  sdFontTestFile[12] = 1;
+  put32(36, 4);
+  put32(40, count + 3);
+  sdFontTestFile[44] = 32;
+  put16(45, 32);
+  sdFontTestFile[55] = nativeLigatures ? 1 : 0;
+  put32(56, 64);
+  const EpdUnicodeInterval intervals[] = {
+      {' ', ' ', 0}, {'-', '-', 1}, {0x4E00, 0x4E00 + count - 1, 2}, {0xFFFD, 0xFFFD, count + 2}};
+  std::memcpy(sdFontTestFile.data() + 64, intervals, sizeof(intervals));
+  for (uint32_t i = 0; i < count + 3; ++i) {
+    EpdGlyph glyph{};
+    glyph.width = glyph.height = 1;
+    glyph.advanceX = (10 + i % 17) << 4;
+    glyph.top = 1;
+    glyph.dataLength = 1;
+    std::memcpy(sdFontTestFile.data() + glyphOffset + i * sizeof(glyph), &glyph, sizeof(glyph));
+  }
+  if (nativeLigatures) {
+    put32(ligatureOffset, 'E' << 16 | 'F');
+    put32(ligatureOffset + 4, 0x4E00);
   }
 }
 
@@ -291,9 +355,11 @@ struct ShapeTestScope {
   size_t headroom = probe::internalHeadroomBytes;
   size_t liveBytes = nullableLiveBytes;
   size_t liveCount = nullableLiveCount;
+  size_t allocationLimit = maximumNullableAllocation;
   ~ShapeTestScope() {
     failNextArraySize = failNextScalarSize = 0;
     failArrayOrdinal = failScalarOrdinal = 1;
+    maximumNullableAllocation = allocationLimit;
     probe::internalHeadroomBytes = headroom;
     probe::resetInternalHeapSamples();
     sdFontTestResetShapeFaults();
@@ -1132,4 +1198,256 @@ TEST(SdCardFontTest, AdvanceCollectionFaultsRejectBothPackedSegmentsAndExtraText
     EXPECT_FALSE(font.hasAdvanceTable());
     sdFontTestResetShapeFaults();
   }
+}
+
+TEST(SdCardFontTest, SmallExactPackedMetricsFitSmallAllocations) {
+  ShapeTestScope guard;
+  makeKerningFont(0, 2, 2, true, true);
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  maximumNullableAllocation = 4096;
+  const char first[] = "A\0A\0";
+  const char second[] = "D\0D\0";
+  const char* segments[] = {first, second};
+  const size_t lengths[] = {sizeof(first), sizeof(second)};
+  ASSERT_EQ(0, font.buildAdvanceTablePacked(segments, lengths, 2, true, true, 1, "BC", true));
+  for (const auto cp : {' ', '-', 'A', 'B', 'C', 'D'}) {
+    uint16_t advance = 0;
+    ASSERT_TRUE(font.getAdvance(cp, 0, advance));
+    const int index = cp == ' ' ? 0 : cp == '-' ? 1 : cp - 'A' + 2;
+    EXPECT_EQ((10 + index) << 4, advance);
+  }
+  EXPECT_EQ(-3, font.getEpdFont()->getKerning('A', 'B'));
+  EXPECT_EQ(-5, font.getEpdFont()->getKerning('C', 'D'));
+}
+
+TEST(SdCardFontTest, RepeatedRawAndShapedAlphabetsDoNotSaturateMetricWorkspace) {
+  ShapeTestScope guard;
+  for (const bool shaped : {false, true}) {
+    SCOPED_TRACE(shaped);
+    makeKerningFont(0, 2, 2, true, true);
+    if (shaped) makeShape(14, 'C');
+    SdCardFont font;
+    ASSERT_TRUE(font.load("fixture.cpfont"));
+    maximumNullableAllocation = 4096;
+    std::string text;
+    for (int i = 0; i < 5000; ++i) text += shaped ? "\xE0\xB8\x81" : "CD";
+    const char* segment = text.c_str();
+    const size_t length = text.size();
+    ASSERT_EQ(0, font.buildAdvanceTablePacked(&segment, &length, 1, true, true, 1, "D", true));
+    uint16_t advance = 0;
+    ASSERT_TRUE(font.getAdvance('C', 0, advance));
+    EXPECT_EQ(14 << 4, advance);
+    ASSERT_TRUE(font.getAdvance('D', 0, advance));
+    EXPECT_EQ(15 << 4, advance);
+    if (shaped) {
+      ASSERT_TRUE(font.getAdvance(0xE01, 0, advance));
+      EXPECT_EQ(18 << 4, advance);  // Raw fallback is retained alongside recipe output.
+      ThaiGlyphCursor cursor;
+      ASSERT_TRUE(cursor.begin("\xE0\xB8\x81", *font.getEpdFont()->getThaiShape()));
+      ThaiGlyphPlacement placement{};
+      ASSERT_TRUE(cursor.next(placement));
+      EXPECT_EQ(static_cast<uint32_t>('C'), placement.codepoint);
+      EXPECT_EQ(32 << 4, placement.advanceFP);
+    }
+    EXPECT_EQ(-5, font.getEpdFont()->getKerning('C', 'D'));
+    maximumNullableAllocation = guard.allocationLimit;
+  }
+}
+
+TEST(SdCardFontTest, ConservativeSaturationAcrossStylesIsNotUniqueOverflow) {
+  ShapeTestScope guard;
+  makeMetricRangeFont(64, true);
+  duplicateNativeStyles();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  const auto alphabet = page(0x4E00, 64);
+  for (const int copies : {1, 150}) {
+    SCOPED_TRACE(copies);
+    font.releaseResidentCaches();
+    std::string text;
+    for (int i = 0; i < copies; ++i) text += alphabet;
+    const char* segment = text.c_str();
+    const size_t length = text.size();
+    ASSERT_EQ(0, font.buildAdvanceTablePacked(&segment, &length, 1, true, true, 0x0F, nullptr, true));
+    for (uint8_t style = 0; style < 4; ++style) {
+      for (uint32_t i = 0; i < 64; ++i) {
+        uint16_t advance = 0;
+        ASSERT_TRUE(font.getAdvance(0x4E00 + i, style, advance));
+        EXPECT_EQ((10 + (i + 2) % 17) << 4, advance);
+      }
+    }
+  }
+}
+
+TEST(SdCardFontTest, ExactMainCapReservesSeparatorsAndRejectsOnlyTheNextIdentity) {
+  ShapeTestScope guard;
+  makeMetricRangeFont(4097);
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  for (uint32_t count : {4096u, 4097u}) {
+    SCOPED_TRACE(count);
+    font.releaseResidentCaches();
+    const auto text = page(0x4E00, count);
+    const char* segment = text.c_str();
+    const size_t length = text.size();
+    const int result = font.buildAdvanceTablePacked(&segment, &length, 1, true, true, 1, nullptr, true);
+    if (count == 4097) {
+      EXPECT_EQ(-1, result);
+      EXPECT_FALSE(font.hasAdvanceTable());  // No partial metric publication.
+      continue;
+    }
+    ASSERT_EQ(0, result);
+    for (const uint32_t i : {0u, 4095u}) {
+      const auto* glyph = font.getEpdFont()->getGlyph(0x4E00 + i);
+      ASSERT_NE(nullptr, glyph);
+      EXPECT_EQ((10 + (i + 2) % 17) << 4, glyph->advanceX);
+    }
+    for (const char separator : {' ', '-'}) {
+      const auto* glyph = font.getEpdFont()->getGlyph(separator);
+      ASSERT_NE(nullptr, glyph);
+      EXPECT_EQ((separator == ' ' ? 10 : 11) << 4, glyph->advanceX);
+    }
+  }
+}
+
+TEST(SdCardFontTest, ReverseDependencyLigaturesUseRequestMembershipAcrossStyles) {
+  ShapeTestScope guard;
+  makeKerningFont(0, 2, 2, true, true);
+  duplicateNativeStyles();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  ASSERT_EQ(0, font.buildAdvanceTable("AF", 0x0F));  // Stale A/F must not close the next E/B request.
+  const char* unrelated = "EB";
+  const size_t unrelatedLength = 2;
+  ASSERT_EQ(0, font.buildAdvanceTablePacked(&unrelated, &unrelatedLength, 1, false, false, 0x0F, "D", true));
+  for (uint8_t style = 0; style < 4; ++style) {
+    uint16_t advance = 0;
+    EXPECT_FALSE(font.getAdvance('C', style, advance));
+    EXPECT_EQ(0, font.getEpdFont(style)->getKerning('C', 'D'));
+  }
+  // Separate words prevent native emission from doing the chain for closure.
+  const char packed[] = "E\0F\0B\0";
+  const char* segment = packed;
+  const size_t length = sizeof(packed);
+  ASSERT_EQ(0, font.buildAdvanceTablePacked(&segment, &length, 1, false, false, 0x0F, "D", true));
+  for (uint8_t style = 0; style < 4; ++style) {
+    uint16_t advance = 0;
+    ASSERT_TRUE(font.getAdvance('C', style, advance));
+    EXPECT_EQ(14 << 4, advance);
+    EXPECT_EQ(-5, font.getEpdFont(style)->getKerning('C', 'D'));
+    const char* suffix = "FB";
+    EXPECT_EQ(static_cast<uint32_t>('C'), font.getEpdFont(style)->applyLigatures('E', suffix));
+    EXPECT_EQ('\0', *suffix);
+  }
+}
+
+TEST(SdCardFontTest, MixedMetricsMatchRenderPrewarmAfterCacheRelease) {
+  ShapeTestScope guard;
+  makeKerningFont(0, 2, 2, true, true);
+  makeShape(14, 'C');
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  ASSERT_NE(nullptr, font.getEpdFont()->getThaiShape());
+  const char* words[] = {"\xE0\xB8\x81", "D", "EF", "\xE4\xB8\x80", "B"};
+  const size_t lengths[] = {3, 1, 2, 3, 1};
+  constexpr uint32_t codepoints[] = {0xE01, 'C', 'D', 'E', 'F', 'A', 0x4E00, 'B', ' ', '-'};
+  uint16_t cold[std::size(codepoints)] = {};
+  for (int pass = 0; pass < 3; ++pass) {
+    SCOPED_TRACE(pass);
+    if (pass != 1) font.releaseResidentCaches();
+    ASSERT_EQ(0, font.buildAdvanceTablePacked(words, lengths, std::size(words), true, true, 1, nullptr, true));
+    for (size_t i = 0; i < std::size(codepoints); ++i) {
+      uint16_t advance = 0;
+      ASSERT_TRUE(font.getAdvance(codepoints[i], 0, advance));
+      if (pass == 0) cold[i] = advance;
+      EXPECT_EQ(cold[i], advance);
+    }
+    EXPECT_EQ(18 << 4, cold[0]);                             // Native fallback source.
+    EXPECT_EQ(14 << 4, cold[1]);                             // Recipe/closure output.
+    EXPECT_EQ(22 << 4, cold[6]);                             // CJK glyph.
+    EXPECT_EQ(-5, font.getEpdFont()->getKerning('C', 'D'));  // Across packed words.
+    EXPECT_EQ(-3, font.getEpdFont()->getKerning('A', 'B'));
+    const char* suffix = "F";
+    EXPECT_EQ(static_cast<uint32_t>('A'), font.getEpdFont()->applyLigatures('E', suffix));
+    ThaiGlyphCursor cursor;
+    ASSERT_TRUE(cursor.begin(words[0], *font.getEpdFont()->getThaiShape()));
+    ThaiGlyphPlacement placement{};
+    ASSERT_TRUE(cursor.next(placement));
+    EXPECT_EQ(static_cast<uint32_t>('C'), placement.codepoint);
+    EXPECT_EQ(32 << 4, placement.advanceFP);
+    EXPECT_EQ(0, placement.xOffsetFP);
+    EXPECT_EQ(0, placement.yOffsetFP);
+    EXPECT_FALSE(cursor.next(placement));
+    ASSERT_EQ(0, font.prewarm("\xE0\xB8\x81 D EF \xE4\xB8\x80 B-", 1, false, true, false));
+    for (size_t i = 0; i < std::size(codepoints); ++i) {
+      const auto* glyph = font.getEpdFont()->getGlyph(codepoints[i]);
+      ASSERT_NE(nullptr, glyph);
+      EXPECT_EQ(cold[i], glyph->advanceX);
+    }
+    EXPECT_EQ(-5, font.getEpdFont()->getKerning('C', 'D'));
+  }
+}
+
+TEST(SdCardFontTest, EmptyExactRequestResetsKerningWithoutDiscardingCachedAdvances) {
+  ShapeTestScope guard;
+  makeKerningFont();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  const char* segment = "AB";
+  const size_t length = 2;
+  ASSERT_EQ(0, font.buildAdvanceTablePacked(&segment, &length, 1, false, false, 1, nullptr, true));
+  ASSERT_EQ(-3, font.getEpdFont()->getKerning('A', 'B'));
+  ASSERT_EQ(0, font.buildAdvanceTablePacked(nullptr, nullptr, 0, false, false, 1, nullptr, true));
+  EXPECT_EQ(0, font.getEpdFont()->getKerning('A', 'B'));
+  uint16_t advance = 0;
+  ASSERT_TRUE(font.getAdvance('A', 0, advance));
+  EXPECT_EQ(32 << 4, advance);
+}
+
+TEST(SdCardFontTest, MetricWorkspaceOomDoesNotPoisonLaterRequests) {
+  ShapeTestScope guard;
+  makeKerningFont();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  // Load kern/ligature tables first so the denied allocation is the workspace.
+  ASSERT_EQ(0, font.buildAdvanceTablePacked(nullptr, nullptr, 0, false, false, 1, nullptr, true));
+  const char* segment = "AB";
+  const size_t length = 2;
+  maximumNullableAllocation = 0;
+  EXPECT_EQ(-1, font.buildAdvanceTablePacked(&segment, &length, 1, false, false, 1, nullptr, true));
+  EXPECT_FALSE(font.hasAdvanceTable());
+  EXPECT_FALSE(font.hasThaiShapeError());
+  maximumNullableAllocation = 4096;
+  ASSERT_EQ(0, font.buildAdvanceTablePacked(&segment, &length, 1, false, false, 1, nullptr, true));
+  uint16_t advance = 0;
+  ASSERT_TRUE(font.getAdvance('A', 0, advance));
+  EXPECT_EQ(32 << 4, advance);
+  EXPECT_EQ(-3, font.getEpdFont()->getKerning('A', 'B'));
+}
+
+TEST(SdCardFontTest, SizingShapeReadFailurePreventsMetricPublicationAndReloadRecovers) {
+  ShapeTestScope guard;
+  makeKerningFont(0, 2, 2, true, true);
+  makeShape(14, 'C');
+  probe::internalHeadroomBytes = 45 * 1024;
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  ASSERT_NE(nullptr, font.getEpdFont()->getThaiShape());
+  font.releaseResidentCaches();
+  sdFontTestFailShapeReadAt = sdFontTestShapeReads + 1;
+  const char* segment = "\xE0\xB8\x81";
+  const size_t length = 3;
+  EXPECT_EQ(-1, font.buildAdvanceTablePacked(&segment, &length, 1, false, false, 1, "D", true));
+  EXPECT_TRUE(font.hasThaiShapeError());
+  EXPECT_FALSE(font.hasAdvanceTable());
+  EXPECT_EQ(0, font.getEpdFont()->getKerning('C', 'D'));
+  sdFontTestResetShapeFaults();
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  ASSERT_EQ(0, font.buildAdvanceTablePacked(&segment, &length, 1, false, false, 1, "D", true));
+  EXPECT_FALSE(font.hasThaiShapeError());
+  uint16_t advance = 0;
+  ASSERT_TRUE(font.getAdvance('C', 0, advance));
+  EXPECT_EQ(14 << 4, advance);
+  EXPECT_EQ(-5, font.getEpdFont()->getKerning('C', 'D'));
 }

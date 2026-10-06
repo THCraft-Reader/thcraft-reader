@@ -18,6 +18,7 @@ class ImageBlock final : public Block {
   bool imageExists() const;
   bool hasValidCache() const;
   bool needsDecode() const;
+  bool prepare(GfxRenderer& renderer, int x, int y) const;
   void renderPlaceholder(GfxRenderer& renderer, int x, int y) const;
   static void clearRenderFailures();
 
@@ -30,9 +31,8 @@ class ImageBlock final : public Block {
 
   // Lazy extraction hook: the section build only header-probes images for their
   // dimensions; the file at imagePath is extracted out of the book on first
-  // render, via this callback (function pointer + context, not std::function —
-  // this is render-loop code). Registered by the reader activity that owns the
-  // Epub, cleared on its exit.
+  // preparation, via this callback. Registered by the reader activity that owns
+  // the Epub, cleared on its exit.
   using ExtractFn = bool (*)(void* ctx, const char* srcPath, const char* destPath);
   static void setExtractor(void* ctx, ExtractFn fn);
 
@@ -44,6 +44,8 @@ class ImageBlock final : public Block {
   static std::unique_ptr<ImageBlock> deserialize(HalFile& file);
 
  private:
+  bool decode(GfxRenderer& renderer, int x, int y) const;
+
   std::string imagePath;
   std::string srcPath;  // book-internal source href; empty once known-extracted
   int16_t width;

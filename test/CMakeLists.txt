@@ -116,6 +116,7 @@ add_subdirectory(sd_card_font)
 add_subdirectory(glyph_bitmap)
 add_subdirectory(thai_text)
 add_subdirectory(thai_render)
+add_subdirectory(image_preparation)
 add_subdirectory(thai_cache)
 add_subdirectory(thai_ui)
 

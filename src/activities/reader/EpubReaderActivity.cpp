@@ -1748,6 +1748,17 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   if (renderer.hasThaiShapeError()) return false;
 
   auto* fcm = renderer.getFontCacheManager();
+  const bool pageHasImages = page->hasImages();
+  if (pageHasImages && page->hasImagesNeedingDecode()) {
+    renderer.waitRefreshComplete();
+    renderer.endStripTarget();
+    renderer.setRenderMode(GfxRenderer::BW);
+    ImageBlock::releaseRenderCache();
+    fcm->releaseSdFontCaches();
+    // Keep the previous panel image while extraction borrows the framebuffer.
+    page->prepareImages(renderer, orientedMarginLeft, orientedMarginTop);
+    renderer.clearScreen();
+  }
   auto scope = fcm->createPrewarmScope();
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   // Scan the status bar too: a CJK book/chapter title redirected to the SD
@@ -1758,8 +1769,6 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   if (renderer.hasThaiShapeError()) return false;
   const auto tPrewarm = millis();
 
-  const bool pageHasImages = page->hasImages();
-  const bool pageHasImagesNeedingDecode = pageHasImages && page->hasImagesNeedingDecode();
   const bool manualRefreshPending = forcedRefreshPending;
   forcedRefreshPending = false;
   const bool cleanImageBasePending = manualRefreshPending || pagesUntilFullRefresh <= 1;
@@ -1786,14 +1795,6 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     }
     if (absoluteImageGrayscale) renderStatusBar();
   };
-
-  if (pageHasImagesNeedingDecode) {
-    page->renderWithImagePlaceholders(renderer, fontId, orientedMarginLeft, orientedMarginTop);
-    renderStatusBar();
-    if (renderer.hasThaiShapeError()) return false;
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    renderer.clearScreen();
-  }
 
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   renderStatusBar();
