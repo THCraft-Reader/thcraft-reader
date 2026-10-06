@@ -90,6 +90,13 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 55
+
+The serialized layout is unchanged. Missing full-block (`U+2588`) and black-square
+(`U+25A0`) symbols now use font-sized solid rectangles instead of replacement
+glyphs. Rebuild older sections so cached line breaks and word positions match
+their new widths. The derived partial version is `0xFE - (55 - 28)` = 227.
+
 ### Version 54
 
 The byte layout remains v52. Soft-flushed paragraphs preserve first-line

@@ -65,7 +65,8 @@ namespace {
 // v52: Optional per-word Thai cluster expansion budgets in the text arena.
 // v53: Bounded weighted Thai distribution and independent mark-safe spacing units.
 // v54: Preserve paragraph continuity and top spacing across soft flushes.
-constexpr uint8_t SECTION_FILE_VERSION = 54;
+// v55: Missing full-block and black-square symbols now have visible widths.
+constexpr uint8_t SECTION_FILE_VERSION = 55;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
