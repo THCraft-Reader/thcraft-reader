@@ -46,7 +46,9 @@ class SdCardFont {
   // Load .cpfont file: reads header + intervals into RAM, records file layout offsets.
   // Supports v4 (multi-style) format.
   // Returns true on success.
-  bool load(const char* path);
+  // residentThaiShape=false keeps the CPSHAPE companion SD-backed through the
+  // shared working cache: no whole-file buffer and no dense indexes.
+  bool load(const char* path, bool residentThaiShape = true);
 
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
   // styleMask: bitmask of styles to prewarm (bit 0=regular, 1=bold, 2=italic, 3=bolditalic).
@@ -294,6 +296,7 @@ class SdCardFont {
   PerStyle styles_[MAX_STYLES] = {};
   uint8_t styleCount_ = 0;
   std::unique_ptr<ThaiShapeStorage> thaiShapeStorage_;
+  bool residentThaiShape_ = true;
   void loadThaiShape();
   using CodepointVisitor = bool (*)(void* context, uint32_t codepoint);
   bool visitTextCodepoints(const char* text, uint8_t styleMask, bool shapeText, bool nativeLigatures,

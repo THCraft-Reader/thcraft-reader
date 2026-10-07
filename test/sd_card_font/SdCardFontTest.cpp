@@ -907,6 +907,26 @@ TEST(SdCardFontTest, ResidentPostallocationReserveFallsThroughBeforeCachedAlloca
   expectShape(font);
 }
 
+TEST(SdCardFontTest, SdBackedLoadSkipsResidentBufferAndIndexesDespiteHeadroom) {
+  ShapeTestScope guard;
+  makeFont();
+  makeShape();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont", /*residentThaiShape=*/false));
+  ASSERT_NE(nullptr, font.getEpdFont()->getThaiShape());
+  EXPECT_EQ(1u, sdFontTestShapeOpenHandles);
+  constexpr size_t indexBytes = ThaiShapeView::DENSE_COUNT * 4;
+  for (const auto& allocation : nullableAllocations) {
+    if (!allocation.pointer) continue;
+    EXPECT_NE(sdFontTestCompanion.size(), allocation.size);
+    EXPECT_NE(indexBytes, allocation.size);
+  }
+  expectShape(font);
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  EXPECT_EQ(0u, sdFontTestShapeOpenHandles);
+  expectShape(font);
+}
+
 TEST(SdCardFontTest, MinimumCacheOomIsNativeOnlyLeakFreeAndReloadRecovers) {
   ShapeTestScope guard;
   makeFont();

@@ -301,23 +301,39 @@ void EpubReaderActivity::openReaderMenu() {
   const ChapterPosition position = chapterPosition();
   const int bookProgressPercent = bookPercentFor(position);
 
-  startActivityForResult(
-      std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), position.displayPage(),
-                                               position.totalPages, bookProgressPercent, SETTINGS.orientation,
-                                               !currentPageFootnotes.empty(), !cachedBookmarks.empty()),
-      [this](const ActivityResult& result) {
-        const auto& menu = std::get<MenuResult>(result.data);
+  const auto makeMenu = [&] {
+    return makeUniqueNoThrow<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), position.displayPage(),
+                                                     position.totalPages, bookProgressPercent, SETTINGS.orientation,
+                                                     !currentPageFootnotes.empty(), !cachedBookmarks.empty());
+  };
+  auto menu = makeMenu();
+  if (!menu) {
+    // Rebuildable font caches re-fault on demand; shed them and retry once.
+    // Try-lock: the render task may be drawing with them, or a caller may hold the lock.
+    RenderLock lock(RenderLock::Mode::Try);
+    if (auto* fcm = renderer.getFontCacheManager(); fcm && lock.ownsLock()) fcm->releaseSdFontCaches();
+    lock.unlock();
+    menu = makeMenu();
+  }
+  if (!menu) {
+    LOG_ERR("ERS", "OOM: reader menu (free=%u max_block=%u)", (unsigned)ESP.getFreeHeap(),
+            (unsigned)ESP.getMaxAllocHeap());
+    return;
+  }
 
-        if (SETTINGS.orientation != menu.orientation) {
-          applyOrientation(menu.orientation);
-        }
+  startActivityForResult(std::move(menu), [this](const ActivityResult& result) {
+    const auto& menu = std::get<MenuResult>(result.data);
 
-        toggleAutoPageTurn(menu.pageTurnOption);
+    if (SETTINGS.orientation != menu.orientation) {
+      applyOrientation(menu.orientation);
+    }
 
-        if (!result.isCancelled) {
-          onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
-        }
-      });
+    toggleAutoPageTurn(menu.pageTurnOption);
+
+    if (!result.isCancelled) {
+      onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
+    }
+  });
 }
 
 bool EpubReaderActivity::buildTickHeapGate() {
@@ -1755,8 +1771,26 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     renderer.setRenderMode(GfxRenderer::BW);
     ImageBlock::releaseRenderCache();
     fcm->releaseSdFontCaches();
-    // Keep the previous panel image while extraction borrows the framebuffer.
-    page->prepareImages(renderer, orientedMarginLeft, orientedMarginTop);
+    {
+      // Declared before prepareImages() so decoder scratch dies before the fonts return.
+      SdCardFontSystem::CoverDecodeScope fonts(sdFontSystem, renderer);
+      const bool sdFontsLoaded = !renderer.getSdCardFonts().empty() || !renderer.getTtfFonts().empty();
+      if (sdFontsLoaded &&
+          (ESP.getFreeHeap() < IMAGE_DECODE_MIN_FREE_HEAP || ESP.getMaxAllocHeap() < IMAGE_DECODE_MIN_MAX_ALLOC)) {
+        LOG_INF("ERS", "Unloading SD fonts for image decode: free=%u max_block=%u", (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
+        fonts.releaseFonts();
+      }
+      // Keep the previous panel image while extraction borrows the framebuffer.
+      page->prepareImages(renderer, orientedMarginLeft, orientedMarginTop);
+    }
+    if (SETTINGS.getReaderFontId() != fontId) {
+      // The section and any paused build are bound to the font identity that did not come back.
+      LOG_ERR("ERS", "Reader font not restored after image decode (free=%u max_block=%u)", (unsigned)ESP.getFreeHeap(),
+              (unsigned)ESP.getMaxAllocHeap());
+      resetSectionForRelayout();
+      return false;
+    }
     renderer.clearScreen();
   }
   auto scope = fcm->createPrewarmScope();
@@ -2623,13 +2657,17 @@ void EpubReaderActivity::applyReaderTextSettings() {
   // The reader otherwise only loads SD fonts on book open, so without this an
   // in-reader font change wouldn't take effect until re-opening the book.
   sdFontSystem.ensureLoaded(renderer);
+  resetSectionForRelayout();
+}
+
+void EpubReaderActivity::resetSectionForRelayout() {
   if (section) {
     rememberCurrentContentOffset();
     cachedSpineIndex = currentSpineIndex;
     cachedChapterTotalPageCount = section->pageCount;
     nextPageNumber = section->currentPage;
   }
-  section.reset();  // force re-pagination with the new settings
+  section.reset();  // force re-pagination with the current font and settings
 }
 
 // The More panel carries everything the classic list menu offers except the

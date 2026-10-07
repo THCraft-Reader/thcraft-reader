@@ -135,6 +135,10 @@ class EpubReaderActivity final : public ReaderActivity {
   bool buildTickHeapGate();
   bool buildHeapPaused = false;
   static constexpr size_t RENDER_MIN_FREE_HEAP = 24 * 1024;
+  // Below either floor, an uncached page image is decoded with the SD fonts unloaded.
+  // Sized for the PNG decoder (~44 KB object behind a 60 KB free-heap gate); JPEG needs less.
+  static constexpr size_t IMAGE_DECODE_MIN_FREE_HEAP = 72 * 1024;
+  static constexpr size_t IMAGE_DECODE_MIN_MAX_ALLOC = 48 * 1024;
   static constexpr int BUILD_WINDOW_AHEAD = 5;
   static constexpr int PARTIAL_REBUILD_START_MARGIN = 15;
   static constexpr int BUILD_POPUP_PAGE_THRESHOLD = 20;
@@ -171,6 +175,8 @@ class EpubReaderActivity final : public ReaderActivity {
   // Persist the reader text settings, (re)load the selected SD font, and
   // re-paginate the current chapter so changes apply without re-opening the book.
   void applyReaderTextSettings();
+  // Caller holds RenderLock. Drops the section so the next render re-paginates from the saved position.
+  void resetSectionForRelayout();
   // More panel rows.
   void buildMoreActions();
   std::string moreRowName(int row) const;

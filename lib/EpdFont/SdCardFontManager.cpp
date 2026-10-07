@@ -28,14 +28,15 @@ int SdCardFontManager::computeFontId(uint32_t contentHash, const char* familyNam
   return id != 0 ? id : 1;  // 0 is reserved as "not found" sentinel
 }
 
-int SdCardFontManager::loadFile(const SdCardFontFileInfo& file, const char* familyName, GfxRenderer& renderer) {
+int SdCardFontManager::loadFile(const SdCardFontFileInfo& file, const char* familyName, GfxRenderer& renderer,
+                                const bool residentThaiShape) {
   auto* font = new (std::nothrow) SdCardFont();
   if (!font) {
     LOG_ERR("SDMGR", "Failed to allocate SdCardFont for %s", file.path.c_str());
     return 0;
   }
 
-  if (!font->load(file.path.c_str())) {
+  if (!font->load(file.path.c_str(), residentThaiShape)) {
     LOG_ERR("SDMGR", "Failed to load %s", file.path.c_str());
     delete font;
     return 0;
@@ -71,7 +72,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
-  if (loadFile(*selected, family.name.c_str(), renderer) == 0) {
+  if (loadFile(*selected, family.name.c_str(), renderer, /*residentThaiShape=*/true) == 0) {
     return false;
   }
 
@@ -91,7 +92,9 @@ int SdCardFontManager::loadFamilyExtraSize(const SdCardFontFamilyInfo& family, G
     if (lf.size == pointSize) return lf.fontId;
   }
 
-  return loadFile(*file, family.name.c_str(), renderer);
+  // UI fallbacks shape a few short labels: SD-backed shaping leaves the
+  // companion tables of every extra size out of the heap.
+  return loadFile(*file, family.name.c_str(), renderer, /*residentThaiShape=*/false);
 }
 
 void SdCardFontManager::unloadAll(GfxRenderer& renderer) {

@@ -306,6 +306,8 @@ version 1. Older firmware can still use the font without positioning. Current
 firmware selects resident or SD-backed shaping automatically: low memory or a
 failed whole-file/index allocation uses one shared working cache below 8 KiB,
 plus per-font metadata and HAL overhead. No setting or repackaged font is needed.
+The 8/10/12 pt UI-fallback sizes always use SD-backed shaping without dense
+indexes, so only the reader-size companion can be resident.
 Missing, incompatible, corrupt or minimum-resource-OOM companions still leave
 the native font usable; no desktop shaping library runs on the device.
 An actual companion read failure stops layout/rendering rather than saving native

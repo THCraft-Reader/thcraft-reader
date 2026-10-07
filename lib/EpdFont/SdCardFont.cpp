@@ -152,7 +152,7 @@ void SdCardFont::loadThaiShape() {
       return false;
     }
     constexpr size_t reserve = 50 * 1024;
-    if (HalMemory::getInternal8BitHeap().freeBytes > reserve) {
+    if (residentThaiShape_ && HalMemory::getInternal8BitHeap().freeBytes > reserve) {
       storage->buffer.reset(psramNewArray<uint8_t>(size));
       if (storage->buffer && HalMemory::getInternal8BitHeap().freeBytes <= reserve) storage->buffer.reset();
     }
@@ -252,7 +252,7 @@ void SdCardFont::loadThaiShape() {
       nextOffset += length;
     }
     if (nextOffset != size) return false;
-    if (storage->cached) {
+    if (storage->cached && residentThaiShape_) {
       constexpr size_t indexBytes = ThaiShapeView::DENSE_COUNT * 4;
       const size_t allIndexBytes = styleCount_ * indexBytes;
       if (HalMemory::getInternal8BitHeap().freeBytes > reserve + allIndexBytes) {
@@ -897,8 +897,9 @@ void SdCardFont::computeStyleFileOffsets(PerStyle& s, uint32_t baseOffset) {
 
 // --- Load ---
 
-bool SdCardFont::load(const char* path) {
+bool SdCardFont::load(const char* path, const bool residentThaiShape) {
   freeAll();
+  residentThaiShape_ = residentThaiShape;
   if (strlen(path) >= sizeof(filePath_)) {
     LOG_ERR("SDCF", "Path too long (%zu bytes, max %zu)", strlen(path), sizeof(filePath_) - 1);
     return false;

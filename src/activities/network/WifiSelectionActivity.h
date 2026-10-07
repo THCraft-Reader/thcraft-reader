@@ -10,6 +10,8 @@
 #include "components/UiAppHost.h"
 #include "util/ButtonNavigator.h"
 
+class KeyboardEntryActivity;
+
 struct Rect;
 struct ThemeMetrics;
 struct WifiCredential;
@@ -128,6 +130,8 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
   void appendHiddenNetworkEntry();
   void selectNetwork(int index);
   void promptHiddenSsid();
+  // Null on OOM, after shedding rebuildable font caches and retrying once.
+  std::unique_ptr<KeyboardEntryActivity> makeKeyboard(const char* title, int maxLength);
   void promptPasswordEntry();
   void attemptConnection();
   void checkConnectionStatus();

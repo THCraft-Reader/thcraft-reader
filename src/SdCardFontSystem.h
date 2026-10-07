@@ -37,7 +37,7 @@ class SdCardFontSystem {
   /// Also re-discovers if the registry has been marked dirty (e.g. by web upload).
   void ensureLoaded(GfxRenderer& renderer);
 
-  /// On-demand cover decoding may temporarily need the memory owned by SD fonts.
+  /// On-demand cover and page-image decoding may temporarily need the memory owned by SD fonts.
   /// The caller must hold RenderLock throughout the scope and must not render
   /// text after releaseFonts() until destruction restores the selected fonts.
   /// Construct before decoder buffers/FrameBufferLoan so they die before restore.
