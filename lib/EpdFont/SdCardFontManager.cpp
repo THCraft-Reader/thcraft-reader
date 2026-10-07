@@ -72,7 +72,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
-  if (loadFile(*selected, family.name.c_str(), renderer, /*residentThaiShape=*/true) == 0) {
+  if (loadFile(*selected, family.name.c_str(), renderer, residentThaiShape_) == 0) {
     return false;
   }
 
@@ -108,6 +108,13 @@ void SdCardFontManager::unloadAll(GfxRenderer& renderer) {
   loaded_.clear();
   loadedFamilyName_.clear();
   loadedPointSize_ = 0;
+}
+
+bool SdCardFontManager::holdsResidentThaiShape() const {
+  for (const auto& lf : loaded_) {
+    if (lf.font->hasResidentThaiShape()) return true;
+  }
+  return false;
 }
 
 int SdCardFontManager::getFontId(const std::string& familyName) const {

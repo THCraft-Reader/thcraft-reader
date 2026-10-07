@@ -348,6 +348,37 @@ TEST_P(CoverDecodeScopeTest, EarlyReturnRestoresFontsAndUiFallbacks) {
   expectSelected();
 }
 
+TEST_P(CoverDecodeScopeTest, DropResidentThaiShapeReloadsSdBackedWithSameIdentityAndPixels) {
+  const auto before = thaiFrame();
+  const int id = system.resolveFontId(kFamily, 16);
+  const size_t loadedBytes = probe::allocationLive();
+  EXPECT_EQ(renderer.getSdCardFonts().at(id)->hasResidentThaiShape(), !GetParam());
+  const auto reads = probe::readCalls;
+
+  system.dropResidentThaiShape(renderer);
+
+  ASSERT_EQ(renderer.getSdCardFonts().size(), 4u);
+  EXPECT_EQ(system.resolveFontId(kFamily, 16), id);
+  for (const auto& entry : renderer.getSdCardFonts()) EXPECT_FALSE(entry.second->hasResidentThaiShape());
+  if (GetParam()) {
+    // Nothing resident to shed: the loaded fonts are left alone.
+    EXPECT_EQ(probe::readCalls, reads);
+  } else {
+    EXPECT_LT(probe::allocationLive(), loadedBytes);
+  }
+  EXPECT_EQ(thaiFrame(), before);
+  expectSelected();
+
+  // The policy outlives the reload: a later load must not go resident again.
+  {
+    SdCardFontSystem::CoverDecodeScope scope(system, renderer);
+    scope.releaseFonts();
+  }
+  ASSERT_EQ(renderer.getSdCardFonts().size(), 4u);
+  for (const auto& entry : renderer.getSdCardFonts()) EXPECT_FALSE(entry.second->hasResidentThaiShape());
+  EXPECT_EQ(thaiFrame(), before);
+}
+
 INSTANTIATE_TEST_SUITE_P(CompanionStorage, CoverDecodeScopeTest, testing::Bool(),
                          [](const testing::TestParamInfo<bool>& info) { return info.param ? "Cached" : "Resident"; });
 }  // namespace

@@ -12,6 +12,7 @@
 
 #include "MappedInputManager.h"
 #include "NetworkModeSelectionActivity.h"
+#include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
@@ -237,6 +238,12 @@ void CrossPointWebServerActivity::onWifiSelectionComplete(const bool connected) 
 
 void CrossPointWebServerActivity::startAccessPoint() {
   LOG_DBG("WEBACT", "Starting Access Point mode...");
+  {
+    // Hotspot starts WiFi without the fresh-heap reboot Join Network takes, so
+    // shed the resident CPSHAPE companion here; leaving reboots and restores it.
+    RenderLock lock(*this);
+    sdFontSystem.dropResidentThaiShape(renderer);
+  }
   LOG_DBG("WEBACT", "Free heap before AP start: %d bytes", ESP.getFreeHeap());
 
   // Configure and start the AP

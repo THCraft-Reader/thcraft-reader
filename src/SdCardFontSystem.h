@@ -30,7 +30,14 @@ class SdCardFontSystem {
   SdCardFontSystem(const SdCardFontSystem&) = delete;
   SdCardFontSystem& operator=(const SdCardFontSystem&) = delete;
   /// Discover SD card fonts and load user's saved selection. Call once during setup.
-  void begin(GfxRenderer& renderer);
+  /// residentThaiShape=false keeps every CPSHAPE companion SD-backed until reboot.
+  void begin(GfxRenderer& renderer, bool residentThaiShape = true);
+
+  /// Reload the selected family with every CPSHAPE companion SD-backed, and keep
+  /// later loads that way until reboot. For sessions that start WiFi without a
+  /// fresh-heap reboot. No-op when no loaded font holds a resident companion.
+  /// The caller must hold RenderLock.
+  void dropResidentThaiShape(GfxRenderer& renderer);
 
   /// Ensure the correct SD font family is loaded for the current settings.
   /// Call before entering the reader or after settings change.

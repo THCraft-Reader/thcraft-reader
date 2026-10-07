@@ -381,7 +381,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   powerManager.startDeepSleep(gpio);
 }
 
-void setupDisplayAndFonts(bool seamless = false) {
+void setupDisplayAndFonts(bool seamless = false, bool residentThaiShape = true) {
 #if !FREEINK_MCU_C3
   // C3 resolves its controller in HalGPIO::begin() before SPI claims the
   // display pins. X4 Pro skips that C3-only path, so probe here before
@@ -422,7 +422,7 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
 
   // Discover and load SD card fonts
-  sdFontSystem.begin(renderer);
+  sdFontSystem.begin(renderer, residentThaiShape);
 
   LOG_DBG("MAIN", "Fonts setup");
 }
@@ -583,7 +583,10 @@ void setup() {
   bool allowFastInitialReaderRefresh = false;
   bool needsWakeRefresh = false;
 
-  setupDisplayAndFonts(resume != BootResume::Splash);
+  // Join Network never draws reader text and reboots on the way out, so its
+  // boot leaves the reader-size CPSHAPE companion on SD for WiFi and the web server.
+  const bool joinNetworkBoot = isSilentReboot && snapshotTarget == SILENT_REBOOT_TARGET_JOIN_NETWORK;
+  setupDisplayAndFonts(resume != BootResume::Splash, !joinNetworkBoot);
 
   switch (resume) {
     case BootResume::Silent:

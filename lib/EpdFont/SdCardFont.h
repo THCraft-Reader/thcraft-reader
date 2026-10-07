@@ -162,6 +162,8 @@ class SdCardFont {
 
   // Runtime companion I/O/structure faults remain latched until a validated reload.
   bool hasThaiShapeError() const;
+  // True while the whole CPSHAPE companion is held in RAM (not SD-backed).
+  bool hasResidentThaiShape() const;
 
  private:
   // Per-style metadata (parsed from file header/TOC)

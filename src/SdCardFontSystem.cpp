@@ -91,7 +91,8 @@ constexpr UiFontSize kUiFontSizes[] = {
 
 }  // namespace
 
-void SdCardFontSystem::begin(GfxRenderer& renderer) {
+void SdCardFontSystem::begin(GfxRenderer& renderer, const bool residentThaiShape) {
+  manager_.setResidentThaiShape(residentThaiShape);
   registry_.discover();
 
   // Register this system as the SD font ID resolver in settings.
@@ -129,6 +130,14 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
   }
 
   LOG_DBG("SDFS", "SD font system ready (%d families discovered)", registry_.getFamilyCount());
+}
+
+void SdCardFontSystem::dropResidentThaiShape(GfxRenderer& renderer) {
+  manager_.setResidentThaiShape(false);
+  if (!manager_.holdsResidentThaiShape()) return;
+  LOG_DBG("SDFS", "Reloading %s with SD-backed shaping", manager_.currentFamilyName().c_str());
+  manager_.unloadAll(renderer);
+  ensureLoadedInternal(renderer, /*preserveSelection=*/true);
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {

@@ -306,6 +306,14 @@ bool SdCardFont::hasThaiShapeError() const {
 #endif
 }
 
+bool SdCardFont::hasResidentThaiShape() const {
+#if THAI_SHAPING
+  return thaiShapeStorage_ && thaiShapeStorage_->buffer;
+#else
+  return false;
+#endif
+}
+
 bool SdCardFont::visitTextCodepoints(const char* text, uint8_t styleMask, bool shapeText, bool nativeLigatures,
                                      CodepointVisitor visitor, void* context) const {
   if (hasThaiShapeError()) return false;
