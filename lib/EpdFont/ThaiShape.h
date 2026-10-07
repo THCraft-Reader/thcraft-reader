@@ -25,6 +25,8 @@ class ThaiShapeCache {
   static constexpr size_t BLOCK_BYTES = 512;
   static constexpr size_t BLOCK_COUNT = 8;
   static constexpr size_t CLUSTER_SLOTS = 2;
+  static constexpr size_t RECIPE_SETS = 16;
+  static constexpr size_t RECIPE_WAYS = 8;
   void invalidate(const ThaiShapeSource& source);
   bool hasLeases() const;
   void setIdleCallback(void (*callback)(ThaiShapeCache*)) { idleCallback_ = callback; }
@@ -50,17 +52,31 @@ class ThaiShapeCache {
     uint32_t references = 0;
     uint8_t count = 0;
   };
+  // A resolved recipe keyed by its dense-entry companion offset (unique per
+  // style and key), so a repeated cluster stages without companion reads.
+  struct Recipe {
+    static constexpr uint8_t MAX_RECORDS = 4;  // longer recipes stay on the block path
+    const ThaiShapeSource* owner = nullptr;
+    uint32_t denseOffset : 24;
+    uint32_t recordCount : 3;  // 0 = the dense index maps no recipe
+    uint32_t recent : 1;
+    uint8_t records[MAX_RECORDS * 8];
+  };
   bool read(const ThaiShapeSource& source, uint32_t offset, uint8_t* output, size_t count);
+  Recipe* recipeSet(const ThaiShapeSource& source, uint32_t denseOffset);
+  const Recipe* findRecipe(const ThaiShapeSource& source, uint32_t denseOffset);
+  void storeRecipe(const ThaiShapeSource& source, uint32_t denseOffset, const uint8_t* records, uint8_t count);
   void touch(uint8_t slot);
   int acquire();
   void retain(uint8_t slot);
   void release(uint8_t slot);
   Block blocks_[BLOCK_COUNT];
   Stage stages_[CLUSTER_SLOTS];
+  Recipe recipes_[RECIPE_SETS * RECIPE_WAYS];
   uint8_t mru_[BLOCK_COUNT] = {0, 1, 2, 3, 4, 5, 6, 7};
   void (*idleCallback_)(ThaiShapeCache*) = nullptr;
 };
-static_assert(sizeof(ThaiShapeCache) <= 8 * 1024, "Shared shaping working set exceeds 8 KiB");
+static_assert(sizeof(ThaiShapeCache) <= 14 * 1024, "Shared shaping working set exceeds 14 KiB");
 
 // Stable owner identity: backing memory/file outlives all borrowing views/cursors.
 class ThaiShapeSource {
@@ -115,6 +131,7 @@ class ThaiShapeView {
   bool read(uint32_t offset, uint8_t* output, size_t count) const;
   bool recipe(uint32_t key, uint16_t& base, uint16_t& suffix) const;
   bool stageRecipe(uint16_t base, uint16_t suffix, uint8_t* records, uint8_t& count) const;
+  uint32_t denseOffset(uint32_t key) const { return offset_ + 28 + key * 4; }
   ThaiGlyphPlacement baseRecord(uint16_t id) const;
   ThaiGlyphPlacement suffixRecord(uint16_t id, uint8_t index) const;
   uint8_t suffixCount(uint16_t id) const;
@@ -148,6 +165,9 @@ class ThaiGlyphCursor {
  private:
   void release();
   void copyState(const ThaiGlyphCursor& other);
+  // SD-backed recipe for `key`, memoized in the shared cache. False when the
+  // key has no recipe or a companion read failed.
+  static bool cachedRecipe(const ThaiShapeView& shape, uint32_t key, uint8_t* records, uint8_t& count);
   // Identify a native scalar or one complete recipe without copying source.
   bool unit(size_t offset, size_t& end, uint32_t& key) const;
   std::string_view text_;

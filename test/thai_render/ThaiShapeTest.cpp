@@ -394,7 +394,7 @@ TEST(ThaiShapeTest, SharedCacheSplitsCrossingReadsUsesMruAndClampsFinalBlock) {
   ASSERT_TRUE(source.readBytes(9 * 512, output, 17));
   EXPECT_EQ(17u, io.lastCount);
   EXPECT_EQ(0, std::memcmp(output, bytes.data() + 9 * 512, 17));
-  EXPECT_LE(sizeof(ThaiShapeCache), 8192u);
+  EXPECT_LE(sizeof(ThaiShapeCache), 14u * 1024u);
 }
 
 TEST(ThaiShapeTest, SourceFailureLatchesOnceInvalidatesVictimAndResetsCleanly) {
@@ -519,6 +519,63 @@ TEST(ThaiShapeTest, AdmissionAndCacheMissesAllocateNothingAndFittingClustersStay
   while (cursor.next(placement)) {
   }
   EXPECT_EQ(indexedReads + 1, io.calls - beforePaged);
+}
+
+TEST(ThaiShapeTest, ResolvedRecipesOutliveBlockEvictionUntilTheirSourceIsInvalidated) {
+  auto bytes = payload();
+  const uint32_t missing = (0xE2D - 0xE01) * 82;
+  put16(bytes, 28 + missing * 4, UINT16_MAX);
+  put16(bytes, 30 + missing * 4, UINT16_MAX);
+  const auto longRecipe = styledPayload(3, 5);
+  ThaiShapeSource resident;
+  resident.setResident(bytes.data(), bytes.size());
+  ThaiShapeView oracle;
+  ASSERT_TRUE(oracle.validate(resident, 0, bytes.size(), covered, nullptr));
+  ThaiGlyphCursor expected;
+  ASSERT_TRUE(expected.begin("กี่", oracle));
+  const auto expectedOutput = placements(expected);
+
+  ThaiShapeCache cache;
+  MemoryIo io{bytes}, longIo{longRecipe};
+  ThaiShapeSource source, longSource;
+  source.setCached(&io, MemoryIo::read, bytes.size(), cache);
+  longSource.setCached(&longIo, MemoryIo::read, longRecipe.size(), cache);
+  ThaiShapeView view, longView;
+  ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(longView.validate(longSource, 0, longRecipe.size(), covered, nullptr));
+  // Blocks 40..47 hold none of the dense, base, offset or suffix bytes used below.
+  const auto evictBlocks = [&](const ThaiShapeSource& owner) {
+    uint8_t byte;
+    for (unsigned i = 0; i < ThaiShapeCache::BLOCK_COUNT; ++i) {
+      ASSERT_TRUE(owner.readBytes((40 + i) * ThaiShapeCache::BLOCK_BYTES, &byte, 1));
+    }
+  };
+  ThaiGlyphCursor cursor;
+  ASSERT_TRUE(cursor.begin("กี่", view));
+  expectPlacements(expectedOutput, placements(cursor));
+  EXPECT_FALSE(cursor.begin(keyText(missing), view));
+  evictBlocks(source);
+  auto calls = io.calls;
+  ASSERT_TRUE(cursor.begin("กี่", view));
+  expectPlacements(expectedOutput, placements(cursor));
+  EXPECT_FALSE(cursor.begin(keyText(missing), view));
+  EXPECT_FALSE(view.failed());
+  EXPECT_EQ(calls, io.calls);
+
+  cache.invalidate(source);
+  ASSERT_TRUE(cursor.begin("กี่", view));
+  expectPlacements(expectedOutput, placements(cursor));
+  EXPECT_LT(calls, io.calls);
+
+  // Six records exceed the retained recipe size: the cluster stays on the block path.
+  ASSERT_TRUE(cursor.begin("กี่", longView));
+  EXPECT_EQ(6u, placements(cursor).size());
+  evictBlocks(longSource);
+  calls = longIo.calls;
+  ASSERT_TRUE(cursor.begin("กี่", longView));
+  EXPECT_EQ(6u, placements(cursor).size());
+  EXPECT_LT(calls, longIo.calls);
+  EXPECT_FALSE(cache.hasLeases());
 }
 
 TEST(ThaiShapeTest, CopiesMovesAndInterleavedStagesRemainIndependentOfEvictionAndLateIoFailure) {

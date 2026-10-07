@@ -32,6 +32,50 @@ void ThaiShapeCache::invalidate(const ThaiShapeSource& source) {
   for (auto& block : blocks_) {
     if (block.owner == &source) block.owner = nullptr;
   }
+  for (auto& recipe : recipes_) {
+    if (recipe.owner == &source) recipe.owner = nullptr;
+  }
+}
+
+ThaiShapeCache::Recipe* ThaiShapeCache::recipeSet(const ThaiShapeSource& source, uint32_t denseOffset) {
+  // The companion size spreads different fonts' identical keys across sets.
+  const uint32_t mixed = (denseOffset / 4 + source.size_) * 2654435761u;
+  return recipes_ + (mixed >> 16) % RECIPE_SETS * RECIPE_WAYS;
+}
+
+const ThaiShapeCache::Recipe* ThaiShapeCache::findRecipe(const ThaiShapeSource& source, uint32_t denseOffset) {
+  Recipe* set = recipeSet(source, denseOffset);
+  for (size_t way = 0; way < RECIPE_WAYS; ++way) {
+    if (set[way].owner == &source && set[way].denseOffset == denseOffset) {
+      set[way].recent = 1;
+      return set + way;
+    }
+  }
+  return nullptr;
+}
+
+void ThaiShapeCache::storeRecipe(const ThaiShapeSource& source, uint32_t denseOffset, const uint8_t* records,
+                                 uint8_t count) {
+  if (count > Recipe::MAX_RECORDS) return;
+  Recipe* set = recipeSet(source, denseOffset);
+  // Second-chance victim: an empty way, else the first not hit since the last sweep.
+  size_t victim = RECIPE_WAYS;
+  for (size_t way = 0; way < RECIPE_WAYS && victim == RECIPE_WAYS; ++way) {
+    if (!set[way].owner) victim = way;
+  }
+  for (size_t way = 0; way < RECIPE_WAYS && victim == RECIPE_WAYS; ++way) {
+    if (!set[way].recent) victim = way;
+  }
+  if (victim == RECIPE_WAYS) {
+    for (size_t way = 0; way < RECIPE_WAYS; ++way) set[way].recent = 0;
+    victim = 0;
+  }
+  auto& recipe = set[victim];
+  recipe.owner = &source;
+  recipe.denseOffset = denseOffset;
+  recipe.recordCount = count;
+  recipe.recent = 1;
+  std::memcpy(recipe.records, records, count * 8);
 }
 
 bool ThaiShapeCache::hasLeases() const {
@@ -245,6 +289,25 @@ ThaiGlyphPlacement ThaiShapeView::suffixRecord(uint16_t id, uint8_t index) const
   return glyph(bytes_ + u32(bytes_ + suffixOffsets_ + id * 4) + 1 + index * 8);
 }
 
+bool ThaiGlyphCursor::cachedRecipe(const ThaiShapeView& shape, uint32_t key, uint8_t* records, uint8_t& count) {
+  auto& cache = *shape.source_->cache_;
+  const uint32_t denseOffset = shape.denseOffset(key);
+  if (const auto* known = cache.findRecipe(*shape.source_, denseOffset)) {
+    count = static_cast<uint8_t>(known->recordCount);
+    std::memcpy(records, known->records, count * 8);
+    return count != 0;
+  }
+  uint16_t base, suffix;
+  count = 0;
+  if (shape.recipe(key, base, suffix)) {
+    if (!shape.stageRecipe(base, suffix, records, count)) return false;
+  } else if (shape.failed()) {
+    return false;
+  }
+  cache.storeRecipe(*shape.source_, denseOffset, records, count);
+  return count != 0;
+}
+
 bool ThaiGlyphCursor::unit(size_t offset, size_t& end, uint32_t& key) const {
   auto scalar = thai::detail::decode(text_, offset, true);
   if (!scalar.valid) return false;
@@ -368,21 +431,22 @@ bool ThaiGlyphCursor::begin(std::string_view text, const ThaiShapeView& shape) {
   if (!cluster.valid || shape.failed()) return false;
   if (end > 128) return shape.source_->fail(shape.offset_);
   text_ = text.substr(0, end);
+  auto* cache = shape.bytes_ ? nullptr : shape.source_->cache_;
   bool hasRecipe = false;
   for (size_t p = 0; p < end;) {
     size_t next;
     uint32_t key;
-    uint16_t base, suffix;
     if (!unit(p, next, key) || next <= p || next > end) return false;
     if (key != NATIVE) {
-      if (!shape.recipe(key, base, suffix)) return false;
+      uint16_t base, suffix;
+      uint8_t records[sizeof(ThaiShapeCache::Unit::records)], count;
+      if (cache ? !cachedRecipe(shape, key, records, count) : !shape.recipe(key, base, suffix)) return false;
       hasRecipe = true;
     }
     p = next;
   }
   if (!hasRecipe) return false;
-  if (!shape.bytes_) {
-    auto* cache = shape.source_->cache_;
+  if (cache) {
     const int slot = cache->acquire();
     if (slot < 0) return shape.source_->fail(shape.offset_);
     cache_ = cache;
@@ -400,12 +464,9 @@ bool ThaiGlyphCursor::begin(std::string_view text, const ThaiShapeView& shape) {
       staged.sourceBegin = static_cast<uint8_t>(p);
       staged.sourceEnd = static_cast<uint8_t>(next);
       staged.recordCount = 0;
-      if (key != NATIVE) {
-        uint16_t base, suffix;
-        if (!shape.recipe(key, base, suffix) || !shape.stageRecipe(base, suffix, staged.records, staged.recordCount)) {
-          release();
-          return false;
-        }
+      if (key != NATIVE && !cachedRecipe(shape, key, staged.records, staged.recordCount)) {
+        release();
+        return false;
       }
       ++stage.count;
       p = next;

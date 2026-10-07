@@ -409,13 +409,23 @@ sizes and styles. Minimum cached admission depends on actual nullable allocation
 not the 50 KiB reserve. Missing, corrupt, incompatible or genuinely unaffordable
 companions leave the native font usable.
 
-The shared object contains eight 512-byte MRU blocks and two complete-cluster
-stages. Its compiled size is **7,484 bytes on C3/S3** and **7,520 bytes on macOS
-arm64**, enforced below 8 KiB by a static assertion. Two stages hold 32 byte-packed
-51-byte units each (3,264 bytes total), including at most six encoded records per
-unit. Cache misses and cursor admission/iteration allocate nothing after load.
-Cached admission reads the entire cluster before exposing placements; cursor
-copies share immutable stage leases. Iteration performs no further SD reads.
+The shared object contains eight 512-byte MRU blocks, two complete-cluster
+stages and 128 resolved recipes. Its compiled size is **12,604 bytes on C3/S3**
+and **13,664 bytes on macOS arm64**, enforced below 14 KiB by a static assertion.
+Two stages hold 32 byte-packed 51-byte units each (3,264 bytes total), including
+at most six encoded records per unit. Cache misses and cursor admission/iteration
+allocate nothing after load. Cached admission reads the entire cluster before
+exposing placements; cursor copies share immutable stage leases. Iteration
+performs no further SD reads.
+
+A recipe lookup touches the dense index, base records, suffix offsets and suffix
+data, which lie in different blocks, so eight blocks alone hold about two
+clusters' worth of mixed text. The resolved recipes (16 sets of eight, 40 bytes
+each on C3/S3) keep each recently used cluster's records, or the fact that its
+key has no recipe, keyed by owner and dense-entry offset. A repeated cluster then
+stages without companion reads whatever the block cache holds. Recipes longer
+than four records stay on the block path. Invalidating a source drops its blocks
+and its recipes together.
 
 Optional dense indexes cost **15,088 bytes per present style**, at most 60,352
 bytes for four styles. They are retained only as a complete set that preserves
@@ -520,13 +530,26 @@ For Noto Sans Thai 16, distributed-edges, portrait 480×800, Thai Justify, track
 | Backing | Load calls / bytes | BW calls / bytes | Each gray plane calls / bytes |
 | --- | ---: | ---: | ---: |
 | Resident | 2 / 56,878 | 0 / 0 | 0 / 0 |
-| Indexed cache | 256 / 129,596 | 108 / 55,296 | 108 / 55,296 |
-| Fully paged | 226 / 114,236 | 362 / 185,344 | 362 / 185,344 |
+| Indexed cache | 256 / 129,596 | 0 / 0 | 0 / 0 |
+| Fully paged | 226 / 114,236 | 0 / 0 | 0 / 0 |
 
 Draw columns exclude prewarm, cache replay and diagnostic renders. These are HAL
-requests, not physical SD transactions or device timings. A fitting repeated
-cluster adds zero reads after warmup; ordinary mixed text need not fit eight blocks.
-Simulated heap samples do not establish usable device headroom.
+requests, not physical SD transactions or device timings. A repeated cluster adds
+zero reads while its recipe stays resolved; these two pages' clusters all do, so
+layout and prewarm pay the reads and drawing pays none. Simulated heap samples do
+not establish usable device headroom.
+
+The UI-fallback sizes are always fully paged, and a list screen measures and
+draws every visible row on each repaint. Replaying one File Browser repaint (8 pt
+fallback, 380 px label, two-line names) through the production renderer and
+FreeInkUI text layout gives these companion HAL requests per repaint, for
+THCraft-Sarabun / THCraft-NotoSerifThai:
+
+| Page | Blocks only | With resolved recipes |
+| --- | ---: | ---: |
+| 10 short names | 616 / 761 | 0 / 0 |
+| 8 long names with spaces | 6,216 / 7,009 | 0 / 12 |
+| 8 long names without spaces | 39,585 / 44,613 | 35 / 36 |
 
 Physical acceptance remains unverified: no reader was enumerated by `pio device
 list`, and no flashing was performed. On X3 and X4, plus a PSRAM comparison when
