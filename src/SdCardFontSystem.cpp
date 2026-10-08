@@ -132,12 +132,13 @@ void SdCardFontSystem::begin(GfxRenderer& renderer, const bool residentThaiShape
   LOG_DBG("SDFS", "SD font system ready (%d families discovered)", registry_.getFamilyCount());
 }
 
-void SdCardFontSystem::dropResidentThaiShape(GfxRenderer& renderer) {
+bool SdCardFontSystem::dropResidentThaiShape(GfxRenderer& renderer) {
   manager_.setResidentThaiShape(false);
-  if (!manager_.holdsResidentThaiShape()) return;
+  if (!manager_.holdsResidentThaiShape()) return false;
   LOG_DBG("SDFS", "Reloading %s with SD-backed shaping", manager_.currentFamilyName().c_str());
   manager_.unloadAll(renderer);
   ensureLoadedInternal(renderer, /*preserveSelection=*/true);
+  return true;
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {

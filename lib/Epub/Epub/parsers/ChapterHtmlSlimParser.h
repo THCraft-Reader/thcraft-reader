@@ -82,6 +82,7 @@ class ChapterHtmlSlimParser {
   uint32_t scalarCarryVisibleOffset = 0;
 #ifdef CROSSPOINT_PARSER_TEST
   bool failThaiAllocation = false;
+  bool failTextBlockAllocation = false;
   const thai::DictionaryView* thaiDictionaryOverride = nullptr;
 #endif
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
@@ -215,6 +216,10 @@ class ChapterHtmlSlimParser {
 
   void updateEffectiveInlineStyle();
   void startNewTextBlock(const BlockStyle& blockStyle);
+  // Contiguous heap required before a ParsedText is constructed.
+  static constexpr size_t TEXT_BLOCK_MIN_CONTIGUOUS = 4 * 1024;
+  // Null on OOM; never aborts.
+  std::unique_ptr<ParsedText> makeTextBlock(const BlockStyle& blockStyle);
   void flushPendingAnchor();
   void flushPartWordBuffer();
   EpdFontFamily::Style currentTextStyle() const;

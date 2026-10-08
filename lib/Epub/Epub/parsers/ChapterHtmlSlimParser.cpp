@@ -752,20 +752,29 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
   flushPendingAnchor();
-  currentTextBlock =
-      makeUniqueNoThrow<ParsedText>(hyphenationEnabled, focusReadingEnabled, blockStyle, paragraphIndentSpaces);
-  if (!currentTextBlock) {
-    // Evict rebuildable caches and retry once before failing the build.
-    freeink::MemoryManager::instance().ensureFree(4 * 1024);
-    currentTextBlock =
-        makeUniqueNoThrow<ParsedText>(hyphenationEnabled, focusReadingEnabled, blockStyle, paragraphIndentSpaces);
-  }
+  currentTextBlock = makeTextBlock(blockStyle);
   if (!currentTextBlock) {
     LOG_ERR("EHP", "OOM: ParsedText");
     layoutOom = true;  // parseStep() turns this into ParseStatus::Error
   }
   wordsExtractedInBlock = 0;
   listItemBulletOnly = false;
+}
+
+std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeTextBlock(const BlockStyle& blockStyle) {
+#ifdef CROSSPOINT_PARSER_TEST
+  if (failTextBlockAllocation) return nullptr;
+#endif
+  // ParsedText's deque members allocate inside its constructor through throwing
+  // new, which aborts under -fno-exceptions, so admit on a contiguous probe.
+  const auto contiguous = [] { return makeUniqueNoThrow<uint8_t[]>(TEXT_BLOCK_MIN_CONTIGUOUS) != nullptr; };
+  if (!contiguous()) {
+    // Evict rebuildable caches and retry once. ensureFree() compares total free
+    // bytes and cannot see a fragmented heap.
+    freeink::MemoryManager::instance().clearCaches();
+    if (!contiguous()) return nullptr;
+  }
+  return makeUniqueNoThrow<ParsedText>(hyphenationEnabled, focusReadingEnabled, blockStyle, paragraphIndentSpaces);
 }
 
 void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
@@ -1249,8 +1258,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       tableCellBlockStyle.isRtl = cssStyle.direction == CssTextDirection::Rtl;
     }
 
-    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
-                                                           tableCellBlockStyle, self->paragraphIndentSpaces);
+    self->currentTextBlock = self->makeTextBlock(tableCellBlockStyle);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: table cell");
       self->skipUntilDepth = self->depth;
@@ -1962,8 +1970,7 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   if (!self->currentTextBlock) {
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
-    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
-                                                           flowStyle, self->paragraphIndentSpaces);
+    self->currentTextBlock = self->makeTextBlock(flowStyle);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block for character data");
       return;
@@ -2209,8 +2216,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
-    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
-                                                           flowStyle, self->paragraphIndentSpaces);
+    self->currentTextBlock = self->makeTextBlock(flowStyle);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block after table");
     }

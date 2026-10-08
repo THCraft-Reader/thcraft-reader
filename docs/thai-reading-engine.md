@@ -409,6 +409,12 @@ sizes and styles. Minimum cached admission depends on actual nullable allocation
 not the 50 KiB reserve. Missing, corrupt, incompatible or genuinely unaffordable
 companions leave the native font usable.
 
+The reserve is measured at font load, before a book's working set exists. The
+EPUB reader therefore demotes a resident companion once per boot: when a page
+render cannot allocate its grayscale scratch, or internal heap is below the
+background build floors (32 KiB free, 16 KiB largest block) at the start of a
+render, it reloads the family SD-backed and logs the heap before and after.
+
 The shared object contains eight 512-byte MRU blocks, two complete-cluster
 stages and 128 resolved recipes. Its compiled size is **12,604 bytes on C3/S3**
 and **13,664 bytes on macOS arm64**, enforced below 14 KiB by a static assertion.

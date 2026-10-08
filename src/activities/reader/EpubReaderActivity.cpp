@@ -338,11 +338,30 @@ void EpubReaderActivity::openReaderMenu() {
   });
 }
 
+bool EpubReaderActivity::heapBelowBuildFloors() const {
+  return ESP.getFreeHeap() < BACKGROUND_BUILD_MIN_FREE_HEAP || ESP.getMaxAllocHeap() < BACKGROUND_BUILD_MIN_MAX_ALLOC;
+}
+
 bool EpubReaderActivity::buildTickHeapGate() {
-  const size_t freeHeap = ESP.getFreeHeap();
-  const size_t maxBlock = ESP.getMaxAllocHeap();
-  buildHeapPaused = freeHeap < BACKGROUND_BUILD_MIN_FREE_HEAP || maxBlock < BACKGROUND_BUILD_MIN_MAX_ALLOC;
+  buildHeapPaused = heapBelowBuildFloors();
   return !buildHeapPaused;
+}
+
+void EpubReaderActivity::shedResidentThaiShapeIfStarved() {
+  const bool starved = renderHeapStarved || heapBelowBuildFloors();
+  renderHeapStarved = false;
+  if (!starved) return;
+  const int fontId = SETTINGS.getReaderFontId();
+  const unsigned freeBefore = ESP.getFreeHeap();
+  const unsigned maxBlockBefore = ESP.getMaxAllocHeap();
+  if (!sdFontSystem.dropResidentThaiShape(renderer)) return;
+  LOG_ERR("ERS", "Heap starved (free=%u max_block=%u); Thai shape now SD-backed (free=%u max_block=%u)", freeBefore,
+          maxBlockBefore, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  if (section && SETTINGS.getReaderFontId() != fontId) {
+    // The section and any paused build are bound to the font identity that did not come back.
+    LOG_ERR("ERS", "Reader font not restored after Thai shape reload");
+    resetSectionForRelayout();
+  }
 }
 
 void EpubReaderActivity::showBuildPopup(GfxRenderer& renderer, int& pagesUntilFullRefresh) {
@@ -1361,6 +1380,9 @@ void EpubReaderActivity::renderBook() {
   buildViewportWidth = viewportWidth;
   buildViewportHeight = viewportHeight;
 
+  // Before the render spec: a reload that loses the reader font changes it.
+  shedResidentThaiShapeIfStarved();
+
   const ReaderRenderSpec renderSpec = SETTINGS.readerRenderSpec(viewportWidth, viewportHeight);
 
   if (!section) {
@@ -1938,6 +1960,7 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.waitRefreshComplete();
       if (!scratch) {
         LOG_ERR("ERS", "OOM: grayscale strip scratch (%d bytes); skipping AA this page", gwBytes * STRIP_ROWS);
+        renderHeapStarved = true;
         if (overlapRefresh || combinedGrayscaleBase) {
           // The BW refresh ran the shadow-free async path, so controller RAM's
           // differential baseline was never rebuilt. Even with AA skipped it must

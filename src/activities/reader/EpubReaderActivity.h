@@ -134,6 +134,12 @@ class EpubReaderActivity final : public ReaderActivity {
   bool backgroundBuildWanted() const;
   bool buildTickHeapGate();
   bool buildHeapPaused = false;
+  bool heapBelowBuildFloors() const;
+  // Latched when a page render could not allocate its grayscale scratch.
+  bool renderHeapStarved = false;
+  // Reloads the reader font with SD-backed Thai shaping when the working set no
+  // longer fits beside the resident companion. Requires the render lock.
+  void shedResidentThaiShapeIfStarved();
   static constexpr size_t RENDER_MIN_FREE_HEAP = 24 * 1024;
   // Below either floor, an uncached page image is decoded with the SD fonts unloaded.
   // Sized for the PNG decoder (~44 KB object behind a 60 KB free-heap gate); JPEG needs less.
