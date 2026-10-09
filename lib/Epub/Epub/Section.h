@@ -1,5 +1,6 @@
 #pragma once
 #include <HalStorage.h>
+
 #include <functional>
 #include <memory>
 #include <optional>
@@ -101,9 +102,11 @@ class Section {
   //   if (!startBuild(...)) fail;
   //   each tick: buildSomeMore(N); render up to pageCount; when isBuildComplete() stop.
   bool startBuild(const ReaderRenderSpec& spec, const std::function<void()>& popupFn = nullptr);
-  // Lay out up to maxPages more pages (maxPages <= 0 = build to completion). Returns
-  // false on error (the build is abandoned). Sets isBuildComplete() when finished.
-  bool buildSomeMore(int maxPages);
+  // Lay out up to maxPages more pages (maxPages <= 0 = build to completion). A non-zero
+  // budgetMs also returns after the parse step that crosses it, however few pages that
+  // laid out. Returns false on error (the build is abandoned). Sets isBuildComplete()
+  // when finished.
+  bool buildSomeMore(int maxPages, uint32_t budgetMs = 0);
   bool isBuilding() const { return static_cast<bool>(build_); }
   bool isBuildComplete() const { return buildComplete_; }
   // Best-known total page count: the exact pageCount once finalized, or a smoothed byte-based

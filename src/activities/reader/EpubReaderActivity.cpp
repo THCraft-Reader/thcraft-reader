@@ -450,30 +450,6 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  constexpr unsigned long IDLE_PREWARM_DEBOUNCE_MS = 400;
-  {
-    RenderLock lock(RenderLock::Mode::Try);
-    if (lock.ownsLock() && section && !section->isBuilding() && renderer.hasFrameBuffer() &&
-        lastRenderCompleteMs != 0 && millis() - lastRenderCompleteMs > IDLE_PREWARM_DEBOUNCE_MS &&
-        ESP.getFreeHeap() > RENDER_MIN_FREE_HEAP && ESP.getMaxAllocHeap() > BACKGROUND_BUILD_MIN_MAX_ALLOC &&
-        (idlePrewarmSpine != currentSpineIndex || idlePrewarmPage != section->currentPage)) {
-      idlePrewarmSpine = currentSpineIndex;
-      idlePrewarmPage = section->currentPage;
-      const int nextPage = section->currentPage + 1;
-      if (nextPage < static_cast<int>(section->pageCount)) {
-        if (const auto p = section->loadPage(nextPage)) {
-          if (auto* fcm = renderer.getFontCacheManager()) {
-            const auto t0 = millis();
-            auto scope = fcm->createPrewarmScope();
-            p->render(renderer, SETTINGS.getReaderFontId(), 0, 0);
-            scope.endScanAndPrewarm();
-            LOG_DBG("ERS", "Idle prewarm: page %d in %lums", nextPage, millis() - t0);
-          }
-        }
-      }
-    }
-  }
-
   {
     RenderLock lock(RenderLock::Mode::Try);
     if (lock.ownsLock() && section && !section->isBuilding() && section->isPartial() && buildViewportWidth > 0 &&
@@ -497,7 +473,7 @@ void EpubReaderActivity::loop() {
       // A build step can lend the framebuffer (image probes), which hands it back white while the
       // panel still shows the page; redraw so nothing is later painted over the blank buffer.
       const uint32_t loansBefore = renderer.frameBufferLoanCount();
-      const bool built = section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK);
+      const bool built = section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK, BACKGROUND_BUILD_TICK_BUDGET_MS);
       if (renderer.frameBufferLoanCount() != loansBefore) {
         pageBufferStale = true;
         requestUpdate();
@@ -1291,6 +1267,29 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     return;
   }
   ReaderActivity::render(std::move(lock));
+  prewarmNextPage();
+}
+
+void EpubReaderActivity::prewarmNextPage() {
+  if (!nextPagePrewarmDue) return;
+  nextPagePrewarmDue = false;
+  if (!section || section->isBuilding() || !renderer.hasFrameBuffer() || ESP.getFreeHeap() <= RENDER_MIN_FREE_HEAP ||
+      ESP.getMaxAllocHeap() <= BACKGROUND_BUILD_MIN_MAX_ALLOC ||
+      (prewarmedSpine == currentSpineIndex && prewarmedPage == section->currentPage)) {
+    return;
+  }
+  prewarmedSpine = currentSpineIndex;
+  prewarmedPage = section->currentPage;
+  const int nextPage = section->currentPage + 1;
+  if (nextPage >= static_cast<int>(section->pageCount)) return;
+  const auto p = section->loadPage(nextPage);
+  auto* fcm = renderer.getFontCacheManager();
+  if (!p || !fcm) return;
+  const auto t0 = millis();
+  auto scope = fcm->createPrewarmScope();
+  p->render(renderer, SETTINGS.getReaderFontId(), 0, 0);
+  scope.endScanAndPrewarm();
+  LOG_DBG("ERS", "Next-page prewarm: page %d in %lums", nextPage, millis() - t0);
 }
 
 bool EpubReaderActivity::isAtEndOfBook() const { return epub && currentSpineIndex >= epub->getSpineItemsCount(); }
@@ -1647,7 +1646,7 @@ void EpubReaderActivity::renderBook() {
       return;
     }
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
-    lastRenderCompleteMs = millis();
+    nextPagePrewarmDue = true;
     markPageRendered();
 #if THAI_ENGINE_STATS
     if (thaiLastRenderedSpine != currentSpineIndex || thaiLastRenderedPage != section->currentPage) {

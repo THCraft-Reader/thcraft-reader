@@ -46,9 +46,12 @@ class EpubReaderActivity final : public ReaderActivity {
   bool showDictionaryMessage = false;
   unsigned long dictionaryMessageTime = 0UL;
   bool currentPageBookmarked = false;
-  int idlePrewarmSpine = -1;
-  int idlePrewarmPage = -1;
-  unsigned long lastRenderCompleteMs = 0;
+  // Next-page glyph prewarm. Runs on the render task right after the page it
+  // follows, so its SD reads never stall the loop task's input polling.
+  int prewarmedSpine = -1;
+  int prewarmedPage = -1;
+  bool nextPagePrewarmDue = false;  // set when a page is drawn; render task only
+  void prewarmNextPage();
 #if THAI_ENGINE_STATS
   int thaiLastRenderedSpine = -1;
   int thaiLastRenderedPage = -1;
@@ -128,6 +131,8 @@ class EpubReaderActivity final : public ReaderActivity {
 
   static constexpr int BUILD_PAGES_PER_CHUNK = 8;
   static constexpr int BACKGROUND_BUILD_PAGES_PER_TICK = 2;
+  // Caps one loop-task build tick so touch is still sampled several times within a tap.
+  static constexpr uint32_t BACKGROUND_BUILD_TICK_BUDGET_MS = 15;
   static constexpr size_t BACKGROUND_BUILD_MIN_FREE_HEAP = 32 * 1024;
   static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 16 * 1024;
   // Requires the render lock; heap admission is checked separately by the build tick.
