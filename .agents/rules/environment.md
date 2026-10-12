@@ -6,6 +6,10 @@ Use the session's `uname -s`: `MINGW64_NT-*` is Windows Git Bash,
 `Linux` is Linux/WSL, and `Darwin` is macOS. Select host-compatible commands.
 Formatting follows the [wrapper rule](testing-debugging.md#code-quality).
 
+On Windows, run `pio` with `PYTHONUTF8=1 PYTHONIOENCODING=utf-8`; without them
+a non-UTF-8 console code page hangs the build. See
+[building on Windows](../../docs/contributing/getting-started.md#building-on-windows).
+
 ### Build in an existing environment
 
 Use installed tools/packages and preserve local configuration/build caches.

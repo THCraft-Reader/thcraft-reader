@@ -74,6 +74,31 @@ Keep the installed tools, packages, and build caches. The setup commands below
 apply only to a new environment or an identified missing or incompatible
 dependency; they are not steps to repeat before each build.
 
+### Building on Windows
+
+Set UTF-8 output before running `pio`. The translation generator prints native
+language names during the build. A console code page that cannot encode them
+(for example cp874 or cp1252) stops PlatformIO's output reader with
+`UnicodeEncodeError`. The build then hangs: no compiler runs and
+`.pio/build/<environment>` stays empty.
+
+```sh
+# Git Bash
+PYTHONUTF8=1 PYTHONIOENCODING=utf-8 pio run -e default
+```
+
+```powershell
+# PowerShell
+$env:PYTHONUTF8 = '1'; $env:PYTHONIOENCODING = 'utf-8'; pio run -e default
+```
+
+If a build already hangs this way, stop the `pio` and `python` processes before
+running it again.
+
+Three host tests do not run under MSVC: `CoverDecodeScopeTest` and
+`ProtectedPathsTest` include the POSIX header `<strings.h>`, and
+`TrustedTimeTimezone` needs a `c++` compiler on `PATH`. Use WSL or CI for those.
+
 ## First-time toolchain setup
 
 Use the pioarduino Core revision installed by
