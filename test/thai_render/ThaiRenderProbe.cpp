@@ -652,7 +652,8 @@ class Probe {
         const uint16_t expansion = block.thaiExpansion(i);
         const int observedMaximum = observeAddedGap(r, measuredText, style, baseDir, tracking, expansion);
         TextBlock isolated({block.wordText(i)}, {block.wordXpos(i)}, {style}, {block.focusBoundary(i)},
-                           {block.focusSuffixX(i)}, block.getBlockStyle(), {}, {}, std::span(&expansion, 1));
+                           {block.focusSuffixX(i)}, block.getBlockStyle(), {}, {}, {}, UINT16_MAX,
+                           std::span(&expansion, 1));
         r.clearScreen();
         isolated.render(r, FONT_ID, line.xPos, line.yPos + block.getRubyShift(r.getFontAscenderSize(FONT_ID)));
         report << "{\"text\":" << json(block.wordText(i)) << ",\"x\":" << x << ",\"y\":" << y

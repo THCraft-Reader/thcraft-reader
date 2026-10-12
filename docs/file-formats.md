@@ -90,6 +90,26 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 56
+
+Combines upstream's clipping metadata (upstream versions 53-55) with the Thai
+TextBlock flags. Each TextBlock header adds a uint16 `paragraphStartWord` after
+`textBytes`. It is the visual index of the paragraph's first logical word, or
+`UINT16_MAX` for a continuation line. Clipping uses this marker independently of
+source-offset gaps.
+
+Each TextBlock arena starts with one 8-byte source range per word (two uint32
+chapter-visible Unicode-codepoint offsets, start inclusive and end exclusive),
+ahead of the 16-bit arrays and the optional `thaiExtraPixels`. Ranges follow
+words through BiDi ordering, line wrapping, and Thai token splits, and include
+codepoints absorbed by NFC composition. The high bit of each word's style byte
+marks a discretionary hyphen, so clipping can remove it independently of source
+length.
+
+Version 55 and older completed and partial section caches rebuild
+automatically; book metadata and reading progress are kept. The derived partial
+version is `0xFE - (56 - 28)` = 226.
+
 ### Version 55
 
 The serialized layout is unchanged. Missing full-block (`U+2588`) and black-square
@@ -578,3 +598,25 @@ make a real book disappear.
 
 `selfSize` is the expected file size. Comparing it against the real one is a free
 truncation guard: a build cut short by a power failure cannot pass.
+
+## Clipping store (`/.crosspoint/clippings/epub_<path-hash>.bin`)
+
+Version 4 retains the version 3 header and page-local range fields. After each
+record's layout signature it stores `startOffset` and `endOffset` (uint32 chapter
+codepoint range, end exclusive; UINT32_MAX means unavailable), `syncRevision`
+(uint64), `pendingUpload` (one byte), and a 65-byte NUL-terminated sync ID. The
+chapter title, text length, and text follow. Versions 1–3 remain readable.
+
+Stable IDs are saved before upload. A sibling `.deleted` file stores fixed
+65-byte IDs awaiting server acknowledgement. Deletions are queued before the
+local record is removed and retried on the next enabled manual sync. A `.bak`
+file is recovered if power interrupted replacement of the main store.
+
+Clipping header strings are limited to 4 KiB on both reads and writes. A failed
+load leaves no usable index and disables writes until a successful load. The
+index is allocated with checked, bounded growth and released on unload.
+
+Book moves rename the store and its `.deleted` journal (plus recovery sidecars)
+together. The stored source path is informational and is refreshed on the next
+save; the current file path selects the store. Local book deletion cleans up all
+of these sidecars but preserves the independent `My Clippings.txt` export.

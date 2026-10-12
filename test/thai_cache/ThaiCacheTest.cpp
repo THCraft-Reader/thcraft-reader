@@ -399,7 +399,7 @@ TEST_P(ThaiSectionCacheTest, TextBlockExpansionRoundTripsAlongsideOptionalFocusA
   std::vector<uint16_t> budgets = {0, 2, 0};
   BlockStyle style;
   style.alignment = CssTextAlign::ThaiJustify;
-  TextBlock block(words, positions, styles, focus, suffix, style, {}, {}, budgets);
+  TextBlock block(words, positions, styles, focus, suffix, style, {}, {}, {}, UINT16_MAX, budgets);
   ASSERT_TRUE(block.valid());
   budgets[1] = 99;  // The arena owns its metadata, not a borrowed layout scratch span.
   EXPECT_EQ(block.thaiExpansion(1), 2);
@@ -461,7 +461,8 @@ TEST_P(ThaiSectionCacheTest, PageRoundTripPreservesExpandedWordsAndLinkHitExtent
   Page page;
   page.elements.push_back(std::make_unique<PageLine>(
       std::make_unique<TextBlock>(words, positions, styles, std::vector<uint8_t>{}, std::vector<uint16_t>{}, style,
-                                  std::vector<std::string>{}, std::vector<TextBlock::LinkSpan>{}, budgets),
+                                  std::vector<std::string>{}, std::vector<TextBlock::LinkSpan>{},
+                                  std::vector<TextBlock::SourceRange>{}, UINT16_MAX, budgets),
       7, 13));
   ASSERT_TRUE(page.addLink("#target", 18, 13, 18, 16));
   HalFile file;
@@ -501,7 +502,7 @@ TEST_P(ThaiSectionCacheTest, TextBlockZeroExpansionIsAbsentAndMismatchedSpansCan
   const std::vector<EpdFontFamily::Style> styles(2, EpdFontFamily::REGULAR);
   const std::vector<uint16_t> zeros = {0, 0};
   TextBlock absent(words, positions, styles, {}, {});
-  TextBlock zero(words, positions, styles, {}, {}, BlockStyle(), {}, {}, zeros);
+  TextBlock zero(words, positions, styles, {}, {}, BlockStyle(), {}, {}, {}, UINT16_MAX, zeros);
   ASSERT_TRUE(absent.valid());
   ASSERT_TRUE(zero.valid());
   const auto absentPath = root / "absent.bin";
@@ -526,7 +527,7 @@ TEST_P(ThaiSectionCacheTest, TextBlockZeroExpansionIsAbsentAndMismatchedSpansCan
     EXPECT_EQ(absent.thaiExpansion(i), 0);
   }
   for (const auto& mismatch : {std::vector<uint16_t>{0}, std::vector<uint16_t>{2, 0, 0}}) {
-    TextBlock invalid(words, positions, styles, {}, {}, BlockStyle(), {}, {}, mismatch);
+    TextBlock invalid(words, positions, styles, {}, {}, BlockStyle(), {}, {}, {}, UINT16_MAX, mismatch);
     EXPECT_FALSE(invalid.valid());
     EXPECT_TRUE(invalid.isEmpty());
     ASSERT_TRUE(file.open((root / "invalid.bin").string().c_str(), "w+b"));
