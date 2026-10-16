@@ -70,7 +70,8 @@ namespace {
 // v54: Preserve paragraph continuity and top spacing across soft flushes.
 // v55: Missing full-block and black-square symbols now have visible widths.
 // v56: Upstream per-word source ranges, discretionary-hyphen flag, and paragraph-start word for clipping.
-constexpr uint8_t SECTION_FILE_VERSION = 56;
+// v57: Upstream hyphen and dash token splitting in standard reading mode.
+constexpr uint8_t SECTION_FILE_VERSION = 57;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
