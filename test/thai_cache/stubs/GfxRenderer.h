@@ -9,6 +9,8 @@ namespace BidiUtils {
 enum class BidiBaseDir : signed char { AUTO = -1, LTR = 0, RTL = 1 };
 }
 
+enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 0x0A, Black = 0x10 };
+
 // Deterministic host metrics, not visual/font proof. Cache and layout remain real.
 class GfxRenderer {
  public:
@@ -28,6 +30,19 @@ class GfxRenderer {
   FontCacheManager* getFontCacheManager() const { return nullptr; }
   bool isFontCacheScanning() const { return false; }
   void drawLine(int, int, int, int, int, bool) const {}
+  void fillRect(int, int, int, int, bool = true) const {}
+  void fillRectDither(int, int, int, int, Color) const {}
+  int drawScaledCodepoint(int, uint32_t, EpdFontFamily::Style, int, int, int scale256) const {
+    return 8 * scale256 / 256;
+  }
+  bool getCodepointMetrics(int, uint32_t, EpdFontFamily::Style, int32_t& advanceFP, int& top) const {
+    advanceFP = 8 << 4;
+    top = 10;
+    return true;
+  }
+  // No sized variants: every word measures in the section font.
+  int resolveFontVariant(int, float) const { return 0; }
+  bool ensureFontLoaded(int) const { return true; }
   void drawText(int, int, int, const char*, bool, EpdFontFamily::Style,
                 BidiUtils::BidiBaseDir = BidiUtils::BidiBaseDir::AUTO, int8_t = 0, uint16_t = 0) const {}
   void drawTextRotated90CW(int, int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR,
@@ -73,7 +88,8 @@ class GfxRenderer {
   }
   int getSpaceAdvance(int, uint32_t, uint32_t, EpdFontFamily::Style) const { return 4; }
   bool isSdCardFont(int) const { return false; }
-  bool ensureSdCardFontReady(int, const char* const*, const size_t*, size_t, bool, bool, uint8_t = 0x0F,
+  void ensureSdCardFontReady(int, const char*, uint8_t = 0x0F) const {}
+  bool ensureSdCardFontReady(int, const char* const*, const size_t*, size_t, bool, bool, uint8_t = 0x0F, bool = false,
                              bool = false) const {
     return true;
   }

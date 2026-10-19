@@ -29,7 +29,7 @@ int SdCardFontManager::computeFontId(uint32_t contentHash, const char* familyNam
 }
 
 int SdCardFontManager::loadFile(const SdCardFontFileInfo& file, const char* familyName, GfxRenderer& renderer,
-                                const bool residentThaiShape) {
+                                const bool residentThaiShape, const int fontIdOverride) {
   auto* font = new (std::nothrow) SdCardFont();
   if (!font) {
     LOG_ERR("SDMGR", "Failed to allocate SdCardFont for %s", file.path.c_str());
@@ -42,7 +42,7 @@ int SdCardFontManager::loadFile(const SdCardFontFileInfo& file, const char* fami
     return 0;
   }
 
-  int fontId = computeFontId(font->contentHash(), familyName, file.pointSize);
+  int fontId = fontIdOverride != 0 ? fontIdOverride : computeFontId(font->contentHash(), familyName, file.pointSize);
   // Guard against collision with built-in font IDs (astronomically unlikely
   // with FNV-1a hashes, but provides a safety net)
   if (renderer.getFontMap().count(fontId) != 0) {
@@ -95,6 +95,23 @@ int SdCardFontManager::loadFamilyExtraSize(const SdCardFontFamilyInfo& family, G
   // UI fallbacks shape a few short labels: SD-backed shaping leaves the
   // companion tables of every extra size out of the heap.
   return loadFile(*file, family.name.c_str(), renderer, /*residentThaiShape=*/false);
+}
+
+bool SdCardFontManager::loadFamilyVariant(const SdCardFontFamilyInfo& family, GfxRenderer& renderer,
+                                          const uint8_t pointSize, const int fontId) {
+  const SdCardFontFileInfo* file = family.findFile(pointSize);
+  // Sized variants mostly draw headings and short runs; keep their shaping tables on SD.
+  return file && loadFile(*file, family.name.c_str(), renderer, /*residentThaiShape=*/false, fontId) != 0;
+}
+
+void SdCardFontManager::unloadFont(GfxRenderer& renderer, const int fontId) {
+  for (auto it = loaded_.begin(); it != loaded_.end(); ++it) {
+    if (it->fontId != fontId) continue;
+    renderer.removeFont(fontId);
+    delete it->font;
+    loaded_.erase(it);
+    return;
+  }
 }
 
 void SdCardFontManager::unloadAll(GfxRenderer& renderer) {

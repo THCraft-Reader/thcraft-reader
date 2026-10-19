@@ -3,6 +3,7 @@
 #include <EpdFontFamily.h>
 #include <ThaiLineBreaker.h>
 
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -56,6 +57,15 @@ class ParsedText {
   // Zero means plain text; non-zero indexes linkTargets. Kept at one byte per
   // token and discarded after layout, never added to the page-cache TextBlock.
   std::vector<uint8_t> wordLinkIds;
+  // Words sized by an inline font-size span: a slot per word into sizeSlotScales (absolute
+  // multiples of the reader's body size). Slot 0 follows the block's own size; the parser
+  // resolves each slot's font before layout.
+  std::vector<uint8_t> wordSizeSlots;
+  static constexpr uint8_t MAX_SIZE_SLOTS = TextBlock::MAX_WORD_FONTS + 1;
+  float sizeSlotScales[MAX_SIZE_SLOTS] = {1.0f};
+  int32_t sizeSlotFontIds[MAX_SIZE_SLOTS] = {};
+  uint8_t sizeSlotCount = 1;
+  int wordFontId(size_t wordIndex, int blockFontId) const;
   std::vector<std::string> linkTargets;
   // Zero-based visible Unicode-codepoint offsets in the spine body, stored as
   // uint16_t deltas from a shared base to keep this layout-only metadata small.
@@ -98,7 +108,11 @@ class ParsedText {
   bool thaiJustificationMetrics = false;
   std::unique_ptr<char[]> thaiPrefixScratch;
   size_t thaiPrefixCapacity = 0;
+  int linesAfterCurrent = -1;
   bool firstLineConsumed = false;
+  // Separate from firstLineConsumed: a <br> line suppresses the indent but still starts a
+  // new clipping paragraph.
+  bool paragraphStartEmitted = false;
   std::vector<std::string> reorderedWordsScratch;
   std::vector<EpdFontFamily::Style> reorderedStylesScratch;
   std::vector<uint16_t> reorderedWidthsScratch;
@@ -113,9 +127,10 @@ class ParsedText {
   void initializeThaiRanks();
   void setTokenBoundary(size_t index, thai::BreakKind before);
   void appendToken(std::string_view token, EpdFontFamily::Style style, bool continues, bool noSpaceBefore,
-                   uint8_t focusBoundary, uint32_t visibleOffset, uint8_t linkId, bool padRuby);
+                   uint8_t focusBoundary, uint32_t visibleOffset, uint8_t linkId, bool padRuby, uint8_t sizeSlot);
   void addWordImpl(std::string word, EpdFontFamily::Style style, bool underline, bool attachToPrevious,
-                   uint32_t visibleOffset, uint8_t linkId, const thai::BreakKind* before);
+                   uint32_t visibleOffset, uint8_t linkId, uint8_t sizeSlot, bool noSpaceBefore,
+                   const thai::BreakKind* before);
   uint32_t visibleOffsetBaseAt(size_t wordIndex) const;
   uint32_t visibleOffsetAt(size_t wordIndex) const;
   uint32_t sourceOffsetAfter(uint32_t start, uint32_t renderedLength) const;
@@ -166,22 +181,26 @@ class ParsedText {
   ~ParsedText() = default;
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
-               uint32_t visibleTextOffset = 0, uint8_t linkId = 0);
+               uint32_t visibleTextOffset = 0, uint8_t linkId = 0, uint8_t sizeSlot = 0, bool noSpaceBefore = false);
   void addWordWithBoundary(std::string word, EpdFontFamily::Style style, bool underline, thai::BreakKind before,
-                           uint32_t visibleOffset, uint8_t linkId);
+                           uint32_t visibleOffset, uint8_t linkId, uint8_t sizeSlot = 0);
   void addAnalyzedToken(std::string_view token, EpdFontFamily::Style style, thai::BreakKind before,
-                        uint32_t visibleOffset, uint8_t linkId);
+                        uint32_t visibleOffset, uint8_t linkId, uint8_t sizeSlot = 0);
   uint8_t addLinkTarget(const char* href);
   bool linkTargetMatches(uint8_t linkId, const char* href) const;
   void setRubyForWordAt(size_t index, const std::string& ruby);
   void setRubyGroupAt(size_t startIndex, size_t count, const std::string& ruby);
+  // The word's renderer style: stored flags removed, small caps restored from its size slot.
   EpdFontFamily::Style getWordStyleAt(size_t index) const {
-    return index < wordStyles.size()
-               ? static_cast<EpdFontFamily::Style>(wordStyles[index] & ~TextBlock::DISCRETIONARY_HYPHEN_FLAG)
-               : EpdFontFamily::REGULAR;
+    if (index >= wordStyles.size()) return EpdFontFamily::REGULAR;
+    const bool smallCaps = index < wordSizeSlots.size() && (wordSizeSlots[index] & TextBlock::SMALL_CAPS_SLOT_FLAG);
+    return static_cast<EpdFontFamily::Style>((wordStyles[index] & ~TextBlock::DISCRETIONARY_HYPHEN_FLAG) |
+                                             (smallCaps ? EpdFontFamily::SMALL_CAPS : 0));
   }
   std::string getRubyTextAt(size_t index) const { return index < rubyTexts.size() ? rubyTexts[index] : std::string(); }
   void ensureRubyCapacity();
+  void suppressFirstLineIndent() { firstLineConsumed = true; }
+  void resetFirstLineIndent() { firstLineConsumed = paragraphStartEmitted = false; }
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
@@ -189,8 +208,16 @@ class ParsedText {
   // True once any word was dropped because the text arena could not allocate.
   // Callers must treat the block as incomplete and fail the section build.
   bool hadDroppedWords() const { return droppedWords; }
+  // While a line is being handed to layoutAndExtractLines' callback: how many lines of the
+  // paragraph follow it, or -1 when the rest of the paragraph is not laid out yet.
+  int linesAfterCurrentLine() const { return linesAfterCurrent; }
+  // Slot for words at an absolute size; reuses a matching slot, or the nearest once all are taken.
+  uint8_t sizeSlotFor(float scale);
+  uint8_t sizeSlotsInUse() const { return sizeSlotCount; }
+  float sizeSlotScale(uint8_t slot) const { return sizeSlotScales[slot]; }
+  void setSizeSlotFontId(uint8_t slot, int32_t fontId) { sizeSlotFontIds[slot] = fontId; }
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
-                             bool includeLastLine = true, int8_t characterSpacing = 0,
-                             uint8_t wordSpacingPercent = 100);
+                             bool includeLastLine = true, int8_t characterSpacing = 0, uint8_t wordSpacingPercent = 100,
+                             size_t maxLines = SIZE_MAX);
 };

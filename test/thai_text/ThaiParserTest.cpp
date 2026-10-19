@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -503,6 +505,58 @@ TEST(ThaiParserTest, ClosingPunctuationAndThaiSuffixUnitsRemainAttached) {
     EXPECT_TRUE(found->continues);
     EXPECT_FALSE(found->noSpace);
   }
+}
+
+TEST(ThaiParserTest, PreservedSpaceBeforeThaiAddsNoSecondGap) {
+  ParserSession session;
+  session.feed("<pre>ก ข");
+  const auto tokens = session.tokens();
+  ASSERT_EQ(joined(tokens), "ก ข");
+  const auto after = std::find_if(tokens.begin(), tokens.end(), [](const auto& token) { return token.text == "ข"; });
+  ASSERT_NE(after, tokens.end());
+  EXPECT_TRUE(after->noSpace);
+}
+
+TEST(ThaiParserTest, PendingThaiTextBlocksWholeParagraphFontSize) {
+  ParserSession session;
+  session.feed("<p>บท<span style=\"font-size: 2em\">หนึ่ง</span>");
+  EXPECT_FALSE(session.parser.inlineSize.valid);
+}
+
+TEST(ThaiParserTest, FirstLetterQuoteBeforeThaiStaysAttached) {
+  ParserSession session;
+  session.feed("<p>");
+  session.parser.dropCap.firstLetterPending = true;
+  session.feed(
+      "\xe2\x80\x9c\xe0\xb8\x9b\xe0\xb8\xa3\xe0\xb8\xb0\xe0\xb9\x80\xe0\xb8\x97\xe0\xb8\xa8<!--complete-text-->");
+  EXPECT_EQ(session.parser.dropCap.length, 0);
+  const auto tokens = session.tokens();
+  ASSERT_GE(tokens.size(), 2u);
+  EXPECT_EQ(tokens[0].text, "\xe2\x80\x9c");
+  EXPECT_TRUE(tokens[1].continues);
+  EXPECT_FALSE(tokens[1].noSpace);
+}
+
+TEST(ThaiParserTest, TablesWithThaiTextKeepEqualColumns) {
+  const auto measure = [](const std::string& markup) {
+    const auto path = std::filesystem::temp_directory_path() / "crosspoint-thai-table.xhtml";
+    {
+      std::ofstream output(path, std::ios::binary);
+      output << markup;
+    }
+    bool planned = false;
+    {
+      ParserSession session;
+      HalFile file;
+      EXPECT_TRUE(file.open(path.string().c_str(), "rb"));
+      ChapterHtmlSlimParser::TableColumnMeasure columns;
+      planned = session.parser.measureTableColumns(file, columns);
+    }
+    std::filesystem::remove(path);
+    return planned;
+  };
+  EXPECT_TRUE(measure("<table><tr><td>Name</td><td>Some longer text</td></tr></table>"));
+  EXPECT_FALSE(measure("<table><tr><td>ชื่อ</td><td>ข้อความภาษาไทยที่ยาว</td></tr></table>"));
 }
 
 TEST(ThaiParserTest, NonThaiControlsNeverAllocateThaiState) {

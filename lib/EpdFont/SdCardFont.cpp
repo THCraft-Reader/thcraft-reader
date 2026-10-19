@@ -1868,6 +1868,10 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
     // by the merge anyway. The renderer fast path tolerates missing entries
     // (a false getAdvance result); the slow path resolves those codepoints.
     if (advanceTableSize_[si] >= ADVANCE_CACHE_LIMIT) continue;
+    if (std::all_of(codepoints, codepoints + cpCount,
+                    [&](const uint32_t cp) { return advanceTableLookup(si, cp, nullptr); })) {
+      continue;
+    }
 
     // For each codepoint in `codepoints`, skip those already cached, then
     // resolve to a glyph index. Build a parallel array sorted by glyph index
@@ -1962,7 +1966,8 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
 
 int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens,
                                         const size_t segmentCount, const bool includeSpace, const bool includeHyphen,
-                                        uint8_t styleMask, const char* extraText, bool loadKernLig) {
+                                        uint8_t styleMask, const char* extraText, bool loadKernLig,
+                                        const bool includeSmallCaps) {
   if (!loaded_ || hasThaiShapeError()) return -1;
   styleMask = resolveStyleMask(styleMask);
   if (styleMask == 0) return 0;
@@ -1991,8 +1996,9 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
     }
   }
 
-  const uint32_t capacity =
-      metricCodepointCapacity(segments, segmentLens, segmentCount, styleMask, extraText, loadKernLig);
+  uint32_t capacity = metricCodepointCapacity(segments, segmentLens, segmentCount, styleMask, extraText, loadKernLig);
+  // Small caps also need the uppercase form of every collected codepoint.
+  if (includeSmallCaps) capacity = std::min<uint32_t>(MAX_UNIQUE_CODEPOINTS, capacity * 2);
   if (hasThaiShapeError()) return -1;
   // +2 reserved slots for space and hyphen injected after the main scan.
   auto scratch = makeUniqueNoThrow<uint32_t[]>(capacity + 2);
@@ -2018,6 +2024,19 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
   if (extraText && !hitCap) {
     hitCap = collectTextCodepoints(extraText, codepoints, cpCount, capacity, styleMask, true, loadKernLig);
     if (hasThaiShapeError()) return -1;
+  }
+  if (includeSmallCaps && !hitCap) {
+    const uint32_t sourceCount = cpCount;
+    for (uint32_t i = 0; i < sourceCount && !hitCap; ++i) {
+      const uint32_t upper = utf8SmallCapsUpper(codepoints[i]);
+      if (upper == codepoints[i] || std::find(codepoints, codepoints + cpCount, upper) != codepoints + cpCount)
+        continue;
+      if (cpCount == capacity) {
+        hitCap = true;
+      } else {
+        codepoints[cpCount++] = upper;
+      }
+    }
   }
   if (loadKernLig && !hitCap) {
     hitCap = completeLigatureCoverage(codepoints, cpCount, capacity, styleMask);

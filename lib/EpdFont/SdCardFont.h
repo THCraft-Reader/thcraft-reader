@@ -87,10 +87,11 @@ class SdCardFont {
   // loadKernLig prepares exact rendered metrics, including native ligature outputs.
   // Scratch is sized from emitted codepoints and possible ligature closure,
   // capped at 4096 main entries plus the two optional separator slots.
+  // includeSmallCaps also prepares uppercase codepoints for small caps, retaining the originals.
   // Returns -1 on requested kern/ligature preparation failure or codepoint-cap overflow.
   int buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
                               bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
-                              const char* extraText = nullptr, bool loadKernLig = false);
+                              const char* extraText = nullptr, bool loadKernLig = false, bool includeSmallCaps = false);
 
   // Look up advanceX for a codepoint from the advance table.
   // Returns false if absent; a cached zero-advance mark is a successful lookup.

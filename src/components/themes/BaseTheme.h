@@ -234,7 +234,6 @@ class BaseTheme {
   virtual ~BaseTheme() = default;
 
   // Component drawing methods
-  static freeink::ui::BitmapRef checkboxIcon(bool checked);
   static void setCheckboxRow(freeink::ui::ListItem& item, bool checked);
   // Dark artwork is counter-inverted; the caller must invert the final screen.
   static void drawMascotScreen(const GfxRenderer& renderer, const char* status, bool dark,

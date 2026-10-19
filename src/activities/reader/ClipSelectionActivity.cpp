@@ -122,18 +122,20 @@ bool ClipSelectionActivity::extractWords() {
       const bool thaiJustified = block->getBlockStyle().alignment == CssTextAlign::ThaiJustify;
       const size_t remaining = MAX_SELECTABLE_WORDS - lineStart;
       size_t rtlWordCount = 0;
-      const int rubyShift = block->getRubyShift(renderer.getFontAscenderSize(fontId));
+      const int lineFont = TextBlock::renderFontId(renderer, block->blockFontId(fontId), fontId);
+      const int rubyShift = block->getRubyShift(renderer.getFontAscenderSize(lineFont));
       for (uint16_t i = 0; i < block->wordCount(); ++i) {
         if (block->wordStartsParagraph(i)) paragraphStartPending = true;
         const char* text = block->wordText(i);
         if (!clippingText::hasVisibleText(text)) continue;
 
         const auto style = static_cast<EpdFontFamily::Style>(block->wordStyle(i) & ~EpdFontFamily::UNDERLINE);
+        const int wordFont = TextBlock::renderFontId(renderer, block->wordFontId(i, fontId), fontId);
         const uint16_t thaiExtraPixels = thaiJustified ? block->thaiExpansion(i) : 0;
-        int width = thaiJustified
-                        ? renderer.getTextAdvanceX(fontId, text, style, characterSpacing, BidiUtils::BidiBaseDir::AUTO,
-                                                   GfxRenderer::TextMeasureMode::Rendered, thaiExtraPixels)
-                        : renderer.getTextAdvanceX(fontId, text, style, characterSpacing);
+        int width = thaiJustified ? renderer.getTextAdvanceX(wordFont, text, style, characterSpacing,
+                                                             BidiUtils::BidiBaseDir::AUTO,
+                                                             GfxRenderer::TextMeasureMode::Rendered, thaiExtraPixels)
+                                  : renderer.getTextAdvanceX(wordFont, text, style, characterSpacing);
         if (width <= 0) continue;
         if (i + 1 < block->wordCount() && block->wordXpos(i + 1) > block->wordXpos(i)) {
           width = std::min(width, static_cast<int>(block->wordXpos(i + 1) - block->wordXpos(i)));
@@ -144,9 +146,10 @@ bool ClipSelectionActivity::extractWords() {
         WordBox& word = isRtl ? words[lineStart + (rtlWordCount < remaining ? rtlWordCount : rtlWordCount % remaining)]
                               : words[wordCount++];
         word.x = static_cast<int16_t>(marginLeft + line.xPos + block->wordXpos(i));
-        word.y = static_cast<int16_t>(marginTop + line.yPos + rubyShift);
+        word.y = static_cast<int16_t>(marginTop + line.yPos + rubyShift + block->wordYOffset(renderer, fontId, i));
         word.width = static_cast<int16_t>(width);
-        word.height = static_cast<int16_t>(lineHeight);
+        word.height = static_cast<int16_t>(renderer.getLineHeight(wordFont));
+        word.fontId = wordFont;
         word.row = rowCount;
         word.pageOffset = static_cast<uint8_t>(pageOffset);
         word.pageWordIndex = pageWordIndex++;
@@ -652,7 +655,8 @@ int ClipSelectionActivity::textXOffset() const {
 void ClipSelectionActivity::prewarmWord(const int index) const {
   if (index >= 0 && index < static_cast<int>(wordCount) && words[index].text) {
     renderer.getFontCacheManager()->prewarmCache(
-        fontId, words[index].text, static_cast<uint8_t>(1u << (static_cast<uint8_t>(words[index].style) & 0x03)));
+        words[index].fontId, words[index].text,
+        static_cast<uint8_t>(1u << (static_cast<uint8_t>(words[index].style) & 0x03)));
   }
 }
 
@@ -692,7 +696,7 @@ void ClipSelectionActivity::drawWordClean(const int index, const int offsetX, co
     clearGapBetween(word, words[index + 1], offsetX, offset);
   }
 
-  renderer.drawText(fontId, word.x + offsetX, word.y + offset, word.text, true, word.style,
+  renderer.drawText(word.fontId, word.x + offsetX, word.y + offset, word.text, true, word.style,
                     BidiUtils::BidiBaseDir::AUTO, word.characterSpacing, word.thaiExtraPixels);
 }
 
@@ -712,7 +716,7 @@ void ClipSelectionActivity::drawWordHighlight(const int index, const int firstSe
   }
 
   renderer.fillRectDither(word.x + offsetX, word.y + offset, word.width, word.height, Color::LightGray);
-  renderer.drawText(fontId, word.x + offsetX, word.y + offset, word.text, true, word.style,
+  renderer.drawText(word.fontId, word.x + offsetX, word.y + offset, word.text, true, word.style,
                     BidiUtils::BidiBaseDir::AUTO, word.characterSpacing, word.thaiExtraPixels);
 }
 
@@ -809,7 +813,7 @@ void ClipSelectionActivity::drawSelection() const {
     if (word.pageOffset != currentPageOffset) continue;
     if (previous) ditherGapBetween(*previous, word, offsetX, offset);
     renderer.fillRectDither(word.x + offsetX, word.y + offset, word.width, word.height, Color::LightGray);
-    renderer.drawText(fontId, word.x + offsetX, word.y + offset, word.text, true, word.style,
+    renderer.drawText(word.fontId, word.x + offsetX, word.y + offset, word.text, true, word.style,
                       BidiUtils::BidiBaseDir::AUTO, word.characterSpacing, word.thaiExtraPixels);
     previous = &word;
   }
