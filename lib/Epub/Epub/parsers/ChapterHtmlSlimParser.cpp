@@ -332,6 +332,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
 }
 
 void ChapterHtmlSlimParser::flushPendingAnchor() {
+  if (stopRequested) return;
   if (pendingAnchorId.empty()) return;
 
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
@@ -339,6 +340,7 @@ void ChapterHtmlSlimParser::flushPendingAnchor() {
   if (std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
     if (currentPage && !currentPage->elements.empty()) {
       completeCurrentPage();
+      if (stopRequested) return;
     }
   }
 
@@ -428,6 +430,7 @@ void ChapterHtmlSlimParser::closeBoxScope() {
     }
     if (!currentPage->elements.empty() && currentPageNextY + above + height > viewportHeight) {
       completeCurrentPage();
+      if (stopRequested) return;
       above = 0;
     }
     const int top = currentPageNextY + above;
@@ -517,6 +520,7 @@ void ChapterHtmlSlimParser::cancelDropCapToWord() {
 }
 
 void ChapterHtmlSlimParser::layoutCurrentBlock(const bool includeLastLine) {
+  if (stopRequested) return;
   const int layoutFontId = prepareBlockFont(
       *currentTextBlock, inlineSize.valid ? inlineSize.scale : currentTextBlock->getBlockStyle().fontScale);
   const int horizontalInset = currentTextBlock->getBlockStyle().totalHorizontalInset();
@@ -531,6 +535,7 @@ void ChapterHtmlSlimParser::layoutCurrentBlock(const bool includeLastLine) {
     topSpacingApplied = true;
   };
   const auto emitLine = [this, &applyTopSpacing](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
+    if (stopRequested) return;
     applyTopSpacing();
     addLineToPage(std::move(textBlock), offset);
   };
@@ -542,7 +547,7 @@ void ChapterHtmlSlimParser::layoutCurrentBlock(const bool includeLastLine) {
     layoutDropCapLines(layoutFontId, effectiveWidth, emitLine, includeLastLine);
   }
   currentTextBlock->layoutAndExtractLines(renderer, layoutFontId, effectiveWidth, emitLine, includeLastLine,
-                                          characterSpacing, wordSpacingPercent);
+                                          characterSpacing, wordSpacingPercent, SIZE_MAX, &stopRequested);
   layoutParagraph = nullptr;
 }
 
@@ -590,6 +595,7 @@ void ChapterHtmlSlimParser::layoutDropCapLines(
   }
   if (!currentPage->elements.empty() && currentPageNextY + lines * lineHeight > viewportHeight) {
     breakPageCarryingLines(keepWithNextCarry(), 0, visibleTextOffset);
+    if (stopRequested) return;
   }
   BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
   const int top = currentPageNextY;
@@ -609,7 +615,8 @@ void ChapterHtmlSlimParser::layoutDropCapLines(
   blockStyle.textIndentDefined = true;
   blockStyle.marginLeft = static_cast<int16_t>(blockStyle.marginLeft + capWidth);
   currentTextBlock->layoutAndExtractLines(renderer, layoutFontId, static_cast<uint16_t>(effectiveWidth - capWidth),
-                                          emitLine, includeLastLine, characterSpacing, wordSpacingPercent, lines);
+                                          emitLine, includeLastLine, characterSpacing, wordSpacingPercent, lines,
+                                          &stopRequested);
   blockStyle.marginLeft = static_cast<int16_t>(blockStyle.marginLeft - capWidth);
   currentPageNextY = static_cast<int16_t>(std::max(static_cast<int>(currentPageNextY), top + lines * lineHeight));
 }
@@ -617,6 +624,7 @@ void ChapterHtmlSlimParser::layoutDropCapLines(
 void ChapterHtmlSlimParser::completeCurrentPage() {
   emitCurrentPage();
   completedPageCount++;
+  if (stopRequested) return;
   currentPage.reset(new Page());
   currentPageNextY = 0;
   currentPageVisibleOffsetSet = false;
@@ -1131,6 +1139,7 @@ void ChapterHtmlSlimParser::breakTextLine(const BlockStyle& style) {
 
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, const bool paragraphEnd) {
+  if (stopRequested) return;
   endTextRun(true);
   if (thaiRun) thaiRun->inBlock = false;
   nextWordContinues = false;  // New block = new paragraph, no continuation
@@ -1163,10 +1172,12 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, cons
     }
 
     makePages(true, paragraphEnd);
+    if (stopRequested) return;
   }
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
   flushPendingAnchor();
+  if (stopRequested) return;
   dropCap.firstLetterPending = false;
   inlineSize = InlineSizeState{};
   currentTextBlock = makeTextBlock(blockStyle);
@@ -1195,6 +1206,7 @@ std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeTextBlock(const BlockStyl
 }
 
 void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
+  if (stopRequested) return;
   if (partWordBufferIndex > 0) {
     flushPartWordBuffer();
   }
@@ -1232,6 +1244,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
     setCurrentPageVisibleOffset(visibleTextOffset);
     emitCurrentPage();
     completedPageCount++;
+    if (stopRequested) return;
     currentPage.reset(new (std::nothrow) Page());
     if (!currentPage) {
       LOG_ERR("EHP", "Failed to create page after horizontal-rule page break");
@@ -1517,6 +1530,7 @@ void ChapterHtmlSlimParser::planTableColumns(const TableColumnMeasure& measure) 
 }
 
 void ChapterHtmlSlimParser::finishTableRow() {
+  if (stopRequested) return;
   closeTableCell();
 
   if (tableRowCells.empty()) {
@@ -1652,6 +1666,10 @@ void ChapterHtmlSlimParser::finishTableRow() {
         setCurrentPageVisibleOffset(lineVisibleOffset);
         emitCurrentPage();
         completedPageCount++;
+        if (stopRequested) {
+          clearLayoutLines();
+          return;
+        }
       }
       currentPage = makeUniqueNoThrow<Page>();
       if (!currentPage) {
@@ -1705,6 +1723,7 @@ void ChapterHtmlSlimParser::finishTableRow() {
 
 void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  if (self->stopRequested) return;
   if (strcasecmp(name, "body") == 0) {
     // Case-insensitive to match ParagraphStreamer's tag matching (ProgressMapper). A case
     // mismatch here would leave visibleTextOffset at 0 for the whole section, so every page
@@ -1789,6 +1808,26 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       CssStyle inlineStyle = CssParser::parseInlineStyle(styleAttr);
       cssStyle.applyOver(inlineStyle);
     }
+  }
+
+  // Resolve explicit inheritance after the cascade, before this element changes the active style.
+  switch (cssStyle.fontWeight) {
+    case CssFontWeight::Normal:
+    case CssFontWeight::Bold:
+      break;
+    case CssFontWeight::Inherit:
+      cssStyle.fontWeight =
+          (self->effectiveBold || self->boldUntilDepth < self->depth) ? CssFontWeight::Bold : CssFontWeight::Normal;
+      break;
+  }
+  switch (cssStyle.fontStyle) {
+    case CssFontStyle::Normal:
+    case CssFontStyle::Italic:
+      break;
+    case CssFontStyle::Inherit:
+      cssStyle.fontStyle =
+          (self->effectiveItalic || self->italicUntilDepth < self->depth) ? CssFontStyle::Italic : CssFontStyle::Normal;
+      break;
   }
 
   if (strcmp(name, "pre") == 0 && !cssStyle.defined.whiteSpace) {
@@ -2217,6 +2256,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                     if (carriedHeight + imageMarginTop + displayHeight > self->viewportHeight) carry = 0;
                   }
                   self->breakPageCarryingLines(carry, 0, self->visibleTextOffset);
+                  if (self->stopRequested) return;
                 } else if (!self->currentPage) {
                   self->currentPage.reset(new Page());
                   if (!self->currentPage) {
@@ -2648,6 +2688,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
 void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char* s, const int len) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  if (self->stopRequested) return;
   const bool countVisibleOffsets = self->insideBody && self->nonVisibleTextDepth == 0 && !self->syntheticCharacterData;
   const uint32_t callbackVisibleOffset = self->visibleTextOffset;
   if (countVisibleOffsets) {
@@ -2777,6 +2818,7 @@ void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const X
 
 void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* name) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  if (self->stopRequested) return;
   if (self->nonVisibleTextDepth > 0) {
     self->nonVisibleTextDepth--;
   }
@@ -3027,6 +3069,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 ChapterHtmlSlimParser::~ChapterHtmlSlimParser() { abortParse(); }
 
 bool ChapterHtmlSlimParser::beginParse() {
+  stopRequested = false;
   htmlEnded_ = false;
   // Initialize block style stack with a root entry representing "no ancestor block elements".
   // The user's paragraph alignment is set as the default so child elements without explicit
@@ -3091,6 +3134,7 @@ bool ChapterHtmlSlimParser::beginParse() {
 }
 
 ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
+  if (stopRequested) return ParseStatus::Error;
   if (renderer.hasThaiShapeError()) {
     LOG_ERR("EHP", "CPShape failed; failing section build");
     return ParseStatus::Error;
@@ -3123,6 +3167,7 @@ ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
     return ParseStatus::Error;
   }
   if (parseStatus == XML_STATUS_ERROR) {
+    if (stopRequested) return ParseStatus::Error;
     if (htmlEnded_) {
       LOG_DBG("EHP", "Ignoring trailing data after </html>: %s", XML_ErrorString(XML_GetErrorCode(xmlParser_)));
       return ParseStatus::Done;
@@ -3146,7 +3191,14 @@ void ChapterHtmlSlimParser::abortParse() {
   }
 }
 
+void ChapterHtmlSlimParser::requestStop() {
+  if (stopRequested) return;
+  stopRequested = true;
+  if (xmlParser_) XML_StopParser(xmlParser_, XML_FALSE);
+}
+
 bool ChapterHtmlSlimParser::finishParse() {
+  if (stopRequested) return false;
   if (scalarCarryBytes) {
     flushThaiPending(true);
     appendLegacyBytes(std::string_view(scalarCarry, scalarCarryBytes), scalarCarryVisibleOffset);
@@ -3174,6 +3226,7 @@ bool ChapterHtmlSlimParser::finishParse() {
   // Process last page if there is still text
   if (currentTextBlock) {
     makePages();
+    if (stopRequested) return false;
     if (renderer.hasThaiShapeError()) {
       LOG_ERR("EHP", "CPShape failed during final layout; failing section build");
       return false;
@@ -3199,7 +3252,7 @@ bool ChapterHtmlSlimParser::finishParse() {
     currentTextBlock.reset();
   }
 
-  return true;
+  return !stopRequested;
 }
 
 bool ChapterHtmlSlimParser::parseAndBuildPages() {
@@ -3336,6 +3389,7 @@ void ChapterHtmlSlimParser::breakPageCarryingLines(const size_t carry, const siz
   setCurrentPageVisibleOffset(visibleOffset);
   emitCurrentPage();
   completedPageCount++;
+  if (stopRequested) return;
   currentPage = std::move(nextPage);
   currentPageNextY = 0;
   currentPageVisibleOffsetSet = false;
@@ -3357,6 +3411,7 @@ void ChapterHtmlSlimParser::breakPageCarryingLines(const size_t carry, const siz
 }
 
 void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const uint32_t visibleOffset) {
+  if (stopRequested) return;
   const int lineFontId = line->blockFontId(fontId);
   const int rubyShift = line->getRubyShift(renderer.getFontAscenderSize(lineFontId));
   // Taller inline words push the shared baseline down.
@@ -3373,6 +3428,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
     size_t paragraphLines = 0;
     const size_t carry = linesToCarry(paragraphLines);
     breakPageCarryingLines(carry, paragraphLines, visibleOffset);
+    if (stopRequested) return;
   }
   setCurrentPageVisibleOffset(visibleOffset);
 
@@ -3414,6 +3470,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
 }
 
 void ChapterHtmlSlimParser::makePages(const bool includeLastLine, const bool paragraphEnd) {
+  if (stopRequested) return;
   if (includeLastLine) flushThaiPending(true);
   if (!currentTextBlock) {
     LOG_ERR("EHP", "!! No text block to make pages for !!");
@@ -3433,12 +3490,14 @@ void ChapterHtmlSlimParser::makePages(const bool includeLastLine, const bool par
     currentPageVisibleOffsetSet = false;
   }
   if (!currentTextBlock->isEmpty()) applyPendingPageBreak();
+  if (stopRequested) return;
 
   const int lineHeight = renderer.getLineHeight(fontId, lineCompression);
 
   const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
 
   layoutCurrentBlock(includeLastLine);
+  if (stopRequested) return;
   if (includeLastLine) {
     // A heading's lines on this page wait to move with what follows it.
     keepWithNextLines =

@@ -74,7 +74,10 @@ namespace {
 // v58-v60: Not written here; upstream used them for layouts without Thai metadata.
 // v61: Upstream v56-v60 rendering layout (fonts per word, drop caps, border boxes, layout and
 //      footnote fixes, low-heap CSS, text before a block start) combined with the Thai layout.
-constexpr uint8_t SECTION_FILE_VERSION = 61;
+// v62-v64: Not written here; upstream used them for layouts without Thai metadata.
+// v65: Upstream v63-v64 (static GIFs, paragraph boundaries, explicit font inheritance)
+//      combined with the Thai layout.
+constexpr uint8_t SECTION_FILE_VERSION = 65;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects

@@ -90,6 +90,19 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 65
+
+The serialized layout is unchanged from version 61. Upstream's static GIF images
+and alternative text, corrected paragraph boundaries (upstream version 63), and
+explicit font-weight/font-style inheritance (upstream version 64) are combined
+with the Thai layout. Upstream versions 62-64 described layouts without Thai
+metadata; this firmware never writes them. CSS cache version 19 stores `inherit`
+as value 2 in the existing font-style and font-weight bytes; the winning
+declaration is resolved against the parent before applying the element's style.
+Older CSS caches and completed and partial section caches rebuild automatically;
+book metadata and reading progress are kept. The derived partial version is
+`0xFE - (65 - 28)` = 217.
+
 ### Version 61
 
 Combines upstream's rendering layout (upstream versions 56-60) with the Thai
@@ -344,7 +357,7 @@ import std.core;
 
 // Approximate: omits each TextBlock's paragraphStartWord and per-word source
 // ranges, and each Page's link records.
-#define EXPECTED_VERSION 61
+#define EXPECTED_VERSION 65
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
