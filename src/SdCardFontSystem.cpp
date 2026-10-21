@@ -275,6 +275,7 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
       0x0430,  // Cyrillic
       0x05D0,  // Hebrew
       0x0627,  // Arabic
+      0x0E01,  // Thai
       0x0531,  // Armenian
       0x10D0,  // Georgian
       0x1200,  // Ethiopic
