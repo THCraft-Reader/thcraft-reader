@@ -185,7 +185,26 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, COVER_GRID = 4 };
+  enum UI_THEME {
+    CLASSIC = 0,
+    LYRA = 1,
+    LYRA_3_COVERS = 2,
+    ROUNDEDRAFF = 3,
+    COVER_GRID = 4,
+    THCRAFT = 5,  // fork-only; keep this value on upstream merges
+    UI_THEME_COUNT
+  };
+
+  // THCraft home widget slots
+  enum HOME_WIDGET {
+    HOME_WIDGET_OFF = 0,
+    HOME_WIDGET_IMAGE = 1,
+    HOME_WIDGET_TODAY = 2,
+    HOME_WIDGET_WEEK = 3,
+    HOME_WIDGET_GOAL = 4,
+    HOME_WIDGET_CLOCK = 5,
+    HOME_WIDGET_COUNT
+  };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -341,6 +360,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   char sdFontFamilyName[32] = "";
   // Dictionary folder name under /dictionaries (empty = no dictionary)
   char dictionaryName[32] = "";
+  // THCraft home: widget per slot, daily goal, and image file names under /widgets
+  uint8_t homeWidgetLeft = HOME_WIDGET_TODAY;
+  uint8_t homeWidgetRight = HOME_WIDGET_WEEK;
+  uint8_t readingGoalMinutes = 30;
+  char homeWidgetLeftImage[48] = "";
+  char homeWidgetRightImage[48] = "";
   // Master switch for all SD-card plugin discovery/execution. New installs keep
   // this disabled; settings migration enables it when pre-existing plugin files
   // are found so a firmware update never silently disables an existing setup.

@@ -104,6 +104,7 @@ bool HalClock::syncFromNTP() {
   constexpr int maxAttempts = 50;
   for (int i = 0; i < maxAttempts; i++) {
     if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+      trustedtime::confirmWallClock();
       time_t now = time(nullptr);
       struct tm timeinfo;
       gmtime_r(&now, &timeinfo);

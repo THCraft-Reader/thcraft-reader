@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ThaiStats.h>
+
 #include <atomic>
 #include <memory>
 #include <string>
@@ -23,6 +24,12 @@ class ReaderActivity : public Activity {
   ReaderSession readerSession;
   std::atomic<bool> pageRendered{false};
   bool bookRemembered = false;
+  bool finishedNoted = false;
+  // Position of the last rendered page, saved to recents on exit and sleep:
+  // the reader may already have released its book by then.
+  int lastProgressBp = -1;
+  uint16_t lastChapter = 0;
+  uint16_t lastChapterCount = 0;
   void markPageRendered() { pageRendered.store(true, std::memory_order_release); }
   void rememberBookOnceRendered();
 
@@ -60,6 +67,8 @@ class ReaderActivity : public Activity {
   // EpubReaderActivity overrides getProgressBasisPoints() and falls back to it.
   int getProgressPercent() const { return getScreenshotInfo().progressPercent; }
   virtual int getProgressBasisPoints() const { return getProgressPercent() * 100; }
+  // 1-based chapter of the current page and the chapter count; false when unknown.
+  virtual bool currentChapter(uint16_t& /*index*/, uint16_t& /*count*/) const { return false; }
 
   virtual bool handleFormatInput() { return false; }
   virtual bool pageTurn(bool isForward) = 0;
@@ -83,6 +92,8 @@ class ReaderActivity : public Activity {
   void clearEndOfBookOptionsIfNeeded();
   void disableFastInitialRefresh();
   void notePageTurn(bool forward, bool succeeded);
+  void noteRenderComplete();
+  void persistRecentProgress();
   void flushReaderSession();
 
  public:

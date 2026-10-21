@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "activities/settings/SettingsActivity.h"
 #include "components/UITheme.h"
 #include "util/DictionaryRegistry.h"
+#include "util/WidgetImages.h"
 
 // Build the font family setting dynamically. When registry is non-null, SD card fonts
 // are appended after the built-in fonts. Otherwise only built-in fonts are listed.
@@ -265,11 +267,82 @@ inline SettingInfo buildShortPowerButtonSetting() {
                                   setShortPowerButtonFromDisplayValue, "shortPwrBtn", StrId::STR_CAT_CONTROLS);
 }
 
-inline std::vector<StrId> homeThemeValues() {
-  static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                     StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_COVER_GRID};
-  const size_t count = UITheme::supportsCoverGrid() ? std::size(VALUES) : std::size(VALUES) - 1;
-  return {VALUES, VALUES + count};
+struct ThemeOption {
+  StrId label;
+  uint8_t value;
+};
+
+// Menu order; Cover Grid (needs PSRAM) is skipped when unsupported, so the
+// displayed index differs from the persisted value.
+inline constexpr ThemeOption THEME_OPTIONS[] = {{StrId::STR_THEME_CLASSIC, CrossPointSettings::CLASSIC},
+                                                {StrId::STR_THEME_LYRA, CrossPointSettings::LYRA},
+                                                {StrId::STR_THEME_LYRA_EXTENDED, CrossPointSettings::LYRA_3_COVERS},
+                                                {StrId::STR_THEME_ROUNDEDRAFF, CrossPointSettings::ROUNDEDRAFF},
+                                                {StrId::STR_THEME_COVER_GRID, CrossPointSettings::COVER_GRID},
+                                                {StrId::STR_THEME_THCRAFT, CrossPointSettings::THCRAFT}};
+
+inline bool themeOptionShown(const ThemeOption& option) {
+  return option.value != CrossPointSettings::COVER_GRID || UITheme::supportsCoverGrid();
+}
+
+inline SettingInfo buildUiThemeSetting() {
+  std::vector<StrId> labels;
+  labels.reserve(std::size(THEME_OPTIONS));
+  for (const auto& option : THEME_OPTIONS) {
+    if (themeOptionShown(option)) labels.push_back(option.label);
+  }
+  return SettingInfo::DynamicEnum(
+      StrId::STR_UI_THEME, std::move(labels),
+      [] {
+        uint8_t index = 0;
+        for (const auto& option : THEME_OPTIONS) {
+          if (!themeOptionShown(option)) continue;
+          if (option.value == SETTINGS.uiTheme) return index;
+          index++;
+        }
+        return static_cast<uint8_t>(CrossPointSettings::LYRA);  // Lyra's index; hidden Cover Grid falls back to it
+      },
+      [](const uint8_t displayIndex) {
+        uint8_t index = 0;
+        SETTINGS.uiTheme = CrossPointSettings::LYRA;
+        for (const auto& option : THEME_OPTIONS) {
+          if (!themeOptionShown(option)) continue;
+          if (index++ == displayIndex) {
+            SETTINGS.uiTheme = option.value;
+            return;
+          }
+        }
+      },
+      "uiTheme", StrId::STR_CAT_DISPLAY);
+}
+
+// "None" plus each image under /widgets; persisted by file name like the
+// dictionary. Both slots share one file list.
+inline SettingInfo buildHomeWidgetImageSetting(const StrId nameId, char* field, const size_t fieldSize, const char* key,
+                                               const std::shared_ptr<const std::vector<std::string>>& files) {
+  SettingInfo s;
+  s.nameId = nameId;
+  s.key = key;
+  s.type = SettingType::ENUM;
+  s.enumStringValues.reserve(files->size() + 1);
+  s.enumStringValues.push_back(I18N.get(StrId::STR_NONE_OPT));
+  s.enumStringValues.insert(s.enumStringValues.end(), files->begin(), files->end());
+  s.category = StrId::STR_CAT_DISPLAY;
+  s.valueGetter = [files, field, fieldSize]() -> uint8_t {
+    for (size_t i = 0; i < files->size(); i++) {
+      if (strncmp((*files)[i].c_str(), field, fieldSize - 1) == 0) return static_cast<uint8_t>(i + 1);
+    }
+    return 0;
+  };
+  s.valueSetter = [files, field, fieldSize](const uint8_t v) {
+    if (v == 0 || v > files->size()) {
+      field[0] = '\0';
+      return;
+    }
+    strncpy(field, (*files)[v - 1].c_str(), fieldSize - 1);
+    field[fieldSize - 1] = '\0';
+  };
+  return s;
 }
 
 using SettingVisitor = void (*)(void* context, SettingInfo& info);
@@ -325,6 +398,32 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     auto it = std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_SIZE; });
     if (it != v.end()) {
       *it = buildFontSizeSetting(registry);
+    }
+  }
+  // THCraft home rows show only with that theme; image pickers only for slots set to Image.
+  if (SETTINGS.uiTheme != CrossPointSettings::THCRAFT) {
+    v.erase(std::remove_if(v.begin(), v.end(),
+                           [](const SettingInfo& s) {
+                             return s.nameId == StrId::STR_HOME_WIDGET_LEFT ||
+                                    s.nameId == StrId::STR_HOME_WIDGET_RIGHT || s.nameId == StrId::STR_DAILY_GOAL;
+                           }),
+            v.end());
+  } else if (SETTINGS.homeWidgetLeft == CrossPointSettings::HOME_WIDGET_IMAGE ||
+             SETTINGS.homeWidgetRight == CrossPointSettings::HOME_WIDGET_IMAGE) {
+    const auto files = std::make_shared<const std::vector<std::string>>(widget_images::list());
+    const auto insertAfter = [&v](const StrId anchor, SettingInfo&& info) {
+      auto it = std::find_if(v.begin(), v.end(), [anchor](const SettingInfo& s) { return s.nameId == anchor; });
+      if (it != v.end()) v.insert(it + 1, std::move(info));
+    };
+    if (SETTINGS.homeWidgetRight == CrossPointSettings::HOME_WIDGET_IMAGE) {
+      insertAfter(StrId::STR_HOME_WIDGET_RIGHT,
+                  buildHomeWidgetImageSetting(StrId::STR_HOME_WIDGET_RIGHT_IMAGE, SETTINGS.homeWidgetRightImage,
+                                              sizeof(SETTINGS.homeWidgetRightImage), "homeWidgetRightImage", files));
+    }
+    if (SETTINGS.homeWidgetLeft == CrossPointSettings::HOME_WIDGET_IMAGE) {
+      insertAfter(StrId::STR_HOME_WIDGET_LEFT,
+                  buildHomeWidgetImageSetting(StrId::STR_HOME_WIDGET_LEFT_IMAGE, SETTINGS.homeWidgetLeftImage,
+                                              sizeof(SETTINGS.homeWidgetLeftImage), "homeWidgetLeftImage", files));
     }
   }
   if (dictionaries && !dictionaries->empty()) {

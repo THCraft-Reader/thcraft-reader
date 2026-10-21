@@ -105,6 +105,10 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   if (dictionaryName[0] != '\0') {
     doc["dictionaryName"] = dictionaryName;
   }
+  // The theme list hides Cover Grid without PSRAM, so it maps display index to value.
+  doc["uiTheme"] = uiTheme;
+  if (homeWidgetLeftImage[0] != '\0') doc["homeWidgetLeftImage"] = homeWidgetLeftImage;
+  if (homeWidgetRightImage[0] != '\0') doc["homeWidgetRightImage"] = homeWidgetRightImage;
   // The displayed option list varies by board, so this setting uses a dynamic
   // display-index mapping and is skipped by the generic persistence loop.
   doc["longPressMenuFunction"] = longPressMenuFunction;
@@ -288,6 +292,9 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   if (storedFontFamily != STORED_NOTOSANS) needsResave = true;
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, load manually
   copyToField(dictionaryName, doc["dictionaryName"] | "", sizeof(dictionaryName));
+  uiTheme = clamp(doc["uiTheme"] | static_cast<uint8_t>(LYRA), UI_THEME_COUNT, LYRA);
+  copyToField(homeWidgetLeftImage, doc["homeWidgetLeftImage"] | "", sizeof(homeWidgetLeftImage));
+  copyToField(homeWidgetRightImage, doc["homeWidgetRightImage"] | "", sizeof(homeWidgetRightImage));
   // Language -- stored as code string for stability across enum reorders.
   if (doc["language"].is<const char*>()) {
     language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));

@@ -21,6 +21,16 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
     values[CrossPointSettings::TRANSPARENT_CUSTOM] = StrId::STR_TRANSPARENT;
     return values;
   }();
+  static constexpr auto HOME_WIDGET_VALUES = [] {
+    std::array<StrId, CrossPointSettings::HOME_WIDGET_COUNT> values{};
+    values[CrossPointSettings::HOME_WIDGET_OFF] = StrId::STR_STATE_OFF;
+    values[CrossPointSettings::HOME_WIDGET_IMAGE] = StrId::STR_WIDGET_IMAGE;
+    values[CrossPointSettings::HOME_WIDGET_TODAY] = StrId::STR_WIDGET_TODAY;
+    values[CrossPointSettings::HOME_WIDGET_WEEK] = StrId::STR_WIDGET_WEEK;
+    values[CrossPointSettings::HOME_WIDGET_GOAL] = StrId::STR_WIDGET_GOAL;
+    values[CrossPointSettings::HOME_WIDGET_CLOCK] = StrId::STR_WIDGET_CLOCK;
+    return values;
+  }();
   const auto emit = [visit, context](auto&& info) { visit(context, info); };
   // --- Display ---
   emit(SettingInfo::StaticEnum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen, SLEEP_SCREEN_VALUES,
@@ -40,8 +50,13 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
                          {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
                           StrId::STR_PAGES_30, StrId::STR_NEVER},
                          "refreshFrequency", StrId::STR_CAT_DISPLAY));
-  emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, homeThemeValues(), "uiTheme",
-                         StrId::STR_CAT_DISPLAY));
+  emit(buildUiThemeSetting());
+  emit(SettingInfo::StaticEnum(StrId::STR_HOME_WIDGET_LEFT, &CrossPointSettings::homeWidgetLeft, HOME_WIDGET_VALUES,
+                               "homeWidgetLeft", StrId::STR_CAT_DISPLAY));
+  emit(SettingInfo::StaticEnum(StrId::STR_HOME_WIDGET_RIGHT, &CrossPointSettings::homeWidgetRight, HOME_WIDGET_VALUES,
+                               "homeWidgetRight", StrId::STR_CAT_DISPLAY));
+  emit(SettingInfo::Value(StrId::STR_DAILY_GOAL, &CrossPointSettings::readingGoalMinutes, {10, 120, 10},
+                          "readingGoalMinutes", StrId::STR_CAT_DISPLAY));
   if (!BoardConfig::hasTouch())
     emit(SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                              StrId::STR_CAT_DISPLAY));

@@ -130,6 +130,8 @@ add_subdirectory(thai_ui)
 
 add_subdirectory(clipping_store)
 add_subdirectory(reader_session)
+add_subdirectory(reading_stats)
+add_subdirectory(thcraft_home_layout)
 add_subdirectory(plugin_manifest_classification)
 add_subdirectory(plugin_picker_layout)
 add_subdirectory(protected_paths)

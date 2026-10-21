@@ -254,6 +254,11 @@ class EpubReaderActivity final : public ReaderActivity {
   std::string getBookAuthor() const override { return epub ? epub->getAuthor() : ""; }
   std::string getBookThumbBmpPath() const override { return epub ? epub->getThumbBmpPath() : ""; }
   int getProgressBasisPoints() const override;
+  bool currentChapter(uint16_t& index, uint16_t& count) const override;
+  // currentChapter() runs after every render; the TOC lookup reads the book cache, so keep it per spine item.
+  mutable int chapterLookupSpine = -1;
+  mutable uint16_t chapterLookupIndex = 0;
+  mutable uint16_t chapterLookupCount = 0;
   void renderBook() override;
   void onEndOfBookRendered() override;
 

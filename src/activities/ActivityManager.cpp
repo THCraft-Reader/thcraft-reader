@@ -22,6 +22,8 @@
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
+#include "home/ReadingStatsActivity.h"
+#include "home/ThcraftHomeActivity.h"
 #include "library/LibraryListActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "network/UsbDriveActivity.h"
@@ -323,6 +325,15 @@ void ActivityManager::goToPlugins(bool showOpds) {
   replaceActivity(std::make_unique<PluginCatalogActivity>(renderer, mappedInput, showOpds, /*rootMode=*/true));
 }
 
+void ActivityManager::goToReadingStats() {
+  auto activity = makeUniqueNoThrow<ReadingStatsActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: reading stats activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
   if (path.empty()) {
     goToFileBrowser("/");
@@ -370,7 +381,17 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Settings" || activityName == "SettingsList") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
+    } else if (activityName == "ReadingStats") {
+      initialMenuItem = HomeMenuItem::STATS_SCREEN;
     }
+  }
+  if (UITheme::hasThcraftHome()) {
+    auto home = makeUniqueNoThrow<ThcraftHomeActivity>(renderer, mappedInput, initialMenuItem, cleanInitialRefresh);
+    if (home) {
+      replaceActivity(std::move(home));
+      return;
+    }
+    LOG_ERR("ACT", "OOM: THCraft home, using the default home");
   }
   replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, initialMenuItem, cleanInitialRefresh));
 }

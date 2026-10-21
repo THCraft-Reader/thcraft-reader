@@ -19,6 +19,7 @@
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
 #include "ReaderUtils.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "XtcReaderActivity.h"
@@ -219,7 +220,18 @@ void ReaderActivity::onExit() {
 
 void ReaderActivity::prepareForSleep() { flushReaderSession(); }
 
+void ReaderActivity::persistRecentProgress() {
+  // The book is listed in recents only after its first page rendered.
+  if (!bookRemembered || lastProgressBp < 0) return;
+  RECENT_BOOKS.updateProgress(bookPath, static_cast<uint16_t>(lastProgressBp), lastChapter, lastChapterCount);
+}
+
 void ReaderActivity::flushReaderSession() {
+  persistRecentProgress();
+  // Dated at its end: the start may predate a clock sync made during the session.
+  if (readerSession.isEmitWorthy()) READING_STATS.addSession(trustedtime::trustedNow());
+  READING_STATS.saveIfDirty();
+
   if (!readerSession.isEmitWorthy() || !pluginevents::anySubscriber(pluginevents::Event::ReaderSession)) {
     readerSession.reset();
     return;
@@ -351,7 +363,11 @@ void ReaderActivity::render(RenderLock&&) {
     renderer.displayBuffer();
     onEndOfBookRendered();
     markPageRendered();
-    readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
+    if (!finishedNoted) {
+      finishedNoted = true;
+      READING_STATS.noteBookFinished(getBookTitle(), getBookAuthor(), trustedtime::trustedNow());
+    }
+    noteRenderComplete();
     return;
   }
 
@@ -360,7 +376,20 @@ void ReaderActivity::render(RenderLock&&) {
     readerSession.noteTurn(false, false);
     return;
   }
-  readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
+  noteRenderComplete();
+}
+
+void ReaderActivity::noteRenderComplete() {
+  const int64_t now = trustedtime::trustedNow();
+  const int progressBp = getProgressBasisPoints();
+  const uint32_t before = readerSession.durationSeconds();
+  readerSession.onRenderComplete(millis(), now, progressBp);
+  // The session credits a page on the next forward turn, 2 s .. 30 min each; record what it accepted.
+  const uint32_t credited = readerSession.durationSeconds() - before;
+  if (credited > 0) READING_STATS.addActiveSeconds(now, credited);
+
+  lastProgressBp = std::clamp(progressBp, 0, 10000);
+  if (!currentChapter(lastChapter, lastChapterCount)) lastChapter = lastChapterCount = 0;
 }
 
 bool ReaderActivity::handleForcedRefresh() {

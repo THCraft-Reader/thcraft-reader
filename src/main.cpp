@@ -37,6 +37,7 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "OpdsTokenStore.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "WifiCredentialStore.h"
@@ -657,6 +658,7 @@ void setup() {
   // UTC-offset setting on first boot after the update).
   timezones::applyToClock();
   RECENT_BOOKS.loadFromFile();
+  READING_STATS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
@@ -673,7 +675,11 @@ void setup() {
   if (halClock.localTime(rtcLocal)) {
     // localTime() renders the RTC's UTC epoch under the TZ rule applied above,
     // so mktime() inverts it exactly (tm_isdst included).
-    trustedtime::adopt(static_cast<int64_t>(mktime(&rtcLocal)));
+    // Without an RTC chip, localTime() reads the system clock itself (kept
+    // through deep sleep), which must not count as a confirmed wall clock.
+    if (trustedtime::adopt(static_cast<int64_t>(mktime(&rtcLocal))) && halClock.isAvailable()) {
+      trustedtime::confirmWallClock();
+    }
     LOG_INF("CLK", "RTC clock read: %04d-%02d-%02d %02d:%02d", rtcLocal.tm_year + 1900, rtcLocal.tm_mon + 1,
             rtcLocal.tm_mday, rtcLocal.tm_hour, rtcLocal.tm_min);
   }

@@ -3512,6 +3512,29 @@ ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {
   return info;
 }
 
+bool EpubReaderActivity::currentChapter(uint16_t& index, uint16_t& count) const {
+  if (!epub) return false;
+  if (chapterLookupSpine != currentSpineIndex) {
+    chapterLookupSpine = currentSpineIndex;
+    chapterLookupIndex = chapterLookupCount = 0;
+    const int spineCount = epub->getSpineItemsCount();
+    if (currentSpineIndex >= 0 && currentSpineIndex < spineCount) {
+      const int tocCount = epub->getTocItemsCount();
+      const int toc = epub->getTocIndexForSpineIndex(currentSpineIndex);
+      const bool useToc = toc >= 0 && toc < tocCount;
+      const int total = useToc ? tocCount : spineCount;
+      if (total <= UINT16_MAX) {
+        chapterLookupIndex = static_cast<uint16_t>(useToc ? toc + 1 : currentSpineIndex + 1);
+        chapterLookupCount = static_cast<uint16_t>(total);
+      }
+    }
+  }
+  if (chapterLookupCount == 0) return false;
+  index = chapterLookupIndex;
+  count = chapterLookupCount;
+  return true;
+}
+
 int EpubReaderActivity::getProgressBasisPoints() const {
   if (isAtEndOfBook()) return 10000;
   if (!epub || !section || epub->getBookSize() == 0) return getProgressPercent() * 100;

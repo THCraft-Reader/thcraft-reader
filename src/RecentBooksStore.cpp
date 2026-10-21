@@ -13,6 +13,11 @@ void RecentBooksStore::toJson(JsonDocument& doc) const {
     obj["title"] = book.title;
     obj["author"] = book.author;
     obj["coverBmpPath"] = book.coverBmpPath;
+    if (book.hasProgress()) obj["progressBp"] = book.progressBp;
+    if (book.chapterCount > 0) {
+      obj["chapter"] = book.chapterIndex;
+      obj["chapters"] = book.chapterCount;
+    }
   }
 }
 
@@ -29,7 +34,15 @@ bool RecentBooksStore::fromJson(JsonVariantConst doc) {
     book.title = obj["title"] | "";
     book.author = obj["author"] | "";
     book.coverBmpPath = obj["coverBmpPath"] | "";
-    recentBooks.push_back(book);
+    const uint32_t progressBp = obj["progressBp"] | static_cast<uint32_t>(RecentBook::PROGRESS_UNKNOWN);
+    book.progressBp = progressBp <= 10000 ? static_cast<uint16_t>(progressBp) : RecentBook::PROGRESS_UNKNOWN;
+    const uint32_t chapterCount = obj["chapters"] | 0u;
+    const uint32_t chapterIndex = obj["chapter"] | 0u;
+    if (chapterCount > 0 && chapterCount <= UINT16_MAX && chapterIndex >= 1 && chapterIndex <= chapterCount) {
+      book.chapterIndex = static_cast<uint16_t>(chapterIndex);
+      book.chapterCount = static_cast<uint16_t>(chapterCount);
+    }
+    recentBooks.push_back(std::move(book));
   }
 
   LOG_DBG("RBS", "Recent books loaded from file (%d entries)", getCount());
@@ -73,6 +86,23 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
     book.coverBmpPath = coverBmpPath;
     saveToFile();
   }
+}
+
+bool RecentBooksStore::updateProgress(const std::string& path, const uint16_t progressBp, const uint16_t chapterIndex,
+                                      const uint16_t chapterCount) {
+  auto it =
+      std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
+  if (it == recentBooks.end()) return false;
+  const uint16_t bp = progressBp <= 10000 ? progressBp : RecentBook::PROGRESS_UNKNOWN;
+  const bool chapterKnown = chapterCount > 0 && chapterIndex >= 1 && chapterIndex <= chapterCount;
+  const uint16_t index = chapterKnown ? chapterIndex : 0;
+  const uint16_t count = chapterKnown ? chapterCount : 0;
+  if (it->progressBp == bp && it->chapterIndex == index && it->chapterCount == count) return true;
+  it->progressBp = bp;
+  it->chapterIndex = index;
+  it->chapterCount = count;
+  if (!saveToFile()) LOG_ERR("RBS", "Failed to persist progress of recent book: %s", path.c_str());
+  return true;
 }
 
 bool RecentBooksStore::removeByPath(const std::string& path) {

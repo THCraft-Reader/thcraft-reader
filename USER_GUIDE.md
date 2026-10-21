@@ -255,6 +255,7 @@ Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **L
   - "Lyra" - The new theme for Crosspoint featuring rounded elements and menu icons
   - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
   - "RoundedRaff" - A rounded theme with additional visual styling
+  - "THCraft" - A home screen with the current book's progress, three recent books, two widgets and an icon bar, plus reading statistics. It adds the **Home Widget (Left/Right)**, **Daily Reading Goal (min)** and **Left/Right Widget Image** settings. See [THCraft home screen](docs/thcraft-home.md).
 
 - **Sunlight Fading Fix**: Configure whether to enable a software-fix for the issue where white X4 models may fade when used in direct sunlight:
   
