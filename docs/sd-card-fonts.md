@@ -122,11 +122,13 @@ To install:
 5. Open a book containing IPA (for example `/ˈθɪŋk/`), arrows (`← → ⇒`),
    symbols (`∞ ≠ ✓ ★`), and Arabic (`مرحبا بالعالم`). Check the selected family
    and size for missing boxes and Arabic joining. Updating the font pack does
-   not require flashing new firmware; copy both members of every pair.
+   not require flashing new firmware; copy both members of every pair. Firmware
+   that reads CPSHAPE v2 needs a v2 pack: an older pack still shows Thai text,
+   but without mark positioning.
 
 This is the **CPFont bitmap path**, not the direct TTF/OTF/TTC path described
 below. Copying only a TTF does not install the baked Thai positioning recipes.
-Use firmware with CPSHAPE support and retain both files of every pair. Older
+Use firmware with CPSHAPE v2 support and retain both files of every pair. Other
 firmware can read CPFont but ignores the positioning companion. The pack includes
 only a regular face; existing reader style fallback still applies. Packaging
 success does not establish physical-device rendering or performance acceptance.
@@ -317,11 +319,23 @@ Copy **both** `MyThaiFont_16.cpfont` and `MyThaiFont_16.cpshape` into the same f
 folder on the SD card. The `.cpshape.json` report is desktop provenance, not needed
 by the reader. Use manual SD copying for the companion file.
 
-CPFont stays version 4, including its original Unicode glyphs; CPSHAPE stays
-version 1. Older firmware can still use the font without positioning. Current
-firmware selects resident or SD-backed shaping automatically: low memory or a
+CPFont stays version 4, including its original Unicode glyphs. Its reserved
+header bytes 16-19 carry a tag that pairs it with the CPSHAPE version 2
+companion; tools that write CPFont without a companion leave them zero. Older
+firmware can still use the font without positioning. Firmware with CPSHAPE v2
+support ignores version 1 companions; convert existing pairs once, without
+re-baking:
+
+```bash
+python3 scripts/upgrade_thai_shape_v2.py OLD_FONTS_DIR NEW_FONTS_DIR
+```
+
+Replace both files of every pair on the SD card, then restart or reload the
+font. The script does not update `.cpshape.json` reports.
+
+Current firmware selects resident or SD-backed shaping automatically: low memory or a
 failed whole-file/index allocation uses one shared working cache below 14 KiB,
-plus per-font metadata and HAL overhead. No setting or repackaged font is needed.
+plus per-font metadata and HAL overhead. No setting is needed.
 The 8/10/12 pt UI-fallback sizes always use SD-backed shaping without dense
 indexes, so only the reader-size companion can be resident.
 Missing, incompatible, corrupt or minimum-resource-OOM companions still leave

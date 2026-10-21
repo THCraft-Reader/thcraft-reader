@@ -157,7 +157,7 @@ class SdCardFont {
   void resetStats();
   const Stats& getStats() const { return stats_; }
 
-  // Header/TOC identity plus shaping flag/state and validated metrics/payload CRCs.
+  // Header/TOC identity plus shaping flag/state and validated pair tag/payload CRC.
   // Used to generate deterministic font IDs for section cache invalidation.
   uint32_t contentHash() const { return contentHash_; }
 
@@ -165,6 +165,10 @@ class SdCardFont {
   bool hasThaiShapeError() const;
   // True while the whole CPSHAPE companion is held in RAM (not SD-backed).
   bool hasResidentThaiShape() const;
+  // Frees a resident companion and serves the same validated views from SD,
+  // keeping font identity and glyph caches. Call under the render lock.
+  // False: the caller must reload this font; the companion may already be released.
+  bool demoteResidentThaiShape();
 
  private:
   // Per-style metadata (parsed from file header/TOC)
@@ -300,7 +304,9 @@ class SdCardFont {
   uint8_t styleCount_ = 0;
   std::unique_ptr<ThaiShapeStorage> thaiShapeStorage_;
   bool residentThaiShape_ = true;
-  void loadThaiShape();
+  // pairTag: CPFont header bytes 16-19, which a paired companion repeats.
+  void loadThaiShape(uint32_t fontBytes, uint32_t pairTag);
+  bool thaiShapePath(char* path, size_t capacity) const;
   using CodepointVisitor = bool (*)(void* context, uint32_t codepoint);
   bool visitTextCodepoints(const char* text, uint8_t styleMask, bool shapeText, bool nativeLigatures,
                            CodepointVisitor visitor, void* context) const;

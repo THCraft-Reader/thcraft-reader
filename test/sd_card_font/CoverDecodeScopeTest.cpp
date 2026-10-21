@@ -348,7 +348,7 @@ TEST_P(CoverDecodeScopeTest, EarlyReturnRestoresFontsAndUiFallbacks) {
   expectSelected();
 }
 
-TEST_P(CoverDecodeScopeTest, DropResidentThaiShapeReloadsSdBackedWithSameIdentityAndPixels) {
+TEST_P(CoverDecodeScopeTest, DropResidentThaiShapeSwitchesSdBackedWithSameIdentityAndPixels) {
   const auto before = thaiFrame();
   const int id = system.resolveFontId(kFamily, 16);
   const size_t loadedBytes = probe::allocationLive();
@@ -369,7 +369,7 @@ TEST_P(CoverDecodeScopeTest, DropResidentThaiShapeReloadsSdBackedWithSameIdentit
   EXPECT_EQ(thaiFrame(), before);
   expectSelected();
 
-  // The policy outlives the reload: a later load must not go resident again.
+  // The policy outlives the switch: a later load must not go resident again.
   {
     SdCardFontSystem::CoverDecodeScope scope(system, renderer);
     scope.releaseFonts();

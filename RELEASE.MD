@@ -49,7 +49,10 @@ fonts/
 ```
 
 Every family must include matching `.cpfont` and `.cpshape` files at **8, 10,
-12, 14, 16, 18, 20, 22, 24, and 26 pt**.
+12, 14, 16, 18, 20, 22, 24, and 26 pt**. Each companion must be CPSHAPE version 2,
+paired with its `.cpfont`; this firmware ignores version 1 companions. Convert an
+older pack once with `python3 scripts/upgrade_thai_shape_v2.py OLD_DIR NEW_DIR`
+on its extracted `fonts/` folder, then put the converted pairs back in the ZIP.
 For example, `fonts/Mali/Mali_26.cpfont` must remain beside
 `fonts/Mali/Mali_26.cpshape`. The complete pack contains 70 pairs.
 Keep all license notices and any accompanying installation/source files.
@@ -118,6 +121,13 @@ with zipfile.ZipFile(font_zip) as archive:
         raise SystemExit("Font ZIP must contain all seven specified families, and no others")
     if {p.with_suffix(".cpshape") for p in fonts} != shapes:
         raise SystemExit("Every .cpfont must have a matching .cpshape, and vice versa")
+    for shape in sorted(shapes):
+        with archive.open(str(shape)) as companion, archive.open(str(shape.with_suffix(".cpfont"))) as font:
+            header, font_header = companion.read(32), font.read(32)
+        # Firmware reads only CPSHAPE v2, paired by bytes 16-19 of both headers.
+        if header[:10] != b"CPSHAPE\0\x02\x00" or header[16:20] != font_header[16:20]:
+            raise SystemExit(f"Not a paired CPSHAPE v2 companion: {shape}; "
+                             "run scripts/upgrade_thai_shape_v2.py")
     for family in sorted(families):
         sizes = (8, 10, 12, 14, 16, 18, 20, 22, 24, 26)
         for size in sizes:

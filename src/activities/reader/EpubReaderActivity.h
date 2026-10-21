@@ -147,7 +147,7 @@ class EpubReaderActivity final : public ReaderActivity {
   bool heapBelowBuildFloors() const;
   // Latched when a page render could not allocate its grayscale scratch.
   bool renderHeapStarved = false;
-  // Reloads the reader font with SD-backed Thai shaping when the working set no
+  // Switches the reader font to SD-backed Thai shaping when the working set no
   // longer fits beside the resident companion. Requires the render lock.
   void shedResidentThaiShapeIfStarved();
   // Bluetooth page turner: every chapter build stops the radio until the chapter is built and its

@@ -3,13 +3,23 @@ use crate::{
     put16, put32, Raster,
 };
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+// CPSHAPE v2 style: 12-byte header, KEY_COUNT 3-byte entries (base ID bits 0-6,
+// mark count bits 7-9, first mark record bits 10-23), base records, mark records.
 pub const KEY_COUNT: usize = 46 * 82;
 pub const STYLE_LIMIT: usize = 96 * 1024;
 pub const FAMILY_LIMIT: usize = 384 * 1024;
+const STYLE_HEADER: usize = 12;
+const ENTRY_BYTES: usize = 3;
+const ABSENT_ENTRY: u32 = 0xff_ffff;
+const MAX_BASES: usize = 127;
+const MAX_MARKS: usize = 5;
+const MAX_RECORDS: usize = 16383;
+// CPFont v4 reserved header bytes that repeat the companion's metrics CRC.
+pub const PAIR_TAG: std::ops::Range<usize> = 16..20;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 struct Record {
     cp: u16,
     advance: u16,
@@ -186,7 +196,7 @@ impl BakedStyle {
         self.payload = self.serialize(raster)?;
         self.roundtrip(raster)?;
         self.counts = json!({"dense_keys": KEY_COUNT, "base_records": read16(&self.payload, 0)?,
-            "suffix_sequences": read16(&self.payload, 2)?, "payload_bytes": self.payload.len(),
+            "mark_records": read16(&self.payload, 2)?, "payload_bytes": self.payload.len(),
             "alternate_glyphs": self.alternates.len()});
         Ok(())
     }
@@ -196,42 +206,39 @@ impl BakedStyle {
             return Err("Incorrect Thai dense key count".into());
         }
         let mut base_ids = BTreeMap::new();
-        let mut suffix_ids = BTreeMap::new();
         let mut bases = Vec::new();
-        let mut suffixes = Vec::new();
-        let mut dense = Vec::with_capacity(KEY_COUNT * 4);
+        let mut sequences: Vec<&[Record]> = Vec::new();
+        let mut seen = HashSet::new();
+        let mut entries = Vec::with_capacity(KEY_COUNT);
         for recipe in &self.recipes {
-            if !(1..=6).contains(&recipe.len()) {
+            if !(1..=MAX_MARKS + 1).contains(&recipe.len()) {
                 return Err("Invalid Thai recipe glyph count".into());
             }
             let base = recipe[0];
-            let suffix = &recipe[1..];
-            let bid = if let Some(&id) = base_ids.get(&base) {
-                id
-            } else {
-                let id = u16::try_from(bases.len()).map_err(|_| "Too many Thai base records")?;
+            let marks = &recipe[1..];
+            let bid = *base_ids.entry(base).or_insert_with(|| {
                 bases.push(base);
-                base_ids.insert(base, id);
-                id
-            };
-            let sid = if let Some(&id) = suffix_ids.get(suffix) {
-                id
-            } else {
-                let id = u16::try_from(suffixes.len()).map_err(|_| "Too many Thai suffixes")?;
-                suffixes.push(suffix);
-                suffix_ids.insert(suffix, id);
-                id
-            };
-            if bid == 0xffff || sid == 0xffff {
-                return Err("Thai record IDs exceed 65534".into());
+                bases.len() - 1
+            });
+            if !marks.is_empty() && seen.insert(marks) {
+                sequences.push(marks);
             }
-            put16(&mut dense, bid);
-            put16(&mut dense, sid);
+            entries.push((bid, marks));
         }
-        let base_offset = 28 + dense.len();
-        let table_offset = base_offset + bases.len() * 8;
-        let data_offset = table_offset + (suffixes.len() + 1) * 4;
-        let size = data_offset + suffixes.iter().map(|s| 1 + s.len() * 8).sum::<usize>();
+        if bases.len() > MAX_BASES {
+            return Err(format!(
+                "Thai style has {} base records; CPSHAPE allows {MAX_BASES}",
+                bases.len()
+            ));
+        }
+        let (records, first) = pack_marks(&sequences);
+        if records.len() > MAX_RECORDS {
+            return Err(format!(
+                "Thai style has {} mark records; CPSHAPE allows {MAX_RECORDS}",
+                records.len()
+            ));
+        }
+        let size = STYLE_HEADER + KEY_COUNT * ENTRY_BYTES + (bases.len() + records.len()) * 8;
         if size > STYLE_LIMIT {
             return Err(format!(
                 "Thai style companion is {size} bytes; maximum is {STYLE_LIMIT}"
@@ -239,29 +246,18 @@ impl BakedStyle {
         }
         let mut output = Vec::with_capacity(size);
         put16(&mut output, bases.len() as u16);
-        put16(&mut output, suffixes.len() as u16);
-        for offset in [28, base_offset, table_offset, data_offset] {
-            put32(&mut output, offset as u32);
-        }
+        put16(&mut output, records.len() as u16);
         put16(&mut output, raster.metrics.ascender as i16 as u16);
         put16(&mut output, raster.metrics.descender as i16 as u16);
         put16(&mut output, raster.metrics.line_height as u16);
         put16(&mut output, 0);
-        output.extend_from_slice(&dense);
-        for base in bases {
-            base.encode(&mut output);
+        for (bid, marks) in entries {
+            let start = if marks.is_empty() { 0 } else { first[marks] };
+            let value = bid as u32 | (marks.len() as u32) << 7 | (start as u32) << 10;
+            output.extend_from_slice(&value.to_le_bytes()[..ENTRY_BYTES]);
         }
-        let mut offset = data_offset;
-        for suffix in &suffixes {
-            put32(&mut output, offset as u32);
-            offset += 1 + suffix.len() * 8;
-        }
-        put32(&mut output, offset as u32);
-        for suffix in suffixes {
-            output.push(suffix.len() as u8);
-            for &record in suffix {
-                record.encode(&mut output);
-            }
+        for record in bases.into_iter().chain(records) {
+            record.encode(&mut output);
         }
         Ok(output)
     }
@@ -270,48 +266,22 @@ impl BakedStyle {
     // publication requires exact original-glyph-ID/position oracle restoration.
     fn roundtrip(&self, raster: &Raster) -> Result<(), String> {
         let p = &self.payload;
-        if p.len() < 28 || p.len() > STYLE_LIMIT {
+        let base = STYLE_HEADER + KEY_COUNT * ENTRY_BYTES;
+        if p.len() < base || p.len() > STYLE_LIMIT {
             return Err("Invalid Thai style payload size".into());
         }
         let nb = usize::from(read16(p, 0)?);
-        let ns = usize::from(read16(p, 2)?);
-        let dense = read32(p, 4)? as usize;
-        let base = read32(p, 8)? as usize;
-        let table = read32(p, 12)? as usize;
-        let data = read32(p, 16)? as usize;
-        if dense != 28
-            || base != dense + KEY_COUNT * 4
-            || table != base + nb * 8
-            || data != table + (ns + 1) * 4
-            || data > p.len()
-            || read16(p, 26)? != 0
-            || read16(p, 20)? as i16 as i32 != raster.metrics.ascender
-            || read16(p, 22)? as i16 as i32 != raster.metrics.descender
-            || i32::from(read16(p, 24)?) != raster.metrics.line_height
+        let nr = usize::from(read16(p, 2)?);
+        let marks = base + nb * 8;
+        if !(1..=MAX_BASES).contains(&nb)
+            || nr > MAX_RECORDS
+            || p.len() != marks + nr * 8
+            || read16(p, 10)? != 0
+            || read16(p, 4)? as i16 as i32 != raster.metrics.ascender
+            || read16(p, 6)? as i16 as i32 != raster.metrics.descender
+            || i32::from(read16(p, 8)?) != raster.metrics.line_height
         {
             return Err("Invalid Thai style section bounds or metrics".into());
-        }
-        let offsets: Vec<_> = (0..=ns)
-            .map(|i| read32(p, table + i * 4).map(|n| n as usize))
-            .collect::<Result<_, _>>()?;
-        if offsets.first() != Some(&data) || offsets.last() != Some(&p.len()) {
-            return Err("Invalid Thai suffix endpoints".into());
-        }
-        let mut suffixes = Vec::with_capacity(ns);
-        for pair in offsets.windows(2) {
-            let (start, end) = (pair[0], pair[1]);
-            if start < data || start >= end || end > p.len() {
-                return Err("Invalid Thai suffix bounds".into());
-            }
-            let count = usize::from(p[start]);
-            if count > 5 || end - start != 1 + count * 8 {
-                return Err("Invalid Thai suffix count".into());
-            }
-            suffixes.push(
-                (0..count)
-                    .map(|i| decode_record(p, start + 1 + i * 8))
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
         }
         let reverse: BTreeMap<_, _> = self
             .mapping
@@ -319,15 +289,23 @@ impl BakedStyle {
             .map(|(&gid, &cp)| (cp as u16, gid))
             .collect();
         for key in 0..KEY_COUNT {
-            let bid = usize::from(read16(p, dense + key * 4)?);
-            let sid = usize::from(read16(p, dense + key * 4 + 2)?);
-            if bid >= nb || sid >= ns {
-                return Err("Invalid Thai recipe index".into());
+            let at = STYLE_HEADER + key * ENTRY_BYTES;
+            let value = u32::from(p[at]) | u32::from(p[at + 1]) << 8 | u32::from(p[at + 2]) << 16;
+            if value == ABSENT_ENTRY {
+                return Err(format!("Thai key {key} has no recipe"));
             }
-            let first = decode_record(p, base + bid * 8)?;
-            let restored = std::iter::once(&first)
-                .chain(suffixes[sid].iter())
-                .map(|record| {
+            let (bid, count, start) = (
+                (value & 0x7f) as usize,
+                (value >> 7 & 7) as usize,
+                (value >> 10) as usize,
+            );
+            if bid >= nb || count > MAX_MARKS || start + count > nr || (count == 0 && start != 0) {
+                return Err("Invalid Thai recipe entry".into());
+            }
+            let restored = std::iter::once(base + bid * 8)
+                .chain((start..start + count).map(|i| marks + i * 8))
+                .map(|offset| {
+                    let record = decode_record(p, offset)?;
                     let &gid = reverse
                         .get(&record.cp)
                         .ok_or("Unknown glyph in Thai roundtrip")?;
@@ -360,12 +338,45 @@ impl BakedStyle {
     }
 }
 
+/// Shared mark records and each sequence's first record.
+type MarkPlacement<'a> = (Vec<Record>, HashMap<&'a [Record], usize>);
+
+/// Place mark sequences longest first; one already contained in the records reuses
+/// them. Ties keep first-appearance order, matching the Python baker byte for byte.
+fn pack_marks<'a>(sequences: &[&'a [Record]]) -> MarkPlacement<'a> {
+    let mut order: Vec<usize> = (0..sequences.len()).collect();
+    order.sort_by_key(|&i| (std::cmp::Reverse(sequences[i].len()), i));
+    let mut records = Vec::new();
+    let mut first = HashMap::new();
+    let mut windows: HashMap<Vec<Record>, usize> = HashMap::new();
+    for i in order {
+        let marks = sequences[i];
+        let start = if let Some(&start) = windows.get(marks) {
+            start
+        } else {
+            let start = records.len();
+            records.extend_from_slice(marks);
+            for end in start..records.len() {
+                for begin in end.saturating_sub(MAX_MARKS - 1)..=end {
+                    windows
+                        .entry(records[begin..=end].to_vec())
+                        .or_insert(begin);
+                }
+            }
+            start
+        };
+        first.insert(marks, start);
+    }
+    (records, first)
+}
+
 fn read16(bytes: &[u8], offset: usize) -> Result<u16, String> {
     let data = bytes
         .get(offset..offset + 2)
         .ok_or("Truncated Thai uint16")?;
     Ok(u16::from_le_bytes([data[0], data[1]]))
 }
+#[cfg(test)]
 fn read32(bytes: &[u8], offset: usize) -> Result<u32, String> {
     let data = bytes
         .get(offset..offset + 4)
@@ -385,8 +396,14 @@ pub fn companion(
     header_toc: &[u8],
     styles: &[(u8, Vec<Vec<u8>>, Option<BakedStyle>)],
 ) -> Result<Vec<u8>, String> {
+    // The CRC, with the pair-tag field zeroed, is also the tag written into CPFont.
+    let mut unpaired = header_toc.to_vec();
+    unpaired
+        .get_mut(PAIR_TAG)
+        .ok_or("Truncated CPFont header")?
+        .fill(0);
     let mut metrics_crc = crc32fast::Hasher::new();
-    metrics_crc.update(header_toc);
+    metrics_crc.update(&unpaired);
     let mut cpfont_bytes = header_toc.len();
     let mut offset = 32 + 12 * styles.len();
     let mut payload = Vec::new();
@@ -414,7 +431,7 @@ pub fn companion(
     }
     let mut output = Vec::with_capacity(offset);
     output.extend_from_slice(b"CPSHAPE\0");
-    put16(&mut output, 1);
+    put16(&mut output, 2);
     put16(&mut output, 32);
     put32(
         &mut output,
@@ -560,8 +577,8 @@ mod tests {
             ),
             (1, 1)
         );
-        assert_eq!(model.payload.len(), 28 + 3772 * 4 + 8 + 8 + 9);
-        model.payload[28] = 1;
+        assert_eq!(model.payload.len(), 12 + 3772 * 3 + 8 + 8);
+        model.payload[12] = 1;
         assert!(model.roundtrip(&raster).is_err());
     }
 
@@ -581,5 +598,60 @@ mod tests {
         assert_ne!(&first[16..20], &changed_metrics[16..20]);
         assert_eq!(read32(&first, 20).unwrap(), crc32fast::hash(&first[32..]));
         assert_eq!(read32(&first, 24).unwrap() as usize, first.len());
+        let mut paired = header;
+        paired[PAIR_TAG].copy_from_slice(&first[16..20]);
+        assert_eq!(companion(&paired, &styles).unwrap(), changed_metrics);
+    }
+
+    #[test]
+    fn serialization_matches_python_baker_golden() {
+        // test/thai_render/test_thai_shape_bake.py pins the same length and CRC.
+        let (mut model, mut raster) = model_and_raster();
+        model.recipes = (0..KEY_COUNT)
+            .map(|key| {
+                std::iter::once(Record {
+                    cp: 0xe01 + (key / 82) as u16,
+                    advance: 64,
+                    x: 0,
+                    y: 0,
+                })
+                .chain((0..key % 4).map(|j| Record {
+                    cp: 0xe31 + ((key % 82 + j) % 5) as u16,
+                    advance: 0,
+                    x: -8 * j as i16,
+                    y: 24,
+                }))
+                .collect()
+            })
+            .collect();
+        (
+            raster.metrics.ascender,
+            raster.metrics.descender,
+            raster.metrics.line_height,
+        ) = (10, -3, 13);
+        let payload = model.serialize(&raster).unwrap();
+        assert_eq!(
+            (payload.len(), crc32fast::hash(&payload)),
+            (11816, 0xbb84_3c1d)
+        );
+    }
+
+    #[test]
+    fn contained_mark_sequences_share_records_longest_first() {
+        let record = |cp| Record {
+            cp,
+            advance: 0,
+            x: 0,
+            y: 0,
+        };
+        let (a, b, c) = (record(1), record(2), record(3));
+        let (bs, cs, abs, as_) = ([b], [c], [a, b], [a]);
+        let sequences: Vec<&[Record]> = vec![&bs, &cs, &abs, &as_];
+        let (records, first) = pack_marks(&sequences);
+        assert_eq!(records, [a, b, c]);
+        assert_eq!(
+            sequences.iter().map(|s| first[s]).collect::<Vec<_>>(),
+            [1, 2, 0, 0]
+        );
     }
 }

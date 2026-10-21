@@ -29,6 +29,10 @@ class SdCardFontManager {
   // True if any loaded font holds its CPSHAPE companion in RAM.
   bool holdsResidentThaiShape() const;
 
+  // Switch every resident companion to SD-backed without reloading fonts.
+  // False: at least one font refused, and the family must be reloaded.
+  bool demoteResidentThaiShape();
+
   // Additively load the .cpfont of `family` at the exact physical `pointSize`
   // (used for size-matched CJK UI fallback alongside the reader-size font).
   // Does not unload anything. If a font of that size is already loaded its id

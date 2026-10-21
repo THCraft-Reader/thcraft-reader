@@ -30,7 +30,7 @@ larger sizes or real bold/italic faces when requested; do not manufacture styles
   global font metrics, Thai line breaking, or unrelated families to fix one font.
 - Do not claim device heap usage, speed, or e-ink quality from host measurements.
 - No firmware rebuild is needed to install paired fonts on firmware that already
-  supports CPSHAPE. Do not run the firmware release workflow automatically.
+  supports CPSHAPE v2. Do not run the firmware release workflow automatically.
 
 ## 1. Select inputs and prepare desktop tools
 

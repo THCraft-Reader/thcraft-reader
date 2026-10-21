@@ -149,7 +149,9 @@ void SdCardFontSystem::begin(GfxRenderer& renderer, const bool residentThaiShape
 bool SdCardFontSystem::dropResidentThaiShape(GfxRenderer& renderer) {
   manager_.setResidentThaiShape(false);
   if (!manager_.holdsResidentThaiShape()) return false;
-  LOG_DBG("SDFS", "Reloading %s with SD-backed shaping", manager_.currentFamilyName().c_str());
+  if (manager_.demoteResidentThaiShape()) return true;
+  LOG_ERR("SDFS", "In-place demotion failed; reloading %s with SD-backed shaping",
+          manager_.currentFamilyName().c_str());
   unloadCpfonts(renderer);
   ensureLoadedInternal(renderer, /*preserveSelection=*/true);
   return true;

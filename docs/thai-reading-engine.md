@@ -394,14 +394,26 @@ rotated drawing and source-ordered glyph prewarming. Both measurement modes use
 the same signed 12.4 pen/offset rounding; tracking occurs only between outer
 clusters. Unsupported clusters remain wholly native.
 
-Companion v1 is little-endian: 32-byte `CPSHAPE\\0` header, 12-byte style TOC entries,
-28-byte style headers, 3,772 dense base/suffix ID pairs, eight-byte glyph records
-and counted suffix sequences. CRC32 protects the payload and binds recipes to
-CPFont header/TOC, intervals, glyph metadata, kerning and ligatures in file order
-(excluding bitmaps). Counts, offsets, glyph coverage and metrics are checked before
-publishing any style. Limits are 96 KiB/style and 384 KiB/family.
+Companion v2 is little-endian: 32-byte `CPSHAPE\\0` header, 12-byte style TOC entries,
+12-byte style headers, then per style 3,772 three-byte lookup entries, base records
+and mark records (eight bytes each). An entry packs a base ID (bits 0-6), a mark
+count (bits 7-9) and the first mark record (bits 10-23); mark sequences contained
+in a longer one reuse its records. Limits are 127 bases, five marks per recipe,
+16,383 mark records, 96 KiB/style and 384 KiB/family. Converting the current
+70-pair Thai pack reduces its companions by 31% in total, from 2,925,836 to
+2,017,720 bytes (Mali 26 pt: 80,890 to 54,092 bytes).
 
-Storage is selected once per font load, without a setting or font conversion.
+CRC32 protects the payload. The converter also takes the CRC32 of the CPFont
+header (pair-tag bytes zeroed), TOC, intervals, glyph metadata, kerning and
+ligatures in file order (excluding bitmaps), and writes it as the pair tag in both
+headers: CPSHAPE bytes 16-19 and the reserved CPFont v4 bytes 16-19. The reader
+compares the two tags instead of re-reading CPFont metadata, so a companion is
+ignored after its CPFont is rebuilt without it; the CPFont still loads. Counts, entries, glyph coverage and metrics are
+checked before publishing any style. `scripts/upgrade_thai_shape_v2.py` converts
+v1 pairs without re-baking; this firmware ignores v1 companions.
+
+Storage is chosen at font load, without a setting or font conversion, and a
+resident companion may later switch to SD-backed (below).
 The whole companion prefers PSRAM and is retained only when internal free memory
 is greater than 50 KiB before and after allocation. Otherwise the validated
 companion stays open through HAL and uses one shared cache across all fonts,
@@ -413,7 +425,12 @@ The reserve is measured at font load, before a book's working set exists. The
 EPUB reader therefore demotes a resident companion once per boot: when a page
 render cannot allocate its grayscale scratch, or internal heap is below the
 background build floors (32 KiB free, 16 KiB largest block) at the start of a
-render, it reloads the family SD-backed and logs the heap before and after.
+render, it switches the companion to SD-backed in place and logs the heap before
+and after. The views were validated against the same file, so only its 32-byte
+header is re-read and compared; font identity, glyph caches and loaded fonts are
+kept. If the file cannot be reopened, its size or header differs, or the shared
+cache cannot be allocated, the reader reloads the family with SD-backed shaping.
+Starting the File Transfer hotspot switches a resident companion the same way.
 
 The shared object contains eight 512-byte MRU blocks, two complete-cluster
 stages and 128 resolved recipes. Its compiled size is **12,604 bytes on C3/S3**
@@ -424,31 +441,34 @@ allocate nothing after load. Cached admission reads the entire cluster before
 exposing placements; cursor copies share immutable stage leases. Iteration
 performs no further SD reads.
 
-A recipe lookup touches the dense index, base records, suffix offsets and suffix
-data, which lie in different blocks, so eight blocks alone hold about two
-clusters' worth of mixed text. The resolved recipes (16 sets of eight, 40 bytes
+A recipe lookup touches its lookup entry, one base record and one contiguous run
+of mark records, which may lie in different blocks, so eight blocks alone hold
+only a few clusters' worth of mixed text. The resolved recipes (16 sets of eight, 40 bytes
 each on C3/S3) keep each recently used cluster's records, or the fact that its
-key has no recipe, keyed by owner and dense-entry offset. A repeated cluster then
+key has no recipe, keyed by owner and lookup-entry offset. A repeated cluster then
 stages without companion reads whatever the block cache holds. Recipes longer
 than four records stay on the block path. Invalidating a source drops its blocks
 and its recipes together.
 
-Optional dense indexes cost **15,088 bytes per present style**, at most 60,352
-bytes for four styles. They are retained only as a complete set that preserves
+Optional dense indexes (RAM copies of the lookup table) cost **11,316 bytes per
+present style**, at most 45,264 bytes for four styles. They are allocated before
+validation and filled by it, and retained only as a complete set that preserves
 greater than 50 KiB internal headroom; failure falls back to fully paged lookup.
-Firmware ELF type information reports per-font storage of 68 bytes (including the
-32-byte source, 12-byte HAL handle and buffer/index ownership), four 44-byte style
-views, a four-byte owning pointer, and an additional 80-byte retained HAL file
-implementation in cached mode. Allocator overhead and ordinary CPFont caches are
-extra. The host storage object is 168 bytes including its 56-byte source and
-64-byte synthetic HAL handle; that handle is not device-memory evidence.
+Firmware ELF type information (C3 `default` build) reports per-font storage of
+72 bytes (including the 32-byte source, 12-byte HAL handle, buffer/index
+ownership and companion size), four 28-byte style views, a four-byte owning
+pointer, and an additional 80-byte retained HAL file implementation in cached
+mode. Allocator overhead and ordinary CPFont caches are extra. Host object sizes
+differ and are not device-memory evidence.
 The shared working object is heap-owned because it cannot fit the render stack.
 
-CRC and structural validation stream through bounded scratch before publishing
-any style. Font identity still includes exactly the accepted native metrics CRC,
-payload CRC, version and active/disabled state; backing mode and cache warmth
-never enter it. CPFont v4, CPSHAPE v1 and healthy rendered-cache versions are
-unchanged. Ordinary glyph-cache clears retain shaping; resident-cache release
+The companion is laid out in read order, so the payload CRC, structural
+validation and any dense-index copy share one sequential pass through bounded
+scratch before publishing any style; SD-backed loads read each block once. Font
+identity includes exactly the accepted pair tag, payload CRC, version and
+active/disabled state; backing mode and cache warmth never enter it. The CPFont
+v4 format and healthy rendered-cache versions are unchanged; a paired CPFont's
+new header tag changes its identity, so books lay out again once. Ordinary glyph-cache clears retain shaping; resident-cache release
 invalidates this font's SD blocks without invalidating staged cursors, indexes,
 views or identity. The last cached owner and last stage lease release the shared
 allocation.

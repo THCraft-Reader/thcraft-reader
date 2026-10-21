@@ -30,7 +30,8 @@ def cpfont_sections(data):
     if data[:8] != b"CPFONT\0\0" or struct.unpack_from("<H", data, 8)[0] != 4:
         raise ValueError("Expected real CPFont v4")
     count = data[12]
-    crc = zlib.crc32(data[:32 + count * 32])
+    tag = baker.PAIR_TAG_OFFSET
+    crc = zlib.crc32(data[32:32 + count * 32], zlib.crc32(data[:tag] + bytes(4) + data[tag + 4:32]))
     styles = {}
     for index in range(count):
         fields = struct.unpack_from("<B3xIIBhhHHBBBI4x", data, 32 + index * 32)
@@ -110,8 +111,14 @@ class BakerBoundsTest(unittest.TestCase):
         for length in (0, 7):
             with self.subTest(length=length), self.assertRaises(ValueError):
                 baker.serialize_style([((0xE01, 1, 0, 0),) * length] * baker.KEY_COUNT, 30, -10, 40)
+        base = (0xE01, 100, 0, 0)
+        with self.assertRaisesRegex(ValueError, "base count"):
+            baker.serialize_style([((0xE01, key % 128, 0, 0),) for key in range(baker.KEY_COUNT)], 30, -10, 40)
+        with self.assertRaisesRegex(ValueError, "mark record count"):
+            baker.serialize_style([(base, *((0xE01, key, slot, 0) for slot in range(5)))
+                                   for key in range(baker.KEY_COUNT)], 30, -10, 40)
         with self.assertRaisesRegex(ValueError, "style companion bytes"):
-            baker.serialize_style([tuple((0xE01, key, slot, 0) for slot in range(6))
+            baker.serialize_style([(base, *((0xE01, key, slot, 0) for slot in range(3)))
                                    for key in range(baker.KEY_COUNT)], 30, -10, 40)
         with self.assertRaisesRegex(ValueError, "line advance"):
             baker.serialize_style([((0xE01, 100, 0, 0),)] * baker.KEY_COUNT, 300, 0, 300)
@@ -121,15 +128,34 @@ class BakerBoundsTest(unittest.TestCase):
 
     def test_corrupt_offsets_and_counts_fail_closed(self):
         valid = baker.serialize_style([((0xE01, 100, 0, 0),)] * baker.KEY_COUNT, 30, -10, 40)
-        for offset, encoded in ((4, struct.pack("<I", 0xFFFFFFFF)),
-                                (28, struct.pack("<HH", 0xFFFF, 0)),
-                                (len(valid) - 1, b"\x06")):
+        for offset, encoded in ((0, struct.pack("<H", 0)),
+                                (2, struct.pack("<H", 1)),
+                                (10, struct.pack("<H", 1)),
+                                (12, b"\x01\x00\x00"),
+                                (12, b"\x80\x00\x00"),
+                                (13, b"\x04")):
             broken = bytearray(valid)
             broken[offset:offset + len(encoded)] = encoded
             with self.subTest(offset=offset), self.assertRaises(ValueError):
                 baker.decode_style(broken)
         with self.assertRaises(ValueError):
             baker.decode_style(valid[:-1])
+
+    def test_contained_mark_sequences_share_records(self):
+        a, b, c = (baker.RECORD.pack(cp, 0, 0, 0) for cp in (1, 2, 3))
+        sequences = {(b,): 0, (c,): 1, (a, b): 2, (a,): 3}
+        records, first = baker.pack_marks(sequences)
+        self.assertEqual(records, [a, b, c])
+        self.assertEqual([first[m] for m in sequences], [1, 2, 0, 0])
+
+    def test_serialization_matches_browser_generator_golden(self):
+        # fonts_generator/src/thai.rs pins the same length and CRC for this input.
+        recipes = [((0xE01 + key // 82, 64, 0, 0),
+                    *((0xE31 + (key % 82 + j) % 5, 0, -8 * j, 24) for j in range(key % 4)))
+                   for key in range(baker.KEY_COUNT)]
+        payload = baker.serialize_style(recipes, 10, -3, 13)
+        self.assertEqual((len(payload), zlib.crc32(payload)), (11816, 0xBB843C1D))
+        self.assertEqual(baker.decode_style(payload), (recipes, (10, -3, 13)))
 
     def test_native_converter_import_does_not_load_harfbuzz(self):
         command = "import fontconvert_sdcard,sys; assert 'uharfbuzz' not in sys.modules"
@@ -292,7 +318,8 @@ class RealFontBakerTest(unittest.TestCase):
         magic, version, header_size, font_bytes, crc, payload_crc, total, count = struct.unpack_from(
             "<8sHHIIIII", companion)
         self.assertEqual((magic, version, header_size, font_bytes, total, count),
-                         (b"CPSHAPE\0", 1, 32, len(cpfont), len(companion), len(sources)))
+                         (b"CPSHAPE\0", baker.VERSION, 32, len(cpfont), len(companion), len(sources)))
+        self.assertEqual(struct.unpack_from("<I", cpfont, baker.PAIR_TAG_OFFSET)[0], crc)
         self.assertLessEqual(total, baker.FAMILY_LIMIT)
         computed_crc, styles = cpfont_sections(cpfont)
         self.assertEqual(crc, computed_crc)

@@ -45,8 +45,8 @@ INSTALL = """THCraft Thai paired bitmap fonts
 
 This pack uses the CPFont bitmap path with optional CPSHAPE Thai positioning.
 It is not a direct TTF/OTF/TTC installation: copying the source TTF alone does
-not install these paired bitmap recipes. Use firmware with Thai CPSHAPE support;
-older firmware can read the CPFont but will not apply the companion positioning.
+not install these paired bitmap recipes. Use firmware with Thai CPSHAPE v2 support;
+other firmware can read the CPFont but will not apply the companion positioning.
 The fonts contain a regular face; existing reader style fallback still applies.
 OFL.txt and the named fallback OFL files retain all source copyright notices.
 Coverage includes IPA, arrows, mathematical/decorative symbols, and Arabic
@@ -141,12 +141,14 @@ def validate_pair(cpfont: Path, source: dict, size: int, fallbacks: list[dict]) 
         raise ValueError(f"Truncated companion: {companion}")
     magic, version, header, font_bytes, metrics_crc, payload_crc, total, styles = struct.unpack_from(
         "<8sHHIIIII", shape)
-    if (magic != b"CPSHAPE\0" or version != 1 or header != 32 or font_bytes != len(font)
+    # CPSHAPE v2 pairs by repeating its metrics CRC in CPFont header bytes 16-19.
+    if (magic != b"CPSHAPE\0" or version != 2 or header != 32 or font_bytes != len(font)
             or total != len(shape) or total > 384 * 1024 or styles != 1 or font[12] != styles
+            or struct.unpack_from("<I", font, 16)[0] != metrics_crc
             or zlib.crc32(shape[header:]) != payload_crc):
         raise ValueError(f"Invalid or mismatched companion: {companion}")
     style, offset, length = struct.unpack_from("<B3xII", shape, 32)
-    if style != 0 or offset != 44 or not 28 <= length <= 96 * 1024 or offset + length != total:
+    if style != 0 or offset != 44 or not 12 + 46 * 82 * 3 <= length <= 96 * 1024 or offset + length != total:
         raise ValueError(f"Invalid regular companion payload: {companion}")
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if (report["dpi"] != 150 or report["point_size"] != size or report["format_version"] != version

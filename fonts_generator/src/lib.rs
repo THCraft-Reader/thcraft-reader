@@ -623,7 +623,9 @@ fn run(mut request: Request) -> Result<Value, String> {
         }
         u32::try_from(offset).map_err(|_| "CPFont file exceeds uint32 size bounds")?;
         let companion = if request.thai {
-            Some(thai::companion(&header_toc, &packed)?)
+            let companion = thai::companion(&header_toc, &packed)?;
+            header_toc[thai::PAIR_TAG].copy_from_slice(&companion[16..20]);
+            Some(companion)
         } else {
             None
         };
@@ -637,7 +639,7 @@ fn run(mut request: Request) -> Result<Value, String> {
         let basename = format!("{}_{}", request.family, size);
         let font_path = format!("fonts/{}/{}.cpfont", request.family, basename);
         let mut report = json!({"generator": "fonts_generator", "generator_version": env!("CARGO_PKG_VERSION"),
-            "cpfont_version": 4, "cpshape_version": if request.thai { Some(1) } else { None },
+            "cpfont_version": 4, "cpshape_version": if request.thai { Some(2) } else { None },
             "dpi": 150, "point_size": size, "force_autohint": request.autohint,
             "settings": request, "versions": {"freetype": freetype, "harfbuzz": harfbuzz,
                 "ttf_parser": "0.25.1", "rust": option_env!("FG_RUST_VERSION"),

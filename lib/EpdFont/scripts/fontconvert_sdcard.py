@@ -867,7 +867,8 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
     fallback_style_fonts = fallback_style_fonts or {}
     shape_models = {}
     if thai_shaping:
-        from thai_shape import bake_style, expanded_intervals, finish_style, make_companion, write_report
+        from thai_shape import (bake_style, expanded_intervals, finish_style, make_companion, paired_header,
+                                write_report)
     for style_id in sorted(style_fonts.keys()):
         fontfile = style_fonts[style_id]
         fallback_fontfiles = fallback_style_fonts.get(style_id, ())
@@ -903,6 +904,8 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
 
     # Build global header
     # V4 header: magic(8) + version(2) + flags(2) + styleCount(1) + reserved(19) = 32
+    # Reserved bytes 16-19 hold the CPSHAPE pair tag when --thai-shaping is used
+    # (thai_shape.paired_header); every other writer must leave them zero.
     header = struct.pack("<8sHHB19s", MAGIC, CPFONT_VERSION, flags, style_count, bytes(19))
     assert len(header) == HEADER_SIZE
 
@@ -935,6 +938,7 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
     companion = None
     if thai_shaping:
         companion = make_companion(header, toc_data, packed_sections, shape_models)
+        header = paired_header(header, companion)
 
     # Write output
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)

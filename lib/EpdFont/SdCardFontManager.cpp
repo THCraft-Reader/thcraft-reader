@@ -134,6 +134,14 @@ bool SdCardFontManager::holdsResidentThaiShape() const {
   return false;
 }
 
+bool SdCardFontManager::demoteResidentThaiShape() {
+  bool demoted = true;
+  for (const auto& lf : loaded_) {
+    if (!lf.font->demoteResidentThaiShape()) demoted = false;
+  }
+  return demoted;
+}
+
 int SdCardFontManager::getFontId(const std::string& familyName) const {
   if (familyName != loadedFamilyName_ || loaded_.empty()) return 0;
   return loaded_.front().fontId;

@@ -34,11 +34,11 @@ class SdCardFontSystem {
   /// residentThaiShape=false keeps every CPSHAPE companion SD-backed until reboot.
   void begin(GfxRenderer& renderer, bool residentThaiShape = true);
 
-  /// Reload the selected family with every CPSHAPE companion SD-backed, and keep
-  /// later loads that way until reboot. For sessions that start WiFi without a
-  /// fresh-heap reboot, and for a reader whose working set no longer fits.
-  /// Returns false, without reloading, when no loaded font holds a resident
-  /// companion. The caller must hold RenderLock.
+  /// Switch every CPSHAPE companion to SD-backed in place, falling back to a
+  /// family reload, and keep later loads that way until reboot. For sessions
+  /// that start WiFi without a fresh-heap reboot, and for a reader whose working
+  /// set no longer fits. Returns false, without reloading, when no loaded font
+  /// holds a resident companion. The caller must hold RenderLock.
   bool dropResidentThaiShape(GfxRenderer& renderer);
 
   /// Ensure the correct SD font family is loaded for the current settings.

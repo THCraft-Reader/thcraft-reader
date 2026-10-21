@@ -321,19 +321,21 @@ void shapePut32(size_t p, uint32_t n) {
   shapePut16(p, n);
   shapePut16(p + 2, n >> 16);
 }
+constexpr uint32_t SHAPE_BASES = ThaiShapeView::HEADER_BYTES + ThaiShapeView::DENSE_BYTES;
+// A rebuilt pair carries a new tag in both headers; any value derived from the metadata will do.
 void updateShapeCrc(uint32_t glyphCount = GLYPHS) {
   const size_t metadataEnd = sdFontTestFile.size() - glyphCount * BITMAP_BYTES;
-  shapePut32(16, mz_crc32(MZ_CRC32_INIT, sdFontTestFile.data(), metadataEnd));
+  const uint32_t tag = mz_crc32(MZ_CRC32_INIT, sdFontTestFile.data() + 32, metadataEnd - 32);
+  put32(16, tag);
+  shapePut32(16, tag);
   shapePut32(20, mz_crc32(MZ_CRC32_INIT, sdFontTestCompanion.data() + 32, sdFontTestCompanion.size() - 32));
 }
+// One style with one base record and no marks; every key maps to that base.
 void makeShape(uint32_t glyphCount = GLYPHS, uint16_t first = FIRST) {
-  constexpr uint32_t base = 28 + ThaiShapeView::DENSE_COUNT * 4;
-  constexpr uint32_t offsets = base + 8;
-  constexpr uint32_t data = offsets + 8;
-  constexpr uint32_t styleSize = data + 1;
+  constexpr uint32_t styleSize = SHAPE_BASES + 8;
   sdFontTestCompanion.assign(44 + styleSize, 0);
   std::memcpy(sdFontTestCompanion.data(), "CPSHAPE\0", 8);
-  shapePut16(8, 1);
+  shapePut16(8, 2);
   shapePut16(10, 32);
   shapePut32(12, sdFontTestFile.size());
   shapePut32(24, sdFontTestCompanion.size());
@@ -341,18 +343,20 @@ void makeShape(uint32_t glyphCount = GLYPHS, uint16_t first = FIRST) {
   shapePut32(36, 44);
   shapePut32(40, styleSize);
   shapePut16(44, 1);
-  shapePut16(46, 1);
-  shapePut32(48, 28);
-  shapePut32(52, base);
-  shapePut32(56, offsets);
-  shapePut32(60, data);
-  shapePut16(64, 32);
-  shapePut16(68, 32);
-  shapePut16(44 + base, first);
-  shapePut16(44 + base + 2, 32 << 4);
-  shapePut32(44 + offsets, data);
-  shapePut32(48 + offsets, styleSize);
+  shapePut16(48, 32);
+  shapePut16(52, 32);
+  shapePut16(44 + SHAPE_BASES, first);
+  shapePut16(44 + SHAPE_BASES + 2, 32 << 4);
   updateShapeCrc(glyphCount);
+}
+// The native identity of the paired CPFont, whose header carries the pair tag.
+uint32_t pairedNativeHash() {
+  const auto companion = sdFontTestCompanion;
+  sdFontTestCompanion.clear();
+  SdCardFont native;
+  EXPECT_TRUE(native.load("fixture.cpfont"));
+  sdFontTestCompanion = companion;
+  return native.contentHash();
 }
 
 struct ShapeTestScope {
@@ -424,13 +428,10 @@ void makeFourStyleShape() {
     put32(toc + 24, 160 + i * nativeStyleBytes);
     std::memcpy(sdFontTestFile.data() + 160 + i * nativeStyleBytes, regular.data() + 64, nativeStyleBytes);
   }
-  constexpr uint32_t base = 28 + ThaiShapeView::DENSE_COUNT * 4;
-  constexpr uint32_t offsets = base + 4 * 8;
-  constexpr uint32_t data = offsets + 8;
-  constexpr uint32_t styleSize = data + 1;
+  constexpr uint32_t styleSize = SHAPE_BASES + 4 * 8;
   sdFontTestCompanion.assign(80 + 4 * styleSize, 0);
   std::memcpy(sdFontTestCompanion.data(), "CPSHAPE\0", 8);
-  shapePut16(8, 1);
+  shapePut16(8, 2);
   shapePut16(10, 32);
   shapePut32(12, sdFontTestFile.size());
   shapePut32(24, sdFontTestCompanion.size());
@@ -441,27 +442,22 @@ void makeFourStyleShape() {
     shapePut32(36 + i * 12, section);
     shapePut32(40 + i * 12, styleSize);
     shapePut16(section, 4);
-    shapePut16(section + 2, 1);
-    shapePut32(section + 4, 28);
-    shapePut32(section + 8, base);
-    shapePut32(section + 12, offsets);
-    shapePut32(section + 16, data);
-    shapePut16(section + 20, 32 + i);
-    shapePut16(section + 22, -i);
-    shapePut16(section + 24, 32 + i);
-    for (uint32_t key = 0; key < ThaiShapeView::DENSE_COUNT; ++key) shapePut16(section + 28 + key * 4, (key + i) % 4);
+    shapePut16(section + 4, 32 + i);
+    shapePut16(section + 6, -i);
+    shapePut16(section + 8, 32 + i);
+    for (uint32_t key = 0; key < ThaiShapeView::DENSE_COUNT; ++key)
+      sdFontTestCompanion[section + ThaiShapeView::HEADER_BYTES + key * 3] = (key + i) % 4;
     for (uint8_t recipe = 0; recipe < 4; ++recipe) {
-      shapePut16(section + base + recipe * 8, FIRST + i * 4 + recipe);
-      shapePut16(section + base + recipe * 8 + 2, (32 + i) << 4);
-      shapePut16(section + base + recipe * 8 + 4, -i * 16);
-      shapePut16(section + base + recipe * 8 + 6, i * 16);
+      shapePut16(section + SHAPE_BASES + recipe * 8, FIRST + i * 4 + recipe);
+      shapePut16(section + SHAPE_BASES + recipe * 8 + 2, (32 + i) << 4);
+      shapePut16(section + SHAPE_BASES + recipe * 8 + 4, -i * 16);
+      shapePut16(section + SHAPE_BASES + recipe * 8 + 6, i * 16);
     }
-    shapePut32(section + offsets, data);
-    shapePut32(section + offsets + 4, styleSize);
   }
-  uint32_t crc = mz_crc32(MZ_CRC32_INIT, sdFontTestFile.data(), 160);
+  uint32_t crc = mz_crc32(MZ_CRC32_INIT, sdFontTestFile.data() + 32, 128);
   for (uint8_t i = 0; i < 4; ++i)
     crc = mz_crc32(crc, sdFontTestFile.data() + 160 + i * nativeStyleBytes, nativeMetadataBytes);
+  put32(16, crc);
   shapePut32(16, crc);
   shapePut32(20, mz_crc32(MZ_CRC32_INIT, sdFontTestCompanion.data() + 32, sdFontTestCompanion.size() - 32));
 }
@@ -616,9 +612,8 @@ TEST(SdCardFontTest, CompanionStaysPublishedAcrossAllResidentCacheEvictions) {
 TEST(SdCardFontTest, CorruptOrOversizedCompanionCannotFailNativeFontLoad) {
   ShapeTestScope guard;
   makeFont();
-  SdCardFont native;
-  ASSERT_TRUE(native.load("fixture.cpfont"));
-  const auto nativeHash = native.contentHash();
+  makeShape();
+  const auto nativeHash = pairedNativeHash();
   for (int scenario = 0; scenario < 15; ++scenario) {
     SCOPED_TRACE(scenario);
     makeShape();
@@ -627,7 +622,7 @@ TEST(SdCardFontTest, CorruptOrOversizedCompanionCannotFailNativeFontLoad) {
         sdFontTestCompanion.resize(20);
         break;
       case 1:
-        shapePut16(8, 2);
+        shapePut16(8, 1);
         break;
       case 2:
         shapePut32(12, sdFontTestFile.size() + 1);
@@ -642,15 +637,15 @@ TEST(SdCardFontTest, CorruptOrOversizedCompanionCannotFailNativeFontLoad) {
         sdFontTestCompanion.resize(ThaiShapeView::MAX_FAMILY_BYTES + 1);
         break;
       case 6:
-        shapePut16(44 + 28, 2);
+        sdFontTestCompanion[44 + ThaiShapeView::HEADER_BYTES] = 1;  // base 1 of 1
         updateShapeCrc();
         break;
       case 7:
-        shapePut32(56, UINT32_MAX);
+        shapePut16(46, 1);  // records beyond the style size
         updateShapeCrc();
         break;
       case 8:
-        shapePut16(44 + 28 + ThaiShapeView::DENSE_COUNT * 4, 1);
+        shapePut16(44 + SHAPE_BASES, 1);  // uncovered base glyph
         updateShapeCrc();
         break;
       case 9:
@@ -662,19 +657,19 @@ TEST(SdCardFontTest, CorruptOrOversizedCompanionCannotFailNativeFontLoad) {
         updateShapeCrc();
         break;
       case 11:
-        shapePut16(64, 31);
+        shapePut16(48, 31);  // ascender differs from CPFont
         updateShapeCrc();
         break;
       case 12:
-        shapePut16(44 + 28, 0xFFFF);
+        sdFontTestCompanion[44 + ThaiShapeView::HEADER_BYTES] = 0x80;  // one mark of zero records
         updateShapeCrc();
         break;
       case 13:
-        shapePut32(48 + 28 + ThaiShapeView::DENSE_COUNT * 4 + 8, UINT32_MAX);
+        shapePut16(54, 1);  // reserved
         updateShapeCrc();
         break;
       case 14:
-        sdFontTestCompanion.back() = 6;
+        sdFontTestCompanion[44 + ThaiShapeView::HEADER_BYTES + 1] = 0x04;  // base-only entry with a mark offset
         updateShapeCrc();
         break;
     }
@@ -720,7 +715,7 @@ TEST(SdCardFontTest, SameSizeNativeMetricsEditChangesActiveFontIdentity) {
   const auto before = font.contentHash();
   const auto bytes = sdFontTestFile.size();
   put16(64 + 24 + offsetof(EpdGlyph, advanceX), 17 << 4);
-  updateShapeCrc();  // recipe bytes and their payload CRC do not change
+  updateShapeCrc();  // the rebuilt pair gets a new tag; recipe bytes do not change
   ASSERT_EQ(bytes, sdFontTestFile.size());
   ASSERT_TRUE(font.load("fixture.cpfont"));
   ASSERT_NE(nullptr, font.getEpdFont()->getThaiShape());
@@ -767,9 +762,9 @@ TEST(SdCardFontTest, FontSizeReloadsPreserveRecipesAcrossBackingTransitions) {
       const uint8_t size = sizes[i];
       sdFontTestFile[44] = size;
       put16(45, size);
-      shapePut16(44 + 20, size);
-      shapePut16(44 + 24, size);
-      shapePut16(44 + 28 + ThaiShapeView::DENSE_COUNT * 4 + 2, size << 4);
+      shapePut16(44 + 4, size);
+      shapePut16(44 + 8, size);
+      shapePut16(44 + SHAPE_BASES + 2, size << 4);
       updateShapeCrc();
       probe::internalHeadroomBytes = i == 2 || i == 3 ? 45 * 1024 : guard.headroom;
       ASSERT_TRUE(font.load("fixture.cpfont"));
@@ -919,7 +914,7 @@ TEST(SdCardFontTest, SdBackedLoadSkipsResidentBufferAndIndexesDespiteHeadroom) {
   ASSERT_TRUE(font.load("fixture.cpfont", /*residentThaiShape=*/false));
   ASSERT_NE(nullptr, font.getEpdFont()->getThaiShape());
   EXPECT_EQ(1u, sdFontTestShapeOpenHandles);
-  constexpr size_t indexBytes = ThaiShapeView::DENSE_COUNT * 4;
+  constexpr size_t indexBytes = ThaiShapeView::DENSE_BYTES;
   for (const auto& allocation : nullableAllocations) {
     if (!allocation.pointer) continue;
     EXPECT_NE(sdFontTestCompanion.size(), allocation.size);
@@ -934,10 +929,9 @@ TEST(SdCardFontTest, SdBackedLoadSkipsResidentBufferAndIndexesDespiteHeadroom) {
 TEST(SdCardFontTest, MinimumCacheOomIsNativeOnlyLeakFreeAndReloadRecovers) {
   ShapeTestScope guard;
   makeFont();
-  SdCardFont font;
-  ASSERT_TRUE(font.load("fixture.cpfont"));
-  const auto nativeHash = font.contentHash();
   makeShape();
+  const auto nativeHash = pairedNativeHash();
+  SdCardFont font;
   probe::internalHeadroomBytes = 45 * 1024;
   failNextScalarSize = sizeof(ThaiShapeCache);
   ASSERT_TRUE(font.load("fixture.cpfont"));
@@ -999,8 +993,8 @@ TEST(SdCardFontTest, FourDistinctStylesPublishAtomicallyInEveryBackingMode) {
     }
   }
   // Corrupt only the final style, retaining a correct payload CRC.
-  constexpr size_t styleSize = 28 + ThaiShapeView::DENSE_COUNT * 4 + 32 + 8 + 1;
-  shapePut16(80 + 3 * styleSize + 28, 4);
+  constexpr size_t styleSize = SHAPE_BASES + 4 * 8;
+  sdFontTestCompanion[80 + 3 * styleSize + ThaiShapeView::HEADER_BYTES] = 4;
   shapePut32(20, mz_crc32(MZ_CRC32_INIT, sdFontTestCompanion.data() + 32, sdFontTestCompanion.size() - 32));
   for (const size_t headroom : {guard.headroom, size_t{45 * 1024}}) {
     probe::internalHeadroomBytes = headroom;
@@ -1017,7 +1011,7 @@ TEST(SdCardFontTest, OptionalIndexesAreAllOrNoneOnOomAndPostallocationReserve) {
   SdCardFont font;
   ASSERT_TRUE(font.load("fixture.cpfont"));
   const auto hash = font.contentHash();
-  constexpr size_t indexBytes = ThaiShapeView::DENSE_COUNT * 4;
+  constexpr size_t indexBytes = ThaiShapeView::DENSE_BYTES;
   for (int scenario = 0; scenario < 3; ++scenario) {
     // The scripted initial sample skips residency but allows all four indexes.
     if (scenario < 2) {
@@ -1036,6 +1030,62 @@ TEST(SdCardFontTest, OptionalIndexesAreAllOrNoneOnOomAndPostallocationReserve) {
     }
     for (uint8_t style = 0; style < 4; ++style) expectShape(font, style, FIRST + style * 5);
   }
+}
+
+TEST(SdCardFontTest, DemotionServesTheSameRecipesFromSdWithoutReloading) {
+  ShapeTestScope guard;
+  makeFourStyleShape();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  ASSERT_TRUE(font.hasResidentThaiShape());
+  const auto hash = font.contentHash();
+  const ThaiShapeView* views[4];
+  for (uint8_t style = 0; style < 4; ++style) views[style] = font.getEpdFont(style)->getThaiShape();
+  const auto liveBytes = nullableLiveBytes;
+  const auto reads = sdFontTestReads;
+  auto shapeReads = sdFontTestShapeReads;
+  ASSERT_TRUE(font.demoteResidentThaiShape());
+  EXPECT_FALSE(font.hasResidentThaiShape());
+  EXPECT_EQ(1u, sdFontTestShapeOpenHandles);
+  EXPECT_EQ(liveBytes - sdFontTestCompanion.size() + sizeof(ThaiShapeCache), nullableLiveBytes);
+  EXPECT_EQ(sdFontTestShapeReads - shapeReads, sdFontTestReads - reads);  // no CPFont re-read
+  EXPECT_EQ(hash, font.contentHash());
+  shapeReads = sdFontTestShapeReads;
+  for (uint8_t style = 0; style < 4; ++style) {
+    EXPECT_EQ(views[style], font.getEpdFont(style)->getThaiShape());
+    expectShape(font, style, FIRST + style * 5);
+  }
+  EXPECT_LT(shapeReads, sdFontTestShapeReads);
+  EXPECT_FALSE(font.hasThaiShapeError());
+  EXPECT_TRUE(font.demoteResidentThaiShape());  // already SD-backed
+  ASSERT_TRUE(font.load("fixture.cpfont"));
+  EXPECT_TRUE(font.hasResidentThaiShape());
+  EXPECT_EQ(hash, font.contentHash());
+}
+
+TEST(SdCardFontTest, DemotionRefusesAChangedCompanionAndCacheOom) {
+  ShapeTestScope guard;
+  makeFont();
+  makeShape();
+  for (int scenario = 0; scenario < 2; ++scenario) {
+    SCOPED_TRACE(scenario);
+    SdCardFont font;
+    ASSERT_TRUE(font.load("fixture.cpfont"));
+    ASSERT_TRUE(font.hasResidentThaiShape());
+    const auto original = sdFontTestCompanion;
+    if (scenario == 0) {
+      sdFontTestCompanion[20] ^= 1;
+    } else {
+      failNextScalarSize = sizeof(ThaiShapeCache);
+    }
+    EXPECT_FALSE(font.demoteResidentThaiShape());
+    sdFontTestCompanion = original;
+    // A refused demotion leaves no usable shaping: the caller reloads.
+    if (scenario == 1) EXPECT_EQ(-1, font.prewarm("\xE0\xB8\x81", 1));
+    ASSERT_TRUE(font.load("fixture.cpfont", /*residentThaiShape=*/false));
+    expectShape(font);
+  }
+  EXPECT_EQ(0u, sdFontTestShapeOpenHandles + failNextScalarSize);
 }
 
 TEST(SdCardFontTest, SharedCacheHasOneAllocationAndStagesOutliveUnloadedOwners) {
@@ -1151,10 +1201,9 @@ TEST(SdCardFontTest, CachedReadFaultsLatchWithoutRetriesOrFallbackCachePublicati
 TEST(SdCardFontTest, ValidationReadFailureNeverPublishesAnActiveStyle) {
   ShapeTestScope guard;
   makeFont();
-  SdCardFont font;
-  ASSERT_TRUE(font.load("fixture.cpfont"));
-  const auto nativeHash = font.contentHash();
   makeShape();
+  const auto nativeHash = pairedNativeHash();
+  SdCardFont font;
   probe::internalHeadroomBytes = 45 * 1024;
   // Header succeeds; the first cached block fill fails.
   sdFontTestShortShapeReadAt = sdFontTestShapeReads + 2;
@@ -1180,8 +1229,8 @@ TEST(SdCardFontTest, FullyPagedAndIndexedLookupDifferOnlyInDenseHalRequests) {
     expectShape(font);
     requests[indexed] = sdFontTestShapeReads - before;
   }
-  // This fixture's base/offset/count records fit one final block; key zero is
-  // in block zero. A copied dense index removes precisely that cold HAL read.
+  // This fixture's base record is in the final block; key zero is in block zero.
+  // A copied lookup table removes precisely that cold HAL read.
   EXPECT_EQ(2u, requests[0]);
   EXPECT_EQ(1u, requests[1]);
 }

@@ -5,6 +5,7 @@
 #include <ThaiShape.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -23,33 +24,51 @@ void put32(std::vector<uint8_t>& b, size_t p, uint32_t n) {
   put16(b, p + 2, n >> 16);
 }
 bool covered(void*, uint32_t cp) { return (cp >= 0xE01 && cp <= 0xE2E) || cp == 0xE001; }
-std::vector<uint8_t> payload() {
-  const uint32_t base = 28 + ThaiShapeView::DENSE_COUNT * 4;
-  const uint32_t offsets = base + ThaiShapeView::DENSE_COUNT * 8;
-  const uint32_t data = offsets + 8;
-  std::vector<uint8_t> b(data + 9);
-  put16(b, 0, ThaiShapeView::DENSE_COUNT);
-  put16(b, 2, 1);
-  put32(b, 4, 28);
-  put32(b, 8, base);
-  put32(b, 12, offsets);
-  put32(b, 16, data);
-  put16(b, 20, 30);
-  put16(b, 22, -10);
-  put16(b, 24, 40);
-  for (uint32_t i = 0; i < ThaiShapeView::DENSE_COUNT; ++i) {
-    put16(b, 28 + i * 4, i);
-    put16(b, base + i * 8, 0xE01 + i / 82);
-    put16(b, base + i * 8 + 2, 100 + i % 82);
+constexpr uint32_t HEADER = ThaiShapeView::HEADER_BYTES;
+constexpr uint32_t BASES = HEADER + ThaiShapeView::DENSE_BYTES;
+constexpr uint32_t BASE_COUNT = 46;
+constexpr uint32_t MARKS = BASES + BASE_COUNT * ThaiShapeView::RECORD_BYTES;
+// Unused records pad every style past 48 cache blocks.
+constexpr uint32_t FILLER = 1600;
+uint32_t entry(uint32_t base, uint32_t marks, uint32_t first) { return base | marks << 7 | first << 10; }
+void putEntry(std::vector<uint8_t>& b, size_t at, uint32_t key, uint32_t value) {
+  for (uint32_t i = 0; i < ThaiShapeView::ENTRY_BYTES; ++i) b[at + HEADER + key * 3 + i] = value >> (i * 8);
+}
+bool validate(ThaiShapeView& view, ThaiShapeSource& source, uint32_t offset, size_t size,
+              uint8_t* denseCopy = nullptr) {
+  ThaiShapeStream stream(source, offset, nullptr, nullptr);
+  return view.validate(stream, size, covered, nullptr, denseCopy);
+}
+// One base per consonant (style-rotated); each variant owns `marks` records that
+// identify it, shared by every consonant.
+std::vector<uint8_t> styledPayload(unsigned style, uint8_t marks) {
+  const uint32_t records = 82 * marks + FILLER;
+  std::vector<uint8_t> b(MARKS + records * ThaiShapeView::RECORD_BYTES);
+  put16(b, 0, BASE_COUNT);
+  put16(b, 2, records);
+  put16(b, 4, 30 + style);
+  put16(b, 6, -10 - style);
+  put16(b, 8, 40 + style * 2);
+  for (uint32_t key = 0; key < ThaiShapeView::DENSE_COUNT; ++key)
+    putEntry(b, 0, key, entry((key / 82 + style) % BASE_COUNT, marks, marks ? key % 82 * marks : 0));
+  for (uint32_t i = 0; i < BASE_COUNT; ++i) {
+    put16(b, BASES + i * 8, 0xE01 + i);
+    put16(b, BASES + i * 8 + 2, 100 + i + style * 100);
+    put16(b, BASES + i * 8 + 4, -int(style) - 3);
+    put16(b, BASES + i * 8 + 6, 7 + style);
   }
-  put32(b, offsets, data);
-  put32(b, offsets + 4, b.size());
-  b[data] = 1;
-  put16(b, data + 1, 0xE001);
-  put16(b, data + 5, -13);
-  put16(b, data + 7, 27);
+  for (uint32_t r = 0; r < records; ++r) put16(b, MARKS + r * 8, 0xE001);
+  for (uint32_t variant = 0; variant < 82; ++variant) {
+    for (uint32_t j = 0; j < marks; ++j) {
+      const uint32_t at = MARKS + (variant * marks + j) * 8;
+      put16(b, at + 2, variant + style);
+      put16(b, at + 4, -13 - int(j));
+      put16(b, at + 6, 27 + j);
+    }
+  }
   return b;
 }
+std::vector<uint8_t> payload() { return styledPayload(0, 1); }
 std::vector<ThaiGlyphPlacement> placements(ThaiGlyphCursor& cursor) {
   std::vector<ThaiGlyphPlacement> result;
   ThaiGlyphPlacement p;
@@ -112,32 +131,6 @@ std::string keyText(uint32_t key) {
   return text;
 }
 
-std::vector<uint8_t> styledPayload(unsigned style, uint8_t suffixCount) {
-  auto bytes = payload();
-  const uint32_t base = 28 + ThaiShapeView::DENSE_COUNT * 4;
-  const uint32_t offsets = base + ThaiShapeView::DENSE_COUNT * 8;
-  const uint32_t data = offsets + 8;
-  bytes.resize(data + 1 + suffixCount * 8);
-  put16(bytes, 20, 30 + style);
-  put16(bytes, 22, -10 - style);
-  put16(bytes, 24, 40 + style * 2);
-  for (uint32_t i = 0; i < ThaiShapeView::DENSE_COUNT; ++i) {
-    put16(bytes, 28 + i * 4, (i + style * 83) % ThaiShapeView::DENSE_COUNT);
-    put16(bytes, base + i * 8 + 2, 100 + i % 82 + style * 100);
-    put16(bytes, base + i * 8 + 4, -int(style) - 3);
-    put16(bytes, base + i * 8 + 6, 7 + style);
-  }
-  put32(bytes, offsets + 4, bytes.size());
-  bytes[data] = suffixCount;
-  for (uint8_t i = 0; i < suffixCount; ++i) {
-    put16(bytes, data + 1 + i * 8, 0xE001);
-    put16(bytes, data + 3 + i * 8, i + style);
-    put16(bytes, data + 5 + i * 8, -13 - i);
-    put16(bytes, data + 7 + i * 8, 27 + i);
-  }
-  return bytes;
-}
-
 }  // namespace
 
 TEST(ThaiShapeTest, SelectsExactNormalStackedAmAndDescenderKeys) {
@@ -145,7 +138,7 @@ TEST(ThaiShapeTest, SelectsExactNormalStackedAmAndDescenderKeys) {
   ThaiShapeSource source;
   source.setResident(bytes.data(), bytes.size());
   ThaiShapeView shape;
-  ASSERT_TRUE(shape.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(shape, source, 0, bytes.size()));
   struct Case {
     const char* text;
     uint32_t base;
@@ -163,7 +156,8 @@ TEST(ThaiShapeTest, SelectsExactNormalStackedAmAndDescenderKeys) {
     const auto output = placements(cursor);
     ASSERT_EQ(2u, output.size());
     EXPECT_EQ(c.base, output[0].codepoint);
-    EXPECT_EQ(100 + c.variant, output[0].advanceFP);
+    EXPECT_EQ(100 + c.base - 0xE01, output[0].advanceFP);
+    EXPECT_EQ(c.variant, output[1].advanceFP);
     EXPECT_EQ(ThaiGlyphPlacement::ClusterStart | ThaiGlyphPlacement::RecipeStart, output[0].flags);
     EXPECT_EQ(0xE001u, output[1].codepoint);
     EXPECT_EQ(-13, output[1].xOffsetFP);
@@ -182,7 +176,7 @@ TEST(ThaiShapeTest, OuterClusterIncludesNativeLeadingVowelAndPreservesFollowingT
   ThaiShapeSource source;
   source.setResident(bytes.data(), bytes.size());
   ThaiShapeView shape;
-  ASSERT_TRUE(shape.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(shape, source, 0, bytes.size()));
   ThaiGlyphCursor cursor;
   ASSERT_TRUE(cursor.begin("เก่งX", shape));
   const auto output = placements(cursor);
@@ -200,7 +194,7 @@ TEST(ThaiShapeTest, UnsupportedClusterEmitsNothingIncludingItsSupportedPrefix) {
   ThaiShapeSource source;
   source.setResident(bytes.data(), bytes.size());
   ThaiShapeView shape;
-  ASSERT_TRUE(shape.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(shape, source, 0, bytes.size()));
   for (const char* text : {"ก่ี่ข", "กีีข", "กํุ่ข"}) {
     ThaiGlyphCursor cursor;
     thai::Cluster cluster{};
@@ -213,9 +207,8 @@ TEST(ThaiShapeTest, UnsupportedClusterEmitsNothingIncludingItsSupportedPrefix) {
   }
   // A missing later recipe rejects the entire TCC, not merely that recipe.
   const uint32_t key = (0xE2D - 0xE01) * 82;
-  put16(bytes, 28 + key * 4, 0xFFFF);
-  put16(bytes, 30 + key * 4, 0xFFFF);
-  ASSERT_TRUE(shape.validate(source, 0, bytes.size(), covered, nullptr));
+  putEntry(bytes, 0, key, ThaiShapeView::ABSENT_ENTRY);
+  ASSERT_TRUE(validate(shape, source, 0, bytes.size()));
   ThaiGlyphCursor cursor;
   EXPECT_FALSE(cursor.begin("เรื่อง", shape));
   EXPECT_EQ(std::string_view("เรื่อ").size(), cursor.consumedBytes());
@@ -233,7 +226,7 @@ TEST(ThaiShapeTest, SpacingUnitsCarryOriginalSpansThroughNativeAndReorderedGlyph
   ThaiShapeSource source;
   source.setResident(bytes.data(), bytes.size());
   ThaiShapeView shape;
-  ASSERT_TRUE(shape.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(shape, source, 0, bytes.size()));
   struct Case {
     std::string_view text;
     std::vector<std::string_view> units;
@@ -274,35 +267,34 @@ TEST(ThaiShapeTest, SpacingUnitsCarryOriginalSpansThroughNativeAndReorderedGlyph
 
 TEST(ThaiShapeTest, RejectsUnsafeTablesAndUncoveredRecipeGlyphs) {
   const auto valid = payload();
-  for (size_t size : {size_t{0}, size_t{27}, valid.size() - 1}) {
+  for (size_t size : {size_t{0}, size_t{BASES - 1}, valid.size() - 1}) {
     ThaiShapeSource source;
     source.setResident(valid.data(), valid.size());
     ThaiShapeView shape;
-    EXPECT_FALSE(shape.validate(source, 0, size, covered, nullptr));
+    EXPECT_FALSE(validate(shape, source, 0, size));
   }
-  for (const auto [offset, value] :
-       {std::pair<size_t, uint32_t>{4, UINT32_MAX}, {8, 28}, {12, UINT32_MAX}, {16, UINT32_MAX}}) {
+  for (const auto [offset, value] : {std::pair<size_t, uint16_t>{0, 0}, {0, ThaiShapeView::MAX_BASES + 1}, {2, 0}}) {
     auto b = valid;
-    put32(b, offset, value);
+    put16(b, offset, value);
     ThaiShapeSource source;
     source.setResident(b.data(), b.size());
     ThaiShapeView shape;
-    EXPECT_FALSE(shape.validate(source, 0, b.size(), covered, nullptr));
+    EXPECT_FALSE(validate(shape, source, 0, b.size()));
   }
   auto b = valid;
-  put16(b, 28, 0xFFFF);
+  putEntry(b, 0, 0, entry(BASE_COUNT, 1, 0));
   ThaiShapeSource source;
   source.setResident(b.data(), b.size());
   ThaiShapeView shape;
-  EXPECT_FALSE(shape.validate(source, 0, b.size(), covered, nullptr));
+  EXPECT_FALSE(validate(shape, source, 0, b.size()));
   b = valid;
-  put16(b, 28 + ThaiShapeView::DENSE_COUNT * 4, 0xFFFF);
+  put16(b, BASES, 0xFFFF);
   source.setResident(b.data(), b.size());
-  EXPECT_FALSE(shape.validate(source, 0, b.size(), covered, nullptr));
+  EXPECT_FALSE(validate(shape, source, 0, b.size()));
   b = valid;
-  b[b.size() - 9] = 6;
+  putEntry(b, 0, 0, entry(0, ThaiShapeView::MAX_MARKS + 1, 0));
   source.setResident(b.data(), b.size());
-  EXPECT_FALSE(shape.validate(source, 0, b.size(), covered, nullptr));
+  EXPECT_FALSE(validate(shape, source, 0, b.size()));
 }
 
 TEST(ThaiShapeTest, PreparedFontRecipesPrewarmAlternatesAndSurviveCacheEviction) {
@@ -447,15 +439,15 @@ TEST(ThaiShapeTest, EveryDenseKeyMatchesResidentAcrossFourDistinctStylesAndOptio
   cached.setCached(&io, MemoryIo::read, family.size(), cache);
   ThaiShapeView oracle[4], paged[4];
   for (unsigned style = 0; style < 4; ++style) {
-    ASSERT_TRUE(oracle[style].validate(resident, offsets[style], sizes[style], covered, nullptr));
-    ASSERT_TRUE(paged[style].validate(cached, offsets[style], sizes[style], covered, nullptr));
+    ASSERT_TRUE(validate(oracle[style], resident, offsets[style], sizes[style]));
+    ASSERT_TRUE(validate(paged[style], cached, offsets[style], sizes[style]));
     EXPECT_EQ(30 + style, paged[style].ascender());
     EXPECT_EQ(-10 - int(style), paged[style].descender());
     EXPECT_EQ(40 + style * 2, paged[style].lineAdvance());
   }
   for (bool indexed : {false, true}) {
     for (unsigned style = 0; style < 4; ++style) {
-      paged[style].setDenseIndex(indexed ? family.data() + offsets[style] + 28 : nullptr);
+      paged[style].setDenseIndex(indexed ? family.data() + offsets[style] + HEADER : nullptr);
       for (uint32_t key = 0; key < ThaiShapeView::DENSE_COUNT; ++key) {
         SCOPED_TRACE(key);
         SCOPED_TRACE(style);
@@ -469,10 +461,11 @@ TEST(ThaiShapeTest, EveryDenseKeyMatchesResidentAcrossFourDistinctStylesAndOptio
         const auto calls = io.calls;
         expectPlacements(expectedOutput, placements(actual));
         EXPECT_EQ(calls, io.calls);
-        const auto id = (key + style * 83) % ThaiShapeView::DENSE_COUNT;
+        const auto base = (key / 82 + style) % BASE_COUNT;
         ASSERT_FALSE(expectedOutput.empty());
-        EXPECT_EQ(0xE01 + id / 82, expectedOutput[0].codepoint);
-        EXPECT_EQ(100 + id % 82 + style * 100, expectedOutput[0].advanceFP);
+        EXPECT_EQ(0xE01 + base, expectedOutput[0].codepoint);
+        EXPECT_EQ(100 + base + style * 100, expectedOutput[0].advanceFP);
+        if (expectedOutput.size() > 1) EXPECT_EQ(key % 82 + style, expectedOutput[1].advanceFP);
       }
     }
   }
@@ -485,7 +478,7 @@ TEST(ThaiShapeTest, AdmissionAndCacheMissesAllocateNothingAndFittingClustersStay
   ThaiShapeSource source;
   source.setCached(&io, MemoryIo::read, bytes.size(), cache);
   ThaiShapeView view;
-  ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(view, source, 0, bytes.size()));
   cache.invalidate(source);
   ThaiGlyphCursor cursor;
   const auto allocations = probe::allocationCalls();
@@ -505,8 +498,8 @@ TEST(ThaiShapeTest, AdmissionAndCacheMissesAllocateNothingAndFittingClustersStay
   }
   EXPECT_EQ(calls, io.calls);
   EXPECT_FALSE(cache.hasLeases());
-  // Dense RAM lookup must not request its block: only suffix metadata/data and base records remain.
-  view.setDenseIndex(bytes.data() + 28);
+  // RAM lookup must not request its block: only base and mark records remain.
+  view.setDenseIndex(bytes.data() + HEADER);
   cache.invalidate(source);
   ASSERT_TRUE(cursor.begin("ก", view));
   while (cursor.next(placement)) {
@@ -524,13 +517,12 @@ TEST(ThaiShapeTest, AdmissionAndCacheMissesAllocateNothingAndFittingClustersStay
 TEST(ThaiShapeTest, ResolvedRecipesOutliveBlockEvictionUntilTheirSourceIsInvalidated) {
   auto bytes = payload();
   const uint32_t missing = (0xE2D - 0xE01) * 82;
-  put16(bytes, 28 + missing * 4, UINT16_MAX);
-  put16(bytes, 30 + missing * 4, UINT16_MAX);
+  putEntry(bytes, 0, missing, ThaiShapeView::ABSENT_ENTRY);
   const auto longRecipe = styledPayload(3, 5);
   ThaiShapeSource resident;
   resident.setResident(bytes.data(), bytes.size());
   ThaiShapeView oracle;
-  ASSERT_TRUE(oracle.validate(resident, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(oracle, resident, 0, bytes.size()));
   ThaiGlyphCursor expected;
   ASSERT_TRUE(expected.begin("กี่", oracle));
   const auto expectedOutput = placements(expected);
@@ -541,9 +533,9 @@ TEST(ThaiShapeTest, ResolvedRecipesOutliveBlockEvictionUntilTheirSourceIsInvalid
   source.setCached(&io, MemoryIo::read, bytes.size(), cache);
   longSource.setCached(&longIo, MemoryIo::read, longRecipe.size(), cache);
   ThaiShapeView view, longView;
-  ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
-  ASSERT_TRUE(longView.validate(longSource, 0, longRecipe.size(), covered, nullptr));
-  // Blocks 40..47 hold none of the dense, base, offset or suffix bytes used below.
+  ASSERT_TRUE(validate(view, source, 0, bytes.size()));
+  ASSERT_TRUE(validate(longView, longSource, 0, longRecipe.size()));
+  // Blocks 40..47 hold only filler records, none of the bytes used below.
   const auto evictBlocks = [&](const ThaiShapeSource& owner) {
     uint8_t byte;
     for (unsigned i = 0; i < ThaiShapeCache::BLOCK_COUNT; ++i) {
@@ -583,7 +575,7 @@ TEST(ThaiShapeTest, CopiesMovesAndInterleavedStagesRemainIndependentOfEvictionAn
   ThaiShapeSource resident;
   resident.setResident(bytes.data(), bytes.size());
   ThaiShapeView oracle;
-  ASSERT_TRUE(oracle.validate(resident, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(oracle, resident, 0, bytes.size()));
   ThaiGlyphCursor expected;
   ASSERT_TRUE(expected.begin("เรื่อ", oracle));
   auto whole = placements(expected);
@@ -592,7 +584,7 @@ TEST(ThaiShapeTest, CopiesMovesAndInterleavedStagesRemainIndependentOfEvictionAn
   ThaiShapeSource source;
   source.setCached(&io, MemoryIo::read, bytes.size(), cache);
   ThaiShapeView view;
-  ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(view, source, 0, bytes.size()));
   ThaiGlyphCursor first, second;
   ASSERT_TRUE(first.begin("เรื่อ", view));
   ThaiGlyphPlacement placement;
@@ -628,13 +620,13 @@ TEST(ThaiShapeTest, FaultBeforeOrAfterFirstRecipeRejectsWholeClusterAndExhaustio
   ThaiShapeSource resident;
   resident.setResident(bytes.data(), bytes.size());
   ThaiShapeView oracle;
-  ASSERT_TRUE(oracle.validate(resident, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(oracle, resident, 0, bytes.size()));
   ThaiShapeCache cache;
   MemoryIo io{bytes};
   ThaiShapeSource source;
   source.setCached(&io, MemoryIo::read, bytes.size(), cache);
   ThaiShapeView view;
-  ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(view, source, 0, bytes.size()));
   cache.invalidate(source);
   ThaiGlyphCursor cursor;
   const auto initial = io.calls;
@@ -645,7 +637,7 @@ TEST(ThaiShapeTest, FaultBeforeOrAfterFirstRecipeRejectsWholeClusterAndExhaustio
   for (size_t failedRead = 1; failedRead <= admissionReads; ++failedRead) {
     io.failCall = 0;
     source.setCached(&io, MemoryIo::read, bytes.size(), cache);
-    ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+    ASSERT_TRUE(validate(view, source, 0, bytes.size()));
     cache.invalidate(source);
     io.failCall = io.calls + failedRead;
     EXPECT_FALSE(cursor.begin("เรื่อ", view));
@@ -662,7 +654,7 @@ TEST(ThaiShapeTest, FaultBeforeOrAfterFirstRecipeRejectsWholeClusterAndExhaustio
   }
   io.failCall = 0;
   source.setCached(&io, MemoryIo::read, bytes.size(), cache);
-  ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(view, source, 0, bytes.size()));
   ThaiGlyphCursor first, second, excess;
   ASSERT_TRUE(first.begin("เรื่อ", view));
   ASSERT_TRUE(second.begin("เรื่อ", view));
@@ -689,7 +681,7 @@ TEST(ThaiShapeTest, StagesSurviveOwnerTeardownAndReleaseOnRebeginOrDestruction) 
     ThaiShapeSource source;
     source.setCached(&io, MemoryIo::read, bytes.size(), cache);
     ThaiShapeView view;
-    ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+    ASSERT_TRUE(validate(view, source, 0, bytes.size()));
     ASSERT_TRUE(retained.begin("เพื่อ", view));
     auto counter = retained;
     expected = placements(counter);
@@ -700,7 +692,7 @@ TEST(ThaiShapeTest, StagesSurviveOwnerTeardownAndReleaseOnRebeginOrDestruction) 
   ThaiShapeSource source;
   source.setCached(&io, MemoryIo::read, bytes.size(), cache);
   ThaiShapeView view;
-  ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(view, source, 0, bytes.size()));
   {
     ThaiGlyphCursor scoped;
     ASSERT_TRUE(scoped.begin("เพื่อ", view));
@@ -714,16 +706,15 @@ TEST(ThaiShapeTest, StagesSurviveOwnerTeardownAndReleaseOnRebeginOrDestruction) 
 TEST(ThaiShapeTest, SharedOwnersDoNotConfuseBlocksAndMissingRecipesDoNotLatchFaults) {
   auto a = styledPayload(0, 0), b = styledPayload(3, 5);
   const uint32_t missing = (0xE2D - 0xE01) * 82;
-  put16(b, 28 + missing * 4, UINT16_MAX);
-  put16(b, 30 + missing * 4, UINT16_MAX);
+  putEntry(b, 0, missing, ThaiShapeView::ABSENT_ENTRY);
   ThaiShapeCache cache;
   MemoryIo ioA{a}, ioB{b};
   ThaiShapeSource sourceA, sourceB;
   sourceA.setCached(&ioA, MemoryIo::read, a.size(), cache);
   sourceB.setCached(&ioB, MemoryIo::read, b.size(), cache);
   ThaiShapeView viewA, viewB;
-  ASSERT_TRUE(viewA.validate(sourceA, 0, a.size(), covered, nullptr));
-  ASSERT_TRUE(viewB.validate(sourceB, 0, b.size(), covered, nullptr));
+  ASSERT_TRUE(validate(viewA, sourceA, 0, a.size()));
+  ASSERT_TRUE(validate(viewB, sourceB, 0, b.size()));
   ThaiGlyphCursor cursorA, cursorB;
   ASSERT_TRUE(cursorA.begin("เรื่อ", viewA));
   EXPECT_FALSE(cursorB.begin("เรื่อ", viewB));
@@ -743,55 +734,108 @@ TEST(ThaiShapeTest, SharedOwnersDoNotConfuseBlocksAndMissingRecipesDoNotLatchFau
 
 TEST(ThaiShapeTest, StreamedValidationRejectsEveryStructuralMutationAcceptedByNeitherBacking) {
   const auto original = payload();
-  const uint32_t base = 28 + ThaiShapeView::DENSE_COUNT * 4;
-  const uint32_t offsets = base + ThaiShapeView::DENSE_COUNT * 8;
-  const uint32_t data = offsets + 8;
+  const uint32_t records = 82 + FILLER;
   struct Mutation {
     uint32_t offset;
     uint32_t value;
     uint8_t width;
   };
   for (const auto mutation : {Mutation{0, 0, 2},
+                              {0, ThaiShapeView::MAX_BASES + 1, 2},
+                              {0, BASE_COUNT + 1, 2},
                               {2, 0, 2},
-                              {4, UINT32_MAX, 4},
-                              {8, 28, 4},
-                              {12, UINT32_MAX, 4},
-                              {16, UINT32_MAX, 4},
-                              {24, 0, 2},
-                              {26, 1, 2},
-                              {28, UINT16_MAX, 2},
-                              {30, 1, 2},
-                              {base, UINT16_MAX, 2},
-                              {offsets, data - 1, 4},
-                              {offsets + 4, data, 4},
-                              {offsets + 4, uint32_t(original.size() + 1), 4},
-                              {data, 6, 1},
-                              {data + 1, UINT16_MAX, 2}}) {
+                              {2, records + 1, 2},
+                              {8, 0, 2},
+                              {10, 1, 2},
+                              {HEADER, entry(BASE_COUNT, 1, 0), 3},
+                              {HEADER, entry(0, ThaiShapeView::MAX_MARKS + 1, 0), 3},
+                              {HEADER, entry(0, 1, records), 3},
+                              {HEADER, entry(0, 0, 1), 3},
+                              {HEADER + (ThaiShapeView::DENSE_COUNT - 1) * 3, entry(0, 2, records - 1), 3},
+                              {BASES, 0x41, 2},
+                              {MARKS, 0x41, 2},
+                              {uint32_t(original.size() - 8), 0x41, 2}}) {
     SCOPED_TRACE(mutation.offset);
     auto bytes = original;
-    if (mutation.width == 4)
-      put32(bytes, mutation.offset, mutation.value);
-    else if (mutation.width == 2)
+    if (mutation.width == 3) {
+      putEntry(bytes, mutation.offset - HEADER, 0, mutation.value);
+    } else {
       put16(bytes, mutation.offset, mutation.value);
-    else
-      bytes[mutation.offset] = mutation.value;
+    }
     ThaiShapeCache cache;
     MemoryIo io{bytes};
     ThaiShapeSource resident, cached;
     resident.setResident(bytes.data(), bytes.size());
     cached.setCached(&io, MemoryIo::read, bytes.size(), cache);
     ThaiShapeView expected, actual;
-    EXPECT_FALSE(expected.validate(resident, 0, bytes.size(), covered, nullptr));
-    EXPECT_FALSE(actual.validate(cached, 0, bytes.size(), covered, nullptr));
+    EXPECT_FALSE(validate(expected, resident, 0, bytes.size()));
+    EXPECT_FALSE(validate(actual, cached, 0, bytes.size()));
     EXPECT_FALSE(expected.valid());
     EXPECT_FALSE(actual.valid());
   }
 }
 
-TEST(ThaiShapeTest, MaximumSuffixCrossesBlockAndRuntimeStructureFaultCannotPublishPrefix) {
+TEST(ThaiShapeTest, StreamReportsEveryByteOnceInOrderAndCopiesTheLookupTable) {
+  std::vector<uint8_t> family(5, 0x5A);
+  const auto style = styledPayload(1, 2);
+  family.insert(family.end(), style.begin(), style.end());
+  ThaiShapeCache cache;
+  MemoryIo io{family};
+  ThaiShapeSource source;
+  source.setCached(&io, MemoryIo::read, family.size(), cache);
+  std::vector<uint8_t> observed;
+  ThaiShapeStream stream(
+      source, 5,
+      [](void* context, const uint8_t* bytes, size_t count) {
+        auto& sink = *static_cast<std::vector<uint8_t>*>(context);
+        sink.insert(sink.end(), bytes, bytes + count);
+      },
+      &observed);
+  std::vector<uint8_t> table(ThaiShapeView::DENSE_BYTES);
+  ThaiShapeView view;
+  ASSERT_TRUE(view.validate(stream, style.size(), covered, nullptr, table.data()));
+  EXPECT_EQ(style, observed);
+  EXPECT_EQ(5 + style.size(), stream.offset());
+  EXPECT_TRUE(std::equal(table.begin(), table.end(), style.begin() + HEADER));
+  // One sequential pass: each cache block is filled once.
+  EXPECT_EQ((family.size() - 1) / ThaiShapeCache::BLOCK_BYTES + 1, io.calls);
+}
+
+TEST(ThaiShapeTest, SwitchingResidentSourceToCachedKeepsValidatedViews) {
+  auto bytes = styledPayload(2, 3);
+  ThaiShapeSource source;
+  source.setResident(bytes.data(), bytes.size());
+  ThaiShapeView view;
+  ASSERT_TRUE(validate(view, source, 0, bytes.size()));
+  std::vector<std::vector<ThaiGlyphPlacement>> expected;
+  for (uint32_t key = 0; key < ThaiShapeView::DENSE_COUNT; key += 41) {
+    const auto text = keyText(key);
+    ThaiGlyphCursor cursor;
+    ASSERT_TRUE(cursor.begin(text, view));
+    expected.push_back(placements(cursor));
+  }
+  ThaiShapeCache cache;
+  MemoryIo io{bytes};
+  source.setCached(&io, MemoryIo::read, bytes.size(), cache);
+  ASSERT_TRUE(view.valid());
+  size_t index = 0;
+  for (uint32_t key = 0; key < ThaiShapeView::DENSE_COUNT; key += 41) {
+    SCOPED_TRACE(key);
+    const auto text = keyText(key);
+    ThaiGlyphCursor cursor;
+    ASSERT_TRUE(cursor.begin(text, view));
+    expectPlacements(expected[index++], placements(cursor));
+  }
+  EXPECT_LT(0u, io.calls);
+  EXPECT_FALSE(view.failed());
+}
+
+TEST(ThaiShapeTest, MaximumMarksCrossBlockAndRuntimeStructureFaultCannotPublishPrefix) {
   auto style = styledPayload(2, 5);
-  const uint32_t data = 28 + ThaiShapeView::DENSE_COUNT * 12 + 8;
-  const uint32_t prefix = (512 + 492 - data % 512) % 512;
+  // "รื่" is variant 5 * 7 + 1; its five marks span 40 bytes.
+  const uint32_t key = (0xE23 - 0xE01) * 82 + 36;
+  const uint32_t marks = MARKS + 36 * 5 * 8;
+  const uint32_t prefix = (512 + 492 - marks % 512) % 512;
   std::vector<uint8_t> bytes(prefix, 0);
   bytes.insert(bytes.end(), style.begin(), style.end());
   ThaiShapeCache cache;
@@ -800,16 +844,16 @@ TEST(ThaiShapeTest, MaximumSuffixCrossesBlockAndRuntimeStructureFaultCannotPubli
   source.setCached(&io, MemoryIo::read, bytes.size(), cache);
   resident.setResident(bytes.data(), bytes.size());
   ThaiShapeView view, oracle;
-  ASSERT_TRUE(view.validate(source, prefix, style.size(), covered, nullptr));
-  ASSERT_TRUE(oracle.validate(resident, prefix, style.size(), covered, nullptr));
+  ASSERT_TRUE(validate(view, source, prefix, style.size()));
+  ASSERT_TRUE(validate(oracle, resident, prefix, style.size()));
   ThaiGlyphCursor actual, expected;
   cache.invalidate(source);
   ASSERT_TRUE(actual.begin("เรื่อ", view));
   ASSERT_TRUE(expected.begin("เรื่อ", oracle));
   expectPlacements(placements(expected), placements(actual));
-  // Emulate a changed on-disk count after validation; the immutable-source contract
+  // Emulate a changed on-disk entry after validation; the immutable-source contract
   // forbids this, but a detected unsafe structure must still fail atomically.
-  bytes[prefix + data] = 255;
+  putEntry(bytes, prefix, key, entry(0, 5, 82 * 5 + FILLER));
   cache.invalidate(source);
   EXPECT_FALSE(actual.begin("เรื่อ", view));
   EXPECT_EQ(std::string_view("เรื่อ").size(), actual.consumedBytes());
@@ -827,7 +871,7 @@ TEST(ThaiShapeTest, LastStageReleaseMayDeleteCacheAfterSourceHasRetired) {
   ThaiShapeSource source;
   source.setCached(&io, MemoryIo::read, bytes.size(), *cache);
   ThaiShapeView view;
-  ASSERT_TRUE(view.validate(source, 0, bytes.size(), covered, nullptr));
+  ASSERT_TRUE(validate(view, source, 0, bytes.size()));
   ThaiGlyphCursor cursor;
   ASSERT_TRUE(cursor.begin("เรื่อ", view));
   source.reset();

@@ -8,9 +8,7 @@
 
 namespace {
 uint16_t u16(const uint8_t* p) { return uint16_t(p[0]) | (uint16_t(p[1]) << 8); }
-uint32_t u32(const uint8_t* p) {
-  return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
-}
+uint32_t u24(const uint8_t* p) { return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16); }
 ThaiGlyphPlacement glyph(const uint8_t* p) {
   return {u16(p), u16(p + 2), static_cast<int16_t>(u16(p + 4)), static_cast<int16_t>(u16(p + 6)), 0};
 }
@@ -39,7 +37,7 @@ void ThaiShapeCache::invalidate(const ThaiShapeSource& source) {
 
 ThaiShapeCache::Recipe* ThaiShapeCache::recipeSet(const ThaiShapeSource& source, uint32_t denseOffset) {
   // The companion size spreads different fonts' identical keys across sets.
-  const uint32_t mixed = (denseOffset / 4 + source.size_) * 2654435761u;
+  const uint32_t mixed = (denseOffset / ThaiShapeView::ENTRY_BYTES + source.size_) * 2654435761u;
   return recipes_ + (mixed >> 16) % RECIPE_SETS * RECIPE_WAYS;
 }
 
@@ -197,96 +195,101 @@ bool ThaiShapeSource::readBytes(uint32_t offset, uint8_t* output, size_t count) 
   return cache_ ? cache_->read(*this, offset, output, count) : fail(offset);
 }
 
+bool ThaiShapeStream::read(uint8_t* output, size_t count) {
+  if (!source_.readBytes(offset_, output, count)) return false;
+  if (observe_) observe_(context_, output, count);
+  offset_ += static_cast<uint32_t>(count);
+  return true;
+}
+
 bool ThaiShapeView::read(uint32_t offset, uint8_t* output, size_t count) const {
   if (offset > size_ || count > size_ - offset) return source_->fail(offset_);
   return source_->readBytes(offset_ + offset, output, count);
 }
 
-bool ThaiShapeView::validate(ThaiShapeSource& source, uint32_t offset, size_t size, Coverage coverage, void* context) {
+bool ThaiShapeView::validate(ThaiShapeStream& stream, size_t size, Coverage coverage, void* context,
+                             uint8_t* denseCopy) {
   *this = ThaiShapeView{};
-  if (!coverage || size < 28 || size > MAX_STYLE_BYTES || offset > source.size_ || size > source.size_ - offset ||
-      source.failed())
+  auto& source = stream.source();
+  const uint32_t offset = stream.offset();
+  if (!coverage || size < HEADER_BYTES + DENSE_BYTES || size > MAX_STYLE_BYTES || offset > source.size_ ||
+      size > source.size_ - offset || source.failed())
     return false;
-  uint8_t header[28];
-  if (!source.readBytes(offset, header, sizeof(header))) return false;
-  const uint32_t bases = u16(header), suffixes = u16(header + 2);
-  const uint32_t dense = u32(header + 4), base = u32(header + 8);
-  const uint32_t offsets = u32(header + 12), data = u32(header + 16);
-  // Canonical contiguous sections eliminate overlaps and unused/unvalidated ranges.
-  if (!bases || !suffixes || bases > DENSE_COUNT || suffixes > DENSE_COUNT || dense != 28 ||
-      base != dense + DENSE_COUNT * 4 || offsets != base + bases * 8 || data != offsets + (suffixes + 1) * 4 ||
-      data > size || u16(header + 26) != 0 || !u16(header + 24))
+  uint8_t header[HEADER_BYTES];
+  if (!stream.read(header, sizeof(header))) return false;
+  const uint32_t bases = u16(header), records = u16(header + 2);
+  // Canonical contiguous sections leave no unused or unvalidated bytes.
+  if (!bases || bases > MAX_BASES || records > MAX_RECORDS || !u16(header + 8) || u16(header + 10) != 0 ||
+      size != HEADER_BYTES + DENSE_BYTES + (bases + records) * RECORD_BYTES)
     return false;
-  uint8_t scratch[8];
-  for (uint32_t i = 0; i < DENSE_COUNT; ++i) {
-    if (!source.readBytes(offset + dense + i * 4, scratch, 4)) return false;
-    const uint16_t b = u16(scratch), s = u16(scratch + 2);
-    if (b == UINT16_MAX && s == UINT16_MAX) continue;
-    if (b >= bases || s >= suffixes) return false;
-  }
-  for (uint32_t i = 0; i < bases; ++i) {
-    if (!source.readBytes(offset + base + i * 8, scratch, 8) || !coverage(context, u16(scratch))) return false;
-  }
-  if (!source.readBytes(offset + offsets, scratch, 4)) return false;
-  uint32_t start = u32(scratch);
-  if (start != data) return false;
-  for (uint32_t i = 0; i < suffixes; ++i) {
-    if (!source.readBytes(offset + offsets + (i + 1) * 4, scratch, 4)) return false;
-    const uint32_t end = u32(scratch);
-    if (start >= size || end <= start || end > size) return false;
-    if (!source.readBytes(offset + start, scratch, 1)) return false;
-    const uint8_t count = scratch[0];
-    if (count > 5 || end - start != 1u + count * 8u) return false;
-    for (uint8_t j = 0; j < count; ++j) {
-      if (!source.readBytes(offset + start + 1 + j * 8, scratch, 8) || !coverage(context, u16(scratch))) return false;
+  constexpr uint32_t CHUNK_ENTRIES = 64;
+  uint8_t chunk[CHUNK_ENTRIES * ENTRY_BYTES];
+  static_assert(sizeof(chunk) % RECORD_BYTES == 0, "Record pass reuses the entry chunk");
+  for (uint32_t key = 0; key < DENSE_COUNT;) {
+    const uint32_t entries = std::min(CHUNK_ENTRIES, DENSE_COUNT - key);
+    if (!stream.read(chunk, entries * ENTRY_BYTES)) return false;
+    for (uint32_t i = 0; i < entries; ++i) {
+      const uint32_t entry = u24(chunk + i * ENTRY_BYTES);
+      if (entry == ABSENT_ENTRY) continue;
+      const uint32_t base = entry & 0x7F, marks = (entry >> 7) & 7, first = entry >> 10;
+      // Base-only recipes canonically point at record 0.
+      if (base >= bases || marks > MAX_MARKS || first + marks > records || (!marks && first)) return false;
     }
-    start = end;
+    if (denseCopy) std::memcpy(denseCopy + key * ENTRY_BYTES, chunk, entries * ENTRY_BYTES);
+    key += entries;
   }
-  if (start != size) return false;
+  // Base and mark records are contiguous; every one must name a CPFont glyph.
+  for (uint32_t remaining = bases + records; remaining;) {
+    const uint32_t count = std::min<uint32_t>(remaining, sizeof(chunk) / RECORD_BYTES);
+    if (!stream.read(chunk, count * RECORD_BYTES)) return false;
+    for (uint32_t i = 0; i < count; ++i) {
+      if (!coverage(context, u16(chunk + i * RECORD_BYTES))) return false;
+    }
+    remaining -= count;
+  }
   source_ = &source;
-  bytes_ = source.resident_ ? source.resident_ + offset : nullptr;
   offset_ = offset;
   size_ = static_cast<uint32_t>(size);
-  baseOffset_ = base;
-  suffixOffsets_ = offsets;
-  suffixData_ = data;
-  bases_ = bases;
-  suffixes_ = suffixes;
-  ascender_ = static_cast<int16_t>(u16(header + 20));
-  descender_ = static_cast<int16_t>(u16(header + 22));
-  lineAdvance_ = u16(header + 24);
+  bases_ = static_cast<uint16_t>(bases);
+  records_ = static_cast<uint16_t>(records);
+  ascender_ = static_cast<int16_t>(u16(header + 4));
+  descender_ = static_cast<int16_t>(u16(header + 6));
+  lineAdvance_ = u16(header + 8);
   return true;
 }
 
-bool ThaiShapeView::recipe(uint32_t key, uint16_t& base, uint16_t& suffix) const {
+bool ThaiShapeView::recipe(uint32_t key, Entry& entry) const {
   if (!source_ || source_->failed() || key >= DENSE_COUNT) return false;
-  uint8_t scratch[4];
-  const uint8_t* p = denseIndex_ ? denseIndex_ + key * 4 : bytes_ ? bytes_ + 28 + key * 4 : scratch;
-  if (p == scratch && !read(28 + key * 4, scratch, sizeof(scratch))) return false;
-  base = u16(p);
-  suffix = u16(p + 2);
-  if (base == UINT16_MAX && suffix == UINT16_MAX) return false;
-  if (base >= bases_ || suffix >= suffixes_) return source_->fail(offset_ + 28 + key * 4);
+  uint8_t scratch[ENTRY_BYTES];
+  const uint8_t* resident = bytes();
+  const uint8_t* p = denseIndex_ ? denseIndex_ + key * ENTRY_BYTES
+                     : resident  ? resident + HEADER_BYTES + key * ENTRY_BYTES
+                                 : scratch;
+  if (p == scratch && !read(HEADER_BYTES + key * ENTRY_BYTES, scratch, sizeof(scratch))) return false;
+  const uint32_t value = u24(p);
+  if (value == ABSENT_ENTRY) return false;
+  entry.base = value & 0x7F;
+  entry.marks = (value >> 7) & 7;
+  entry.first = static_cast<uint16_t>(value >> 10);
+  // SD-backed entries are re-checked: the file is read again after validation.
+  if (entry.base >= bases_ || entry.marks > MAX_MARKS || entry.first + entry.marks > records_)
+    return source_->fail(denseOffset(key));
   return true;
 }
 
-bool ThaiShapeView::stageRecipe(uint16_t base, uint16_t suffix, uint8_t* records, uint8_t& count) const {
-  uint8_t offsets[8];
-  if (!read(suffixOffsets_ + suffix * 4, offsets, sizeof(offsets))) return false;
-  const uint32_t start = u32(offsets), end = u32(offsets + 4);
-  if (start < suffixData_ || start >= size_ || end <= start || end > size_) return source_->fail(offset_);
-  uint8_t suffixCount;
-  if (!read(start, &suffixCount, 1)) return false;
-  if (suffixCount > 5 || end - start != 1u + suffixCount * 8u) return source_->fail(offset_ + start);
-  if (!read(baseOffset_ + base * 8, records, 8) || !read(start + 1, records + 8, suffixCount * 8)) return false;
-  count = 1 + suffixCount;
+bool ThaiShapeView::stageRecipe(const Entry& entry, uint8_t* records, uint8_t& count) const {
+  if (!read(baseOffset() + entry.base * RECORD_BYTES, records, RECORD_BYTES) ||
+      !read(markOffset() + entry.first * RECORD_BYTES, records + RECORD_BYTES, entry.marks * RECORD_BYTES))
+    return false;
+  count = 1 + entry.marks;
   return true;
 }
 
-ThaiGlyphPlacement ThaiShapeView::baseRecord(uint16_t id) const { return glyph(bytes_ + baseOffset_ + id * 8); }
-uint8_t ThaiShapeView::suffixCount(uint16_t id) const { return bytes_[u32(bytes_ + suffixOffsets_ + id * 4)]; }
-ThaiGlyphPlacement ThaiShapeView::suffixRecord(uint16_t id, uint8_t index) const {
-  return glyph(bytes_ + u32(bytes_ + suffixOffsets_ + id * 4) + 1 + index * 8);
+ThaiGlyphPlacement ThaiShapeView::baseRecord(uint8_t id) const {
+  return glyph(bytes() + baseOffset() + id * RECORD_BYTES);
+}
+ThaiGlyphPlacement ThaiShapeView::markRecord(uint16_t index) const {
+  return glyph(bytes() + markOffset() + index * RECORD_BYTES);
 }
 
 bool ThaiGlyphCursor::cachedRecipe(const ThaiShapeView& shape, uint32_t key, uint8_t* records, uint8_t& count) {
@@ -297,10 +300,10 @@ bool ThaiGlyphCursor::cachedRecipe(const ThaiShapeView& shape, uint32_t key, uin
     std::memcpy(records, known->records, count * 8);
     return count != 0;
   }
-  uint16_t base, suffix;
+  ThaiShapeView::Entry entry;
   count = 0;
-  if (shape.recipe(key, base, suffix)) {
-    if (!shape.stageRecipe(base, suffix, records, count)) return false;
+  if (shape.recipe(key, entry)) {
+    if (!shape.stageRecipe(entry, records, count)) return false;
   } else if (shape.failed()) {
     return false;
   }
@@ -378,8 +381,8 @@ void ThaiGlyphCursor::copyState(const ThaiGlyphCursor& other) {
   consumed_ = other.consumed_;
   offset_ = other.offset_;
   unitEnd_ = other.unitEnd_;
+  firstMark_ = other.firstMark_;
   base_ = other.base_;
-  suffix_ = other.suffix_;
   record_ = other.record_;
   records_ = other.records_;
   stage_ = other.stage_;
@@ -431,16 +434,16 @@ bool ThaiGlyphCursor::begin(std::string_view text, const ThaiShapeView& shape) {
   if (!cluster.valid || shape.failed()) return false;
   if (end > 128) return shape.source_->fail(shape.offset_);
   text_ = text.substr(0, end);
-  auto* cache = shape.bytes_ ? nullptr : shape.source_->cache_;
+  auto* cache = shape.bytes() ? nullptr : shape.source_->cache_;
   bool hasRecipe = false;
   for (size_t p = 0; p < end;) {
     size_t next;
     uint32_t key;
     if (!unit(p, next, key) || next <= p || next > end) return false;
     if (key != NATIVE) {
-      uint16_t base, suffix;
+      ThaiShapeView::Entry entry;
       uint8_t records[sizeof(ThaiShapeCache::Unit::records)], count;
-      if (cache ? !cachedRecipe(shape, key, records, count) : !shape.recipe(key, base, suffix)) return false;
+      if (cache ? !cachedRecipe(shape, key, records, count) : !shape.recipe(key, entry)) return false;
       hasRecipe = true;
     }
     p = next;
@@ -517,13 +520,17 @@ bool ThaiGlyphCursor::next(ThaiGlyphPlacement& out) {
       out = {thai::detail::decode(text_, offset_, true).value, 0, 0, 0, ThaiGlyphPlacement::Native};
       offset_ = unitEnd_;
     } else {
-      shape_->recipe(key, base_, suffix_);
-      records_ = 1 + shape_->suffixCount(suffix_);
+      ThaiShapeView::Entry entry{};
+      // Admitted by begin(); only a fault latched since then fails here.
+      if (!shape_->recipe(key, entry)) return false;
+      base_ = entry.base;
+      firstMark_ = entry.first;
+      records_ = 1 + entry.marks;
       record_ = 0;
     }
   }
   if (records_) {
-    out = record_ == 0 ? shape_->baseRecord(base_) : shape_->suffixRecord(suffix_, record_ - 1);
+    out = record_ == 0 ? shape_->baseRecord(base_) : shape_->markRecord(firstMark_ + record_ - 1);
     if (record_ == 0) out.flags |= ThaiGlyphPlacement::RecipeStart;
     if (++record_ == records_) {
       out.flags |= ThaiGlyphPlacement::RecipeEnd;

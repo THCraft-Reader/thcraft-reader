@@ -1,7 +1,8 @@
 """Desktop-only Thai CPFont v4 companion baking; never imported by native conversion.
 
-Recipe coordinates are signed y-up 12.4 pixels. All byte offsets in a style,
-including entries of its suffix offset table, are relative to that style start.
+Recipe coordinates are signed y-up 12.4 pixels. A CPSHAPE v2 style is a 12-byte
+header, KEY_COUNT 3-byte entries (base ID bits 0-6, mark count bits 7-9, first
+mark record bits 10-23), then base records and shared mark records.
 """
 from __future__ import annotations
 
@@ -14,14 +15,21 @@ import struct
 import zlib
 
 MAGIC = b"CPSHAPE\0"
-VERSION = 1
+VERSION = 2
 KEY_COUNT = 46 * 82
+ENTRY_BYTES = 3
+ABSENT_ENTRY = 0xFFFFFF
+MAX_BASES = 127
+MAX_MARKS = 5
+MAX_RECORDS = 16383
+# CPFont v4 reserved header bytes that repeat the companion's metrics CRC.
+PAIR_TAG_OFFSET = 16
 STYLE_LIMIT = 96 * 1024
 FAMILY_LIMIT = 384 * 1024
 FIRST_SIGNS = (None, 0xE31, *range(0xE34, 0xE3B), 0xE47, 0xE4D)
 TERMINALS = (None, *range(0xE48, 0xE4D), 0xE4E)
 RECORD = struct.Struct("<HHhh")
-STYLE_HEADER = struct.Struct("<HHIIIIhhHH")
+STYLE_HEADER = struct.Struct("<HHhhHH")
 
 
 def contexts():
@@ -148,18 +156,37 @@ def expanded_intervals(intervals, codepoints):
     return merged
 
 
+def pack_marks(sequences):
+    """Place mark sequences longest first; one already contained in the records reuses them.
+
+    Ties keep first-appearance order, so output is deterministic and matches the
+    browser generator byte for byte.
+    """
+    records, first, windows = [], {}, {}
+    for marks in sorted(sequences, key=lambda m: (-len(m), sequences[m])):
+        start = windows.get(marks)
+        if start is None:
+            start = len(records)
+            records.extend(marks)
+            for end in range(start, len(records)):
+                for begin in range(max(0, end - MAX_MARKS + 1), end + 1):
+                    windows.setdefault(tuple(records[begin:end + 1]), begin)
+        first[marks] = start
+    return records, first
+
+
 def serialize_style(recipes, ascender, descender, advance_y):
     if len(recipes) != KEY_COUNT:
         raise ValueError(f"Expected {KEY_COUNT} dense keys")
     checked(ascender, -32768, 32767, "ascender")
     checked(descender, -32768, 32767, "descender")
-    checked(advance_y, 0, 255, "CPFont line advance")
-    bases, suffixes, base_ids, suffix_ids, dense = [], [], {}, {}, bytearray()
+    checked(advance_y, 1, 255, "CPFont line advance")
+    bases, base_ids, sequences, entries = [], {}, {}, []
     for recipe in recipes:
         if recipe is None:
-            dense += struct.pack("<HH", 0xFFFF, 0xFFFF)
+            entries.append(None)
             continue
-        checked(len(recipe), 1, 6, "recipe glyph count")
+        checked(len(recipe), 1, MAX_MARKS + 1, "recipe glyph count")
         encoded = []
         for cp, advance, x, y in recipe:
             checked(cp, 0, 65535, "CPFont codepoint")
@@ -167,61 +194,53 @@ def serialize_style(recipes, ascender, descender, advance_y):
             checked(x, -32768, 32767, "xOffsetFP")
             checked(y, -32768, 32767, "yOffsetFP")
             encoded.append(RECORD.pack(cp, advance, x, y))
-        base = encoded[0]
-        suffix = bytes([len(encoded) - 1]) + b"".join(encoded[1:])
+        base, marks = encoded[0], tuple(encoded[1:])
         if base not in base_ids:
             base_ids[base] = len(bases)
             bases.append(base)
-        if suffix not in suffix_ids:
-            suffix_ids[suffix] = len(suffixes)
-            suffixes.append(suffix)
-        dense += struct.pack("<HH", base_ids[base], suffix_ids[suffix])
-    checked(len(bases), 0, 65534, "base count")
-    checked(len(suffixes), 0, 65534, "suffix count")
-    base_offset = STYLE_HEADER.size + len(dense)
-    table_offset = base_offset + len(bases) * RECORD.size
-    data_offset = table_offset + (len(suffixes) + 1) * 4
-    offsets, end = [], data_offset
-    for suffix in suffixes:
-        offsets.append(end)
-        end += len(suffix)
-    offsets.append(end)
-    checked(end, 0, STYLE_LIMIT, "style companion bytes")
-    header = STYLE_HEADER.pack(len(bases), len(suffixes), STYLE_HEADER.size,
-                               base_offset, table_offset, data_offset,
-                               ascender, descender, advance_y, 0)
-    return (header + dense + b"".join(bases) +
-            struct.pack(f"<{len(offsets)}I", *offsets) + b"".join(suffixes))
+        if marks:
+            sequences.setdefault(marks, len(sequences))
+        entries.append((base_ids[base], marks))
+    checked(len(bases), 1, MAX_BASES, "base count")
+    records, first = pack_marks(sequences)
+    checked(len(records), 0, MAX_RECORDS, "mark record count")
+    dense = bytearray()
+    for entry in entries:
+        if entry is None:
+            value = ABSENT_ENTRY
+        else:
+            base_id, marks = entry
+            value = base_id | len(marks) << 7 | (first[marks] if marks else 0) << 10
+        dense += value.to_bytes(ENTRY_BYTES, "little")
+    payload = (STYLE_HEADER.pack(len(bases), len(records), ascender, descender, advance_y, 0) +
+               dense + b"".join(bases) + b"".join(records))
+    checked(len(payload), 0, STYLE_LIMIT, "style companion bytes")
+    return payload
 
 
 def decode_style(payload):
     """Strict independent byte reader used for the baker's serialization round trip."""
-    if not STYLE_HEADER.size <= len(payload) <= STYLE_LIMIT:
+    dense = STYLE_HEADER.size
+    if not dense + KEY_COUNT * ENTRY_BYTES <= len(payload) <= STYLE_LIMIT:
         raise ValueError("Invalid style payload size")
-    nb, ns, dense, base, table, data, asc, desc, line, reserved = STYLE_HEADER.unpack_from(payload)
-    if (reserved or dense != 28 or base != dense + KEY_COUNT * 4 or
-            table != base + nb * 8 or data != table + (ns + 1) * 4 or data > len(payload)):
+    nb, nr, asc, desc, line, reserved = STYLE_HEADER.unpack_from(payload)
+    base = dense + KEY_COUNT * ENTRY_BYTES
+    marks = base + nb * RECORD.size
+    if (reserved or not 1 <= nb <= MAX_BASES or nr > MAX_RECORDS or not line or
+            len(payload) != marks + nr * RECORD.size):
         raise ValueError("Invalid style section bounds")
-    offsets = struct.unpack_from(f"<{ns + 1}I", payload, table)
-    if offsets[0] != data or offsets[-1] != len(payload):
-        raise ValueError("Invalid suffix endpoints")
-    suffixes = []
-    for start, end in zip(offsets, offsets[1:]):
-        if not data <= start < end <= len(payload):
-            raise ValueError("Invalid suffix span")
-        count = payload[start]
-        if count > 5 or end - start != 1 + count * 8:
-            raise ValueError("Invalid suffix count")
-        suffixes.append(tuple(RECORD.unpack_from(payload, start + 1 + i * 8) for i in range(count)))
     result = []
     for key in range(KEY_COUNT):
-        bid, sid = struct.unpack_from("<HH", payload, dense + key * 4)
-        if bid == sid == 0xFFFF:
+        value = int.from_bytes(payload[dense + key * ENTRY_BYTES:dense + (key + 1) * ENTRY_BYTES], "little")
+        if value == ABSENT_ENTRY:
             result.append(None)
-        elif bid >= nb or sid >= ns:
-            raise ValueError("Invalid recipe index")
-        else:
-            result.append((RECORD.unpack_from(payload, base + bid * 8),) + suffixes[sid])
+            continue
+        bid, count, start = value & 0x7F, value >> 7 & 7, value >> 10
+        if bid >= nb or count > MAX_MARKS or start + count > nr or (not count and start):
+            raise ValueError("Invalid recipe entry")
+        result.append((RECORD.unpack_from(payload, base + bid * RECORD.size),) +
+                      tuple(RECORD.unpack_from(payload, marks + (start + i) * RECORD.size)
+                            for i in range(count)))
     return result, (asc, desc, line)
 
 
@@ -250,35 +269,55 @@ def finish_style(model, raster):
                 for recipe in decoded]
     if restored != model.oracle or metrics != model.metrics:
         raise ValueError("Thai recipe serialization differs from HarfBuzz oracle")
-    nb, ns = struct.unpack_from("<HH", model.payload)
+    nb, nr = struct.unpack_from("<HH", model.payload)
     model.counts = {"dense_keys": len(model.recipes), "base_records": nb,
-                    "suffix_sequences": ns, "payload_bytes": len(model.payload),
+                    "mark_records": nr, "payload_bytes": len(model.payload),
                     "alternate_glyphs": len(model.alternates)}
     return raster._replace(ascender=asc, descender=desc, advanceY=line)
 
 
 def make_companion(header, toc, packed_sections, models):
-    """CRC the CPFont metadata in exact file order, excluding only bitmap sections."""
+    """CRC the CPFont metadata in exact file order, excluding only bitmap sections.
+
+    The CRC (with the pair-tag field zeroed) becomes the pair tag: paired_header()
+    writes it into the CPFont header, and the reader compares the two fields
+    instead of re-reading CPFont metadata.
+    """
     if not 1 <= len(models) <= 4 or set(models) != set(packed_sections):
         raise ValueError("Invalid companion styles")
     cpfont_bytes = len(header) + len(toc)
-    metrics_crc = zlib.crc32(toc, zlib.crc32(header))
+    unpaired = header[:PAIR_TAG_OFFSET] + bytes(4) + header[PAIR_TAG_OFFSET + 4:]
+    metrics_crc = zlib.crc32(toc, zlib.crc32(unpaired))
     for style in sorted(packed_sections):
         for section in packed_sections[style][:-1]:
             metrics_crc = zlib.crc32(section, metrics_crc)
         cpfont_bytes += sum(map(len, packed_sections[style]))
+    return assemble_companion(cpfont_bytes, metrics_crc,
+                              {style: model.payload for style, model in models.items()})
+
+
+def assemble_companion(cpfont_bytes, metrics_crc, payloads):
+    """Family header, style TOC and style payloads (style ID -> serialized style)."""
     checked(cpfont_bytes, 0, 0xFFFFFFFF, "CPFont file bytes")
+    if not 1 <= len(payloads) <= 4:
+        raise ValueError("Invalid companion styles")
     toc_bytes = bytearray()
-    offset = 32 + 12 * len(models)
-    for style, model in sorted(models.items()):
+    offset = 32 + 12 * len(payloads)
+    for style, payload in sorted(payloads.items()):
         checked(style, 0, 3, "style ID")
-        checked(len(model.payload), 28, STYLE_LIMIT, "style companion bytes")
-        toc_bytes += struct.pack("<B3xII", style, offset, len(model.payload))
-        offset += len(model.payload)
+        checked(len(payload), STYLE_HEADER.size + KEY_COUNT * ENTRY_BYTES, STYLE_LIMIT,
+                "style companion bytes")
+        toc_bytes += struct.pack("<B3xII", style, offset, len(payload))
+        offset += len(payload)
     checked(offset, 32, FAMILY_LIMIT, "family companion bytes")
-    payload = bytes(toc_bytes) + b"".join(model.payload for _, model in sorted(models.items()))
+    payload = bytes(toc_bytes) + b"".join(payload for _, payload in sorted(payloads.items()))
     return struct.pack("<8sHHIIIII", MAGIC, VERSION, 32, cpfont_bytes,
-                       metrics_crc, zlib.crc32(payload), offset, len(models)) + payload
+                       metrics_crc, zlib.crc32(payload), offset, len(payloads)) + payload
+
+
+def paired_header(header, companion):
+    """CPFont header carrying the companion's pair tag in its reserved bytes."""
+    return header[:PAIR_TAG_OFFSET] + companion[16:20] + header[PAIR_TAG_OFFSET + 4:]
 
 
 def write_report(path, companion, models, sources, fallbacks, size, force_autohint):

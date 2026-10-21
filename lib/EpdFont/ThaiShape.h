@@ -52,7 +52,7 @@ class ThaiShapeCache {
     uint32_t references = 0;
     uint8_t count = 0;
   };
-  // A resolved recipe keyed by its dense-entry companion offset (unique per
+  // A resolved recipe keyed by its lookup-entry companion offset (unique per
   // style and key), so a repeated cluster stages without companion reads.
   struct Recipe {
     static constexpr uint8_t MAX_RECORDS = 4;  // longer recipes stay on the block path
@@ -86,6 +86,8 @@ class ThaiShapeSource {
   ~ThaiShapeSource() { reset(); }
   ThaiShapeSource(const ThaiShapeSource&) = delete;
   ThaiShapeSource& operator=(const ThaiShapeSource&) = delete;
+  // Views follow the current backing, so switching resident -> cached under the
+  // render lock keeps every validated view usable without revalidation.
   void setResident(const uint8_t* bytes, uint32_t size);
   void setCached(void* context, Read read, uint32_t size, ThaiShapeCache& cache);
   void reset();
@@ -111,14 +113,44 @@ class ThaiShapeSource {
   void* failureContext_ = nullptr;
 };
 
-// Immutable validated style metadata; optional dense bytes are an exact retained copy.
+// Load-time sequential reader: each byte is read once, in file order, and handed
+// to the observer, so validation and the payload CRC share one pass.
+class ThaiShapeStream {
+ public:
+  using Observe = void (*)(void* context, const uint8_t* bytes, size_t count);
+  ThaiShapeStream(ThaiShapeSource& source, uint32_t offset, Observe observe, void* context)
+      : source_(source), observe_(observe), context_(context), offset_(offset) {}
+  bool read(uint8_t* output, size_t count);
+  ThaiShapeSource& source() const { return source_; }
+  uint32_t offset() const { return offset_; }
+
+ private:
+  ThaiShapeSource& source_;
+  Observe observe_;
+  void* context_;
+  uint32_t offset_;
+};
+
+// Immutable validated style metadata; an optional lookup table is an exact retained copy.
+// CPSHAPE v2 style: 12-byte header, DENSE_COUNT 3-byte entries, base records, mark records.
 class ThaiShapeView {
  public:
   static constexpr uint32_t DENSE_COUNT = 46 * 82;
+  static constexpr uint32_t ENTRY_BYTES = 3;
+  static constexpr uint32_t DENSE_BYTES = DENSE_COUNT * ENTRY_BYTES;
+  static constexpr uint32_t HEADER_BYTES = 12;
+  static constexpr uint32_t RECORD_BYTES = 8;
+  // Entry bits: base ID 0-6, mark count 7-9, first mark record 10-23.
+  static constexpr uint32_t MAX_BASES = 127;
+  static constexpr uint32_t MAX_MARKS = 5;
+  static constexpr uint32_t MAX_RECORDS = 16383;
+  static constexpr uint32_t ABSENT_ENTRY = 0xFFFFFF;
   static constexpr uint32_t MAX_STYLE_BYTES = 96 * 1024;
   static constexpr uint32_t MAX_FAMILY_BYTES = 384 * 1024;
   using Coverage = bool (*)(void*, uint32_t);
-  bool validate(ThaiShapeSource& source, uint32_t offset, size_t size, Coverage coverage, void* context);
+  // Reads exactly `size` bytes from the stream. A non-null `denseCopy` (DENSE_BYTES)
+  // receives the lookup table as it is validated.
+  bool validate(ThaiShapeStream& stream, size_t size, Coverage coverage, void* context, uint8_t* denseCopy);
   void setDenseIndex(const uint8_t* index) { denseIndex_ = index; }
   bool valid() const { return source_ != nullptr; }
   bool failed() const { return source_ && source_->failed(); }
@@ -128,23 +160,26 @@ class ThaiShapeView {
 
  private:
   friend class ThaiGlyphCursor;
+  struct Entry {
+    uint8_t base;
+    uint8_t marks;
+    uint16_t first;
+  };
   bool read(uint32_t offset, uint8_t* output, size_t count) const;
-  bool recipe(uint32_t key, uint16_t& base, uint16_t& suffix) const;
-  bool stageRecipe(uint16_t base, uint16_t suffix, uint8_t* records, uint8_t& count) const;
-  uint32_t denseOffset(uint32_t key) const { return offset_ + 28 + key * 4; }
-  ThaiGlyphPlacement baseRecord(uint16_t id) const;
-  ThaiGlyphPlacement suffixRecord(uint16_t id, uint8_t index) const;
-  uint8_t suffixCount(uint16_t id) const;
+  const uint8_t* bytes() const { return source_->resident_ ? source_->resident_ + offset_ : nullptr; }
+  bool recipe(uint32_t key, Entry& entry) const;
+  bool stageRecipe(const Entry& entry, uint8_t* records, uint8_t& count) const;
+  uint32_t denseOffset(uint32_t key) const { return offset_ + HEADER_BYTES + key * ENTRY_BYTES; }
+  uint32_t baseOffset() const { return HEADER_BYTES + DENSE_BYTES; }
+  uint32_t markOffset() const { return baseOffset() + bases_ * RECORD_BYTES; }
+  ThaiGlyphPlacement baseRecord(uint8_t id) const;
+  ThaiGlyphPlacement markRecord(uint16_t index) const;
   ThaiShapeSource* source_ = nullptr;
-  const uint8_t* bytes_ = nullptr;
   const uint8_t* denseIndex_ = nullptr;
   uint32_t offset_ = 0;
   uint32_t size_ = 0;
-  uint32_t baseOffset_ = 0;
-  uint32_t suffixOffsets_ = 0;
-  uint32_t suffixData_ = 0;
   uint16_t bases_ = 0;
-  uint16_t suffixes_ = 0;
+  uint16_t records_ = 0;
   int16_t ascender_ = 0;
   int16_t descender_ = 0;
   uint16_t lineAdvance_ = 0;
@@ -176,8 +211,8 @@ class ThaiGlyphCursor {
   size_t consumed_ = 0;
   size_t offset_ = 0;
   size_t unitEnd_ = 0;
-  uint16_t base_ = 0;
-  uint16_t suffix_ = 0;
+  uint16_t firstMark_ = 0;
+  uint8_t base_ = 0;
   uint8_t record_ = 0;
   uint8_t records_ = 0;
   uint8_t stage_ = 0;

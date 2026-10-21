@@ -53,6 +53,8 @@ constexpr char CPFONT_MAGIC[8] = {'C', 'P', 'F', 'O', 'N', 'T', '\0', '\0'};
 // stringified into FONT_MANIFEST_URL.
 constexpr uint32_t HEADER_SIZE = 32;
 constexpr uint32_t STYLE_TOC_ENTRY_SIZE = 32;
+// Reserved CPFont v4 header bytes and CPSHAPE header bytes that hold the same pair tag.
+constexpr uint32_t PAIR_TAG_OFFSET = 16;
 
 // Helper to read little-endian values from byte buffer
 inline uint16_t readU16(const uint8_t* p) { return p[0] | (p[1] << 8); }
@@ -103,6 +105,7 @@ struct ThaiShapeStorage {
   HalFile file;
   std::unique_ptr<uint8_t[], ThaiShapeBufferDeleter> buffer;
   std::unique_ptr<uint8_t[], ThaiShapeBufferDeleter> indexes[SdCardFont::MAX_STYLES];
+  uint32_t size = 0;
   bool cached = false;
 
   ~ThaiShapeStorage() {
@@ -119,31 +122,67 @@ struct ThaiShapeStorage {
     auto& file = static_cast<ThaiShapeStorage*>(context)->file;
     return file.seekSet(offset) && file.read(output, count) == static_cast<int>(count);
   }
+
+#if THAI_SHAPING
+  // Minimum cached mode is admitted by actual allocation, not a heap floor.
+  bool useCached(HalFile&& companion) {
+    if (!sharedShapeCache) {
+      sharedShapeCache = makeUniqueNoThrow<ThaiShapeCache>();
+      if (!sharedShapeCache) {
+        LOG_ERR("THAI", "Cannot allocate shared companion cache (%u bytes)", unsigned(sizeof(ThaiShapeCache)));
+        return false;
+      }
+      sharedShapeCache->setIdleCallback(releaseIdleShapeCache);
+    }
+    file = std::move(companion);
+    cached = true;
+    ++cachedShapeOwners;
+    source.setCached(this, read, size, *sharedShapeCache);
+    setFailureLog();
+    return true;
+  }
+#endif
+
+  void setFailureLog() {
+    source.setFailureCallback(
+        [](void*, uint32_t offset) {
+          LOG_ERR("THAI", "CPShape read failed at %lu", static_cast<unsigned long>(offset));
+        },
+        nullptr);
+  }
 };
 
 SdCardFont::SdCardFont() = default;
 
 SdCardFont::~SdCardFont() { freeAll(); }
 
-void SdCardFont::loadThaiShape() {
+bool SdCardFont::thaiShapePath(char* path, const size_t capacity) const {
+  const char* extension = strrchr(filePath_, '.');
+  if (!extension || strcmp(extension, ".cpfont") != 0) return false;
+  const size_t stem = static_cast<size_t>(extension - filePath_);
+  if (stem + sizeof(".cpshape") > capacity) return false;
+  memcpy(path, filePath_, stem);
+  memcpy(path + stem, ".cpshape", sizeof(".cpshape"));
+  return true;
+}
+
+void SdCardFont::loadThaiShape(const uint32_t fontBytes, const uint32_t pairTag) {
   const uint8_t disabledIdentity[] = {1, THAI_SHAPING ? uint8_t{1} : uint8_t{0}, 0};
   contentHash_ = fnv1a(disabledIdentity, sizeof(disabledIdentity), contentHash_);
 #if THAI_SHAPING
   char path[sizeof(filePath_) + 2];
-  const char* extension = strrchr(filePath_, '.');
-  if (!extension || strcmp(extension, ".cpfont") != 0) return;
-  const size_t stem = static_cast<size_t>(extension - filePath_);
-  memcpy(path, filePath_, stem);
-  memcpy(path + stem, ".cpshape", 9);
-  if (!Storage.exists(path)) return;
+  if (!thaiShapePath(path, sizeof(path)) || !Storage.exists(path)) return;
+  [[maybe_unused]] const uint32_t startMs = millis();
   const auto load = [&]() -> bool {
     HalFile companion;
     if (!Storage.openFileForRead("THAI", path, companion)) return false;
     const size_t size = companion.size();
     if (size < 44 || size > ThaiShapeView::MAX_FAMILY_BYTES) return false;
     uint8_t header[32];
+    // Matching pair tags bind this companion to its CPFont; a rebuilt CPFont gets a new tag.
     if (companion.read(header, sizeof(header)) != static_cast<int>(sizeof(header)) || memcmp(header, "CPSHAPE\0", 8) ||
-        readU16(header + 8) != 1 || readU16(header + 10) != 32 || readU32(header + 24) != size ||
+        readU16(header + 8) != 2 || readU16(header + 10) != 32 || readU32(header + 12) != fontBytes ||
+        readU32(header + PAIR_TAG_OFFSET) != pairTag || readU32(header + 24) != size ||
         readU32(header + 28) != styleCount_)
       return false;
     auto storage = makeUniqueNoThrow<ThaiShapeStorage>();
@@ -151,6 +190,7 @@ void SdCardFont::loadThaiShape() {
       LOG_ERR("THAI", "Cannot allocate companion source");
       return false;
     }
+    storage->size = static_cast<uint32_t>(size);
     constexpr size_t reserve = 50 * 1024;
     if (residentThaiShape_ && HalMemory::getInternal8BitHeap().freeBytes > reserve) {
       storage->buffer.reset(psramNewArray<uint8_t>(size));
@@ -160,79 +200,42 @@ void SdCardFont::loadThaiShape() {
       if (!companion.seekSet(0) || companion.read(storage->buffer.get(), size) != static_cast<int>(size)) return false;
       companion.close();
       storage->source.setResident(storage->buffer.get(), size);
-    } else {
-      // Minimum cached mode is admitted by actual allocation, not a heap floor.
-      if (!sharedShapeCache) {
-        sharedShapeCache = makeUniqueNoThrow<ThaiShapeCache>();
-        if (!sharedShapeCache) {
-          LOG_ERR("THAI", "Cannot allocate shared companion cache (%u bytes)", unsigned(sizeof(ThaiShapeCache)));
-          return false;
-        }
-        sharedShapeCache->setIdleCallback(releaseIdleShapeCache);
-      }
-      storage->file = std::move(companion);
-      storage->cached = true;
-      ++cachedShapeOwners;
-      storage->source.setCached(storage.get(), ThaiShapeStorage::read, size, *sharedShapeCache);
+      storage->setFailureLog();
+    } else if (!storage->useCached(std::move(companion))) {
+      return false;
     }
-    storage->source.setFailureCallback(
-        [](void*, uint32_t offset) {
-          LOG_ERR("THAI", "CPShape read failed at %lu", static_cast<unsigned long>(offset));
-        },
-        nullptr);
-    uint8_t chunk[128];
-    uint32_t payloadCRC = MZ_CRC32_INIT;
-    for (uint32_t offset = 32; offset < size;) {
-      const uint32_t count = std::min<uint32_t>(sizeof(chunk), size - offset);
-      if (!storage->source.readBytes(offset, chunk, count)) return false;
-      payloadCRC = static_cast<uint32_t>(mz_crc32(payloadCRC, chunk, count));
-      offset += count;
-    }
-    if (payloadCRC != readU32(header + 20)) return false;
-    HalFile font;
-    if (!Storage.openFileForRead("THAI", filePath_, font) || font.size() != readU32(header + 12)) return false;
-    const size_t fontSize = font.size();
-    uint32_t metricsCRC = MZ_CRC32_INIT;
-    const auto checksumRange = [&](uint32_t offset, uint32_t count) -> bool {
-      if (offset > fontSize || count > fontSize - offset || !font.seekSet(offset)) return false;
-      while (count) {
-        const uint32_t n = std::min<uint32_t>(count, sizeof(chunk));
-        if (font.read(chunk, n) != static_cast<int>(n)) return false;
-        metricsCRC = static_cast<uint32_t>(mz_crc32(metricsCRC, chunk, n));
-        count -= n;
-      }
-      return true;
-    };
-    uint32_t previousEnd = HEADER_SIZE + styleCount_ * STYLE_TOC_ENTRY_SIZE;
-    if (!checksumRange(0, previousEnd)) return false;
-    uint8_t visited = 0;
-    for (uint8_t n = 0; n < styleCount_; ++n) {
-      uint8_t selected = MAX_STYLES;
+    // Optional lookup tables fill during validation, for every present style or none.
+    if (storage->cached && residentThaiShape_ &&
+        HalMemory::getInternal8BitHeap().freeBytes > reserve + styleCount_ * ThaiShapeView::DENSE_BYTES) {
       for (uint8_t i = 0; i < MAX_STYLES; ++i) {
-        if (!styles_[i].present || (visited & (1u << i))) continue;
-        if (selected == MAX_STYLES || styles_[i].intervalsFileOffset < styles_[selected].intervalsFileOffset)
-          selected = i;
+        if (!styles_[i].present) continue;
+        storage->indexes[i].reset(psramNewArray<uint8_t>(ThaiShapeView::DENSE_BYTES));
+        if (!storage->indexes[i] || HalMemory::getInternal8BitHeap().freeBytes <= reserve) {
+          for (auto& index : storage->indexes) index.reset();
+          break;
+        }
       }
-      if (selected == MAX_STYLES) return false;
-      const auto& s = styles_[selected];
-      if (s.intervalsFileOffset < previousEnd || s.bitmapFileOffset < s.intervalsFileOffset ||
-          !checksumRange(s.intervalsFileOffset, s.bitmapFileOffset - s.intervalsFileOffset))
-        return false;
-      previousEnd = s.bitmapFileOffset;
-      visited |= static_cast<uint8_t>(1u << selected);
     }
-    if (metricsCRC != readU32(header + 16)) return false;
-    uint32_t denseOffsets[MAX_STYLES] = {};
-    uint8_t seen = 0;
-    uint32_t nextOffset = 32 + styleCount_ * 12;
-    if (nextOffset > size) return false;
+    // One sequential pass validates every style and checks the payload CRC.
+    uint32_t payloadCRC = MZ_CRC32_INIT;
+    ThaiShapeStream stream(
+        storage->source, 32,
+        [](void* crc, const uint8_t* bytes, size_t count) {
+          auto& value = *static_cast<uint32_t*>(crc);
+          value = static_cast<uint32_t>(mz_crc32(value, bytes, count));
+        },
+        &payloadCRC);
+    uint8_t toc[MAX_STYLES][12];
+    if (styleCount_ > MAX_STYLES) return false;
     for (uint8_t i = 0; i < styleCount_; ++i) {
-      uint8_t toc[12];
-      if (!storage->source.readBytes(32 + i * 12, toc, sizeof(toc))) return false;
-      const uint8_t style = toc[0];
-      const uint32_t offset = readU32(toc + 4), length = readU32(toc + 8);
-      if (style >= MAX_STYLES || !styles_[style].present || (seen & (1u << style)) || toc[1] || toc[2] || toc[3] ||
-          offset != nextOffset || offset > size || length > size - offset)
+      if (!stream.read(toc[i], sizeof(toc[i]))) return false;
+    }
+    uint8_t seen = 0;
+    for (uint8_t i = 0; i < styleCount_; ++i) {
+      const uint8_t style = toc[i][0];
+      const uint32_t offset = readU32(toc[i] + 4), length = readU32(toc[i] + 8);
+      if (style >= MAX_STYLES || !styles_[style].present || (seen & (1u << style)) || toc[i][1] || toc[i][2] ||
+          toc[i][3] || offset != stream.offset() || length > size - offset)
         return false;
       struct CoverageContext {
         const SdCardFont* font;
@@ -243,34 +246,13 @@ void SdCardFont::loadThaiShape() {
         return c.font->findGlobalGlyphIndex(*c.style, cp) >= 0;
       };
       auto& view = styles_[style].thaiShape;
-      if (!view.validate(storage->source, offset, length, covered, &context)) return false;
+      if (!view.validate(stream, length, covered, &context, storage->indexes[style].get())) return false;
       const auto& h = styles_[style].header;
       if (view.ascender() != h.ascender || view.descender() != h.descender || view.lineAdvance() != h.advanceY)
         return false;
-      denseOffsets[style] = offset + 28;  // validate requires the canonical dense offset.
       seen |= static_cast<uint8_t>(1u << style);
-      nextOffset += length;
     }
-    if (nextOffset != size) return false;
-    if (storage->cached && residentThaiShape_) {
-      constexpr size_t indexBytes = ThaiShapeView::DENSE_COUNT * 4;
-      const size_t allIndexBytes = styleCount_ * indexBytes;
-      if (HalMemory::getInternal8BitHeap().freeBytes > reserve + allIndexBytes) {
-        bool allIndexes = true;
-        for (uint8_t i = 0; i < MAX_STYLES; ++i) {
-          if (!styles_[i].present) continue;
-          storage->indexes[i].reset(psramNewArray<uint8_t>(indexBytes));
-          if (!storage->indexes[i] || HalMemory::getInternal8BitHeap().freeBytes <= reserve) {
-            allIndexes = false;
-            break;
-          }
-          if (!storage->source.readBytes(denseOffsets[i], storage->indexes[i].get(), indexBytes)) return false;
-        }
-        if (!allIndexes) {
-          for (auto& index : storage->indexes) index.reset();
-        }
-      }
-    }
+    if (stream.offset() != size || payloadCRC != readU32(header + 20)) return false;
     // Publish only after every style passed and optional indexes are all-or-none.
     thaiShapeStorage_ = std::move(storage);
     size_t residentIndexBytes = 0;
@@ -278,15 +260,15 @@ void SdCardFont::loadThaiShape() {
       if (!styles_[i].present) continue;
       auto& s = styles_[i];
       s.thaiShape.setDenseIndex(thaiShapeStorage_->indexes[i].get());
-      if (thaiShapeStorage_->indexes[i]) residentIndexBytes += ThaiShapeView::DENSE_COUNT * 4;
+      if (thaiShapeStorage_->indexes[i]) residentIndexBytes += ThaiShapeView::DENSE_BYTES;
       s.stubData.thaiShape = s.miniData.thaiShape = &s.thaiShape;
     }
-    contentHash_ = fnv1a(header + 16, 8, contentHash_);
+    contentHash_ = fnv1a(header + PAIR_TAG_OFFSET, 8, contentHash_);
     const uint8_t active = 1;
     contentHash_ = fnv1a(&active, 1, contentHash_);
-    LOG_DBG("THAI", "CPShape %s: source/HAL inline=%u views=%u shared=%u indexes=%u resident=%u bytes",
-            thaiShapeStorage_->cached ? "cached" : "resident", unsigned(sizeof(ThaiShapeStorage)),
-            unsigned(sizeof(ThaiShapeView) * MAX_STYLES),
+    LOG_DBG("THAI", "CPShape %s in %lu ms: source/HAL inline=%u views=%u shared=%u indexes=%u resident=%u bytes",
+            thaiShapeStorage_->cached ? "cached" : "resident", static_cast<unsigned long>(millis() - startMs),
+            unsigned(sizeof(ThaiShapeStorage)), unsigned(sizeof(ThaiShapeView) * MAX_STYLES),
             thaiShapeStorage_->cached ? unsigned(sizeof(ThaiShapeCache)) : 0u, unsigned(residentIndexBytes),
             thaiShapeStorage_->buffer ? unsigned(size) : 0u);
     return true;
@@ -295,6 +277,36 @@ void SdCardFont::loadThaiShape() {
     for (auto& style : styles_) style.thaiShape = ThaiShapeView{};
     LOG_ERR("THAI", "Companion unavailable (invalid, incompatible or OOM): %s", path);
   }
+#else
+  (void)fontBytes;
+  (void)pairTag;
+#endif
+}
+
+bool SdCardFont::demoteResidentThaiShape() {
+#if THAI_SHAPING
+  if (!thaiShapeStorage_ || !thaiShapeStorage_->buffer) return true;
+  auto& storage = *thaiShapeStorage_;
+  char path[sizeof(filePath_) + 2];
+  HalFile companion;
+  uint8_t header[32];
+  // Views stay validated only if the file is still the one held in RAM; the
+  // header carries its size, pair tag and payload CRC.
+  if (!thaiShapePath(path, sizeof(path)) || !Storage.openFileForRead("THAI", path, companion) ||
+      companion.size() != storage.size || companion.read(header, sizeof(header)) != static_cast<int>(sizeof(header)) ||
+      memcmp(header, storage.buffer.get(), sizeof(header)) != 0)
+    return false;
+  // Free the buffer before the shared cache allocation that replaces it.
+  storage.source.reset();
+  storage.buffer.reset();
+  if (!storage.useCached(std::move(companion))) {
+    LOG_ERR("THAI", "CPShape demotion lost its backing; reload required: %s", path);
+    return false;
+  }
+  LOG_DBG("THAI", "CPShape demoted in place: %s", path);
+  return true;
+#else
+  return true;
 #endif
 }
 
@@ -1168,7 +1180,7 @@ bool SdCardFont::load(const char* path, const bool residentThaiShape) {
     applyGlyphMissCallback(i);
   }
 
-  loadThaiShape();
+  loadThaiShape(static_cast<uint32_t>(file.size()), readU32(headerBuf + PAIR_TAG_OFFSET));
   loaded_ = true;
 
   LOG_DBG("SDCF", "Loaded: %s (v%u, %u styles)", path, CPFONT_VERSION, styleCount_);

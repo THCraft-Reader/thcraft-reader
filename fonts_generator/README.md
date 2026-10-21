@@ -1,6 +1,6 @@
 # THCraft Font Workshop
 
-Browser-only TTF/OTF → CPFont v4 conversion with optional Thai CPSHAPE v1 positioning. Rust, FreeType and HarfBuzz compile into WebAssembly. The website loads a separate, content-hashed WASM asset on demand; the standalone distribution embeds everything in one HTML file. Neither uses a CDN, conversion server API, or font uploads.
+Browser-only TTF/OTF → CPFont v4 conversion with optional Thai CPSHAPE v2 positioning. Rust, FreeType and HarfBuzz compile into WebAssembly. The website loads a separate, content-hashed WASM asset on demand; the standalone distribution embeds everything in one HTML file. Neither uses a CDN, conversion server API, or font uploads.
 
 ## Use
 
@@ -27,7 +27,7 @@ and do not publish a download.
 
 Reading (Fiction), Default (CrossPoint), Latin Extended, Greek, Cyrillic, Vietnamese, Hebrew, Arabic (Farsi/Urdu), Armenian, Georgian, Ethiopic, Cherokee, Tifinagh, Thai, Hangul, Chinese (Simplified/Traditional), Japanese, Symbols & Arrows, and IPA characters. Additional hexadecimal ranges accept `0300-036F`, `U+2190-U+21FF`, or individual codepoints.
 
-Presets overlap and are merged. The Chinese choices request the same BMP Han/radical/punctuation/Bopomofo blocks: regional glyph forms come from the supplied font, not from conversion or a change of Unicode codepoint. Japanese adds kana coverage. Supplementary characters may be requested with custom ranges; CPFont's kerning/ligature pair fields remain BMP-only. Script coverage does not add new shaping support to firmware; CPSHAPE v1 is Thai-specific.
+Presets overlap and are merged. The Chinese choices request the same BMP Han/radical/punctuation/Bopomofo blocks: regional glyph forms come from the supplied font, not from conversion or a change of Unicode codepoint. Japanese adds kana coverage. Supplementary characters may be requested with custom ranges; CPFont's kerning/ligature pair fields remain BMP-only. Script coverage does not add new shaping support to firmware; CPSHAPE v2 is Thai-specific.
 
 ## Build
 
@@ -89,7 +89,7 @@ The website fetches the same-origin engine on conversion, not page load. A conte
 }
 ```
 
-Results contain `files` (`path`, `kind`, `size`) and `warnings`, or `error`. The low-level API accepts explicit intervals and always adds U+FFFD; the browser adds the rest of the always-on base coverage. A successful request replaces `/output`; a failed request does not publish a partial pair. CPFont is little-endian with continuous 2-bit packing and 12.4 advances. CPSHAPE binds to CPFont metadata in file order, excluding bitmaps, and enforces 96 KiB/style and 384 KiB/family.
+Results contain `files` (`path`, `kind`, `size`) and `warnings`, or `error`. The low-level API accepts explicit intervals and always adds U+FFFD; the browser adds the rest of the always-on base coverage. A successful request replaces `/output`; a failed request does not publish a partial pair. CPFont is little-endian with continuous 2-bit packing and 12.4 advances. CPSHAPE binds to CPFont metadata in file order, excluding bitmaps, through a pair tag written into both headers, and enforces 96 KiB/style and 384 KiB/family.
 
 ## Verification
 
@@ -101,11 +101,11 @@ cargo test --lib --locked
 
 Verified on Windows with Chromium/Edge:
 
-- 16 Rust tests: bitmap pitch/packing, fixed-point rounding, kerning classes, aliases, ligature handling, validation, Thai recipes and CRC binding.
-- 12 byte-identical CPFont/CPSHAPE outputs against the existing Python converter: Noto Sans Thai at 8/16 pt, four styles at 16 pt, Noto Serif Thai, Sarabun, Latin auto-hinting, and CFF OTF. The Python environment used FreeType 2.13.2/HarfBuzz 14.4.0; the match is evidence for these fixtures, not a claim about every font/version.
+- 18 Rust tests: bitmap pitch/packing, fixed-point rounding, kerning classes, aliases, ligature handling, validation, Thai recipes, shared mark records, CRC/pair-tag binding, and a synthetic CPSHAPE v2 style payload whose length and CRC the Python baker test also pins.
+- 12 byte-identical CPFont/CPSHAPE v1 outputs against the existing Python converter (measured before CPSHAPE v2; for v2 the compiled WASM engine run under Node matched the Python converter byte for byte for Noto Sans Thai 16 pt with ASCII, punctuation and Thai coverage and no fallback; the other fixtures were not re-run): Noto Sans Thai at 8/16 pt, four styles at 16 pt, Noto Serif Thai, Sarabun, Latin auto-hinting, and CFF OTF. The Python environment used FreeType 2.13.2/HarfBuzz 14.4.0; the match is evidence for these fixtures, not a claim about every font/version.
 - Real site uploads, Hebrew coverage from a fallback, ZIP download/CRC validation, offline file-based conversion with networking disabled, two-size base-only output, custom-range validation, cancellation and regeneration.
 - Responsive 390 px layout and actual bitmap proof.
 - Separate-asset site delivery: no WASM or license-document request during initial page load; one 1,966,472-byte same-origin WASM request after conversion starts; successful generation and visible missing-asset errors. With the mascot included and notices linked separately, initial HTML is 206,499 bytes instead of the original 4,015,542 bytes. The standalone build retains embedded notices and still converts with networking disabled.
 - A browser-generated Thai pair loaded by the firmware's production-linked `ThaiRenderProbe`, with shaping active, placement checks and cache roundtrip, producing two pages.
 
-Device testing is still required: copy a generated pair to SD, restart, check Thai marks and fallback glyphs in books/UI, and verify orientations and heap behavior on the target reader. No firmware code or format version changes are required. Current FreeType upstream CMake emits a compatibility deprecation warning with newer CMake; compilation and packaging succeed.
+Device testing is still required: copy a generated pair to SD, restart, check Thai marks and fallback glyphs in books/UI, and verify orientations and heap behavior on the target reader. Generated pairs need firmware with CPSHAPE v2 support. Current FreeType upstream CMake emits a compatibility deprecation warning with newer CMake; compilation and packaging succeed.
