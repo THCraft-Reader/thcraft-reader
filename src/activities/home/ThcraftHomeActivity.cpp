@@ -2,6 +2,7 @@
 
 #include <BoardConfig.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <HalDisplay.h>
 #include <HalPowerManager.h>
 #include <I18n.h>
@@ -9,7 +10,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <ctime>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -392,13 +392,21 @@ void ThcraftHomeActivity::loop() {
     loadMissingProgress();
   }
 
-  // A visible clock widget repaints when the minute changes; nothing else ticks.
+  // A visible clock widget repaints when the device clock moves past the
+  // minute last drawn; nothing else ticks. halClock's RTC cache is shared with
+  // the render task, so it is read under a try-lock that never waits on a render.
   const bool clockShown = layout.showWidgets && (widgetType(0) == CrossPointSettings::HOME_WIDGET_CLOCK ||
                                                  widgetType(1) == CrossPointSettings::HOME_WIDGET_CLOCK);
-  const int64_t minute = static_cast<int64_t>(time(nullptr)) / 60;
-  if (clockShown && firstRenderDone.load(std::memory_order_acquire) && minute != lastClockMinute) {
-    if (lastClockMinute >= 0) requestUpdate();
-    lastClockMinute = minute;
+  constexpr unsigned long CLOCK_CHECK_MS = 5000;
+  if (clockShown && assetsLoaded.load(std::memory_order_acquire) && millis() - lastClockCheckMs >= CLOCK_CHECK_MS) {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock()) {
+      lastClockCheckMs = millis();
+      struct tm now{};
+      const bool known = halClock.localTime(now);
+      lock.unlock();
+      if (known && now.tm_hour * 60 + now.tm_min != drawnClockMinute.load(std::memory_order_acquire)) requestUpdate();
+    }
   }
 }
 
@@ -457,7 +465,7 @@ bool ThcraftHomeActivity::loadMissingAssets() {
   return showingLoading;
 }
 
-void ThcraftHomeActivity::drawHeader() {
+void ThcraftHomeActivity::drawHeader(const struct tm* local) {
   const Rect& h = layout.header;
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
@@ -475,9 +483,9 @@ void ThcraftHomeActivity::drawHeader() {
     x -= renderer.getTextWidth(UI_10_FONT_ID, text) + 6;
     renderer.drawText(UI_10_FONT_ID, x, h.y + 2, text);
   }
-  char time[12];
-  struct tm local{};
-  if (thcraft_widgets::localNow(local) && thcraft_widgets::formatClock(time, sizeof(time), local)) {
+  if (local) {
+    char time[12];
+    thcraft_widgets::formatClock(time, sizeof(time), *local);
     x -= renderer.getTextWidth(UI_10_FONT_ID, time) + 14;
     renderer.drawText(UI_10_FONT_ID, x, h.y + 2, time);
   }
@@ -582,7 +590,7 @@ void ThcraftHomeActivity::drawProgress(const int x, const int y, const int width
   renderer.drawText(SMALL_FONT_ID, x + width - textWidth, y, text);
 }
 
-void ThcraftHomeActivity::drawWidgets() {
+void ThcraftHomeActivity::drawWidgets(const struct tm* local) {
   int actionable = 0;
   for (int slot = 0; slot < ThcraftHomeLayout::WIDGET_COUNT; ++slot) {
     const int type = widgetType(slot);
@@ -603,7 +611,7 @@ void ThcraftHomeActivity::drawWidgets() {
         thcraft_widgets::drawGoal(renderer, rect, stats, SETTINGS.readingGoalMinutes, messages);
         break;
       case CrossPointSettings::HOME_WIDGET_CLOCK:
-        thcraft_widgets::drawClock(renderer, rect);
+        thcraft_widgets::drawClock(renderer, rect, local);
         break;
       default:
         break;
@@ -655,10 +663,14 @@ void ThcraftHomeActivity::render(RenderLock&&) {
   const unsigned long started = millis();
   renderer.clearScreen();
   coverCache.prepare();
-  drawHeader();
+  // One device-clock reading per frame, so the header and Clock widget agree.
+  struct tm now{};
+  const struct tm* local = halClock.localTime(now) ? &now : nullptr;
+  drawnClockMinute.store(local ? now.tm_hour * 60 + now.tm_min : -1, std::memory_order_release);
+  drawHeader(local);
   drawCard();
   if (layout.showRecent) drawRecent();
-  if (layout.showWidgets) drawWidgets();
+  if (layout.showWidgets) drawWidgets(local);
   drawNav();
   renderUi();
 

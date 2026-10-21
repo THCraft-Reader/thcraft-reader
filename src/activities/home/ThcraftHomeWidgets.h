@@ -19,17 +19,15 @@ struct Messages {
   std::string noImage[2];
 };
 
-// Home draws the clock from the system clock, which RTC boards seed at boot:
-// halClock's RTC cache can lag a minute behind the minute tick.
-bool localNow(struct tm& out);
-bool formatClock(char* out, size_t size, const struct tm& local);
-
 void drawFrame(const GfxRenderer& renderer, Rect rect, bool focused);
 void drawToday(const GfxRenderer& renderer, Rect rect, const ReadingStatsSnapshot& stats, const Messages& messages);
 void drawWeek(const GfxRenderer& renderer, Rect rect, const ReadingStatsSnapshot& stats, const Messages& messages);
 void drawGoal(const GfxRenderer& renderer, Rect rect, const ReadingStatsSnapshot& stats, int goalMinutes,
               const Messages& messages);
-void drawClock(const GfxRenderer& renderer, Rect rect);
+// Formats like HalClock::formatTime, from a reading already taken.
+void formatClock(char* out, size_t size, const struct tm& local);
+// `local` is the frame's device-clock reading, or nullptr when there is no time.
+void drawClock(const GfxRenderer& renderer, Rect rect, const struct tm* local);
 // Image area inside the frame; the home screen converts the image to this size.
 Rect imageArea(Rect rect);
 void drawImage(const GfxRenderer& renderer, Rect rect, const std::string& bmpPath, const Messages& messages);

@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <ctime>
 
 #include "CrossPointSettings.h"
 #include "components/themes/thcraft/ThcraftTheme.h"
@@ -64,21 +63,6 @@ void drawProgressBar(const GfxRenderer& renderer, const int x, const int y, cons
   const uint32_t clamped = std::min(value, max);
   const int fill = max > 0 ? static_cast<int>(static_cast<uint64_t>(width - 4) * clamped / max) : 0;
   if (fill > 0) renderer.fillRoundedRect(x + 2, y + 2, fill, height - 4, (height - 4) / 2, Color::Black);
-}
-
-bool localNow(struct tm& out) {
-  // Below 2025-01-01 the clock was never set.
-  constexpr time_t MIN_VALID_EPOCH = 1735689600;
-  const time_t now = time(nullptr);
-  return now >= MIN_VALID_EPOCH && localtime_r(&now, &out) != nullptr;
-}
-
-bool formatClock(char* out, const size_t size, const struct tm& local) {
-  if (SETTINGS.clockFormat == 1) {
-    const int hour = local.tm_hour % 12 == 0 ? 12 : local.tm_hour % 12;
-    return snprintf(out, size, "%d:%02d %s", hour, local.tm_min, local.tm_hour >= 12 ? "PM" : "AM") > 0;
-  }
-  return snprintf(out, size, "%02d:%02d", local.tm_hour, local.tm_min) > 0;
 }
 
 void drawFrame(const GfxRenderer& renderer, const Rect rect, const bool focused) {
@@ -179,18 +163,27 @@ void drawGoal(const GfxRenderer& renderer, const Rect rect, const ReadingStatsSn
   }
 }
 
-void drawClock(const GfxRenderer& renderer, const Rect rect) {
+void formatClock(char* out, const size_t size, const struct tm& local) {
+  if (SETTINGS.clockFormat == 1) {
+    const int hour = local.tm_hour % 12 == 0 ? 12 : local.tm_hour % 12;
+    snprintf(out, size, "%d:%02d %s", hour, local.tm_min, local.tm_hour >= 12 ? "PM" : "AM");
+  } else {
+    snprintf(out, size, "%02d:%02d", local.tm_hour, local.tm_min);
+  }
+}
+
+void drawClock(const GfxRenderer& renderer, const Rect rect, const struct tm* local) {
   int y = drawTitle(renderer, rect, tr(STR_WIDGET_CLOCK));
-  char time[12];
-  struct tm local{};
-  if (!localNow(local) || !formatClock(time, sizeof(time), local)) {
+  if (!local) {
     renderer.drawText(UI_10_FONT_ID, rect.x + PADDING, y, tr(STR_NOT_SET));
     return;
   }
+  char time[12];
+  formatClock(time, sizeof(time), *local);
   y = drawBigValue(renderer, rect.x + PADDING, y, time, nullptr) + GAP;
   char date[32];
-  snprintf(date, sizeof(date), "%s  %04d-%02d-%02d", I18N.get(WEEKDAYS[(local.tm_wday + 6) % 7]), local.tm_year + 1900,
-           local.tm_mon + 1, local.tm_mday);
+  snprintf(date, sizeof(date), "%s  %04d-%02d-%02d", I18N.get(WEEKDAYS[(local->tm_wday + 6) % 7]),
+           local->tm_year + 1900, local->tm_mon + 1, local->tm_mday);
   renderer.drawText(UI_10_FONT_ID, rect.x + PADDING, y, date);
 }
 

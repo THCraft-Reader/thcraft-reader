@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -60,10 +61,10 @@ class ThcraftHomeActivity final : public Activity, private UiAppHost {
   bool widgetActionable(int slot) const;
   int widgetSlotAt(int index) const;
 
-  void drawHeader();
+  void drawHeader(const struct tm* local);
   void drawCard();
   void drawRecent();
-  void drawWidgets();
+  void drawWidgets(const struct tm* local);
   void drawNav();
   void drawProgress(int x, int y, int width, const RecentBook& book);
   bool focused(Zone zone, int index) const;
@@ -86,7 +87,9 @@ class ThcraftHomeActivity final : public Activity, private UiAppHost {
   Zone focusZone = Zone::Card;
   std::array<int, ZONE_COUNT> zoneIndex{};
   int pendingTouch = -1;
-  int64_t lastClockMinute = -1;
+  // Hour * 60 + minute of the device clock in the last frame, -1 without a time.
+  std::atomic<int> drawnClockMinute{-1};
+  unsigned long lastClockCheckMs = 0;
   bool hasOpdsServers = false;
   bool hasPlugins = false;
   // Written by the render task, read by loop().
