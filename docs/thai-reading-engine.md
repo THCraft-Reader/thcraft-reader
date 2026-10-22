@@ -456,7 +456,8 @@ validation and filled by it, and retained only as a complete set that preserves
 greater than 50 KiB internal headroom; failure falls back to fully paged lookup.
 Firmware ELF type information (C3 `default` build) reports per-font storage of
 72 bytes (including the 32-byte source, 12-byte HAL handle, buffer/index
-ownership and companion size), four 28-byte style views, a four-byte owning
+ownership and companion size), one 28-byte style view per present style (inside
+the heap-allocated style array), a four-byte owning
 pointer, and an additional 80-byte retained HAL file implementation in cached
 mode. Allocator overhead and ordinary CPFont caches are extra. Host object sizes
 differ and are not device-memory evidence.

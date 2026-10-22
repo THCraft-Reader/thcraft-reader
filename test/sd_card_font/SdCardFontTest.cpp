@@ -1618,6 +1618,58 @@ TEST(SdCardFontTest, AnEmptyOrFailedAdvanceBuildLeavesNoTable) {
   EXPECT_TRUE(font.hasAdvanceTable());
 }
 
+TEST(SdCardFontTest, AFullAdvanceTableSkipsTheScanWithoutAllocating) {
+  makeFont(1001);
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture"));
+  ASSERT_EQ(0, font.buildAdvanceTable(page(FIRST, 768).c_str(), 1));
+  uint16_t advance = 0;
+  ASSERT_TRUE(font.getAdvance(FIRST + 767, 0, advance));
+  ASSERT_EQ(32U << 4, advance);
+  const size_t allocationsBefore = nullableCalls;
+  EXPECT_EQ(0, font.buildAdvanceTable(page(FIRST + 768, 200).c_str(), 1));
+  EXPECT_EQ(allocationsBefore, nullableCalls);
+  EXPECT_FALSE(font.getAdvance(FIRST + 768, 0, advance));
+}
+
+TEST(SdCardFontTest, OnePageWithMoreCodepointsThanTheTableKeepsTheLowestInAnyOrder) {
+  constexpr uint32_t CACHE_LIMIT = 768;  // SdCardFont::ADVANCE_CACHE_LIMIT
+  makeFont(1001);
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture"));
+  // The top 768 first (ascending), then the rest descending: whatever the
+  // input order, only the lowest 768 stay cached. Every codepoint appears
+  // twice, so repeats must not count twice.
+  std::string text;
+  for (uint32_t cp = FIRST + 232; cp < FIRST + 1000; ++cp) text += page(cp, 1) + page(cp, 1);
+  for (uint32_t cp = FIRST + 231; cp + 1 > FIRST; --cp) text += page(cp, 1) + page(cp, 1);
+  ASSERT_EQ(0, font.buildAdvanceTable(text.c_str(), 1));
+  for (uint32_t cp = FIRST; cp < FIRST + 1000; ++cp) {
+    uint16_t advance = 0;
+    ASSERT_EQ(cp < FIRST + CACHE_LIMIT, font.getAdvance(cp, 0, advance)) << std::hex << cp;
+    if (cp < FIRST + CACHE_LIMIT) ASSERT_EQ(32U << 4, advance) << std::hex << cp;
+  }
+}
+
+TEST(SdCardFontTest, CodepointsTheFontLacksDoNotTakeTableSlotsWithoutAReplacementGlyph) {
+  constexpr uint32_t CACHE_LIMIT = 768;  // SdCardFont::ADVANCE_CACHE_LIMIT
+  makeFont(1001);
+  put32(76, 0xFFFC);  // the last glyph is U+FFFC instead of U+FFFD
+  put32(80, 0xFFFC);
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture"));
+  // 300 codepoints below FIRST that the font lacks, each twice, then a full
+  // table's worth it has. Only the latter can be cached, so all should be.
+  const std::string lacking = page(0x4E00, 300);
+  const std::string text = lacking + lacking + page(FIRST, CACHE_LIMIT);
+  EXPECT_EQ(300, font.buildAdvanceTable(text.c_str(), 1));
+  for (uint32_t cp = FIRST; cp < FIRST + CACHE_LIMIT; ++cp) {
+    uint16_t advance = 0;
+    ASSERT_TRUE(font.getAdvance(cp, 0, advance)) << std::hex << cp;
+    ASSERT_EQ(32U << 4, advance) << std::hex << cp;
+  }
+}
+
 TEST(SdCardFontTest, ShortAdvancePreparationAvoidsLargeScratchAndRepeatedReads) {
   makeFont();
   SdCardFont font;

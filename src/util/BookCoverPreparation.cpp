@@ -112,7 +112,8 @@ bool bookcovers::prepareForReader(GfxRenderer& renderer, const std::string& book
     request.thumbHeight = themeHeight > 0 ? themeHeight : UITheme::getInstance().getMetrics().homeCoverHeight;
   }
   request.sleepCover = SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER ||
-                       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM;
+                       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM ||
+                       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_TRANSPARENT;
   request.showPopup = true;
   if (request.thumbHeight > 0 || request.sleepCover) prepare(renderer, bookPath, request);
   renderer.setOrientation(orientation);

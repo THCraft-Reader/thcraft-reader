@@ -150,6 +150,15 @@ class EpubReaderActivity final : public ReaderActivity {
   // Switches the reader font to SD-backed Thai shaping when the working set no
   // longer fits beside the resident companion. Requires the render lock.
   void shedResidentThaiShapeIfStarved();
+  // One bounded build step on the loop task, in a frame whose input did nothing. Lays out about
+  // BACKGROUND_BUILD_PAGES_PER_TICK pages (one 1 KB parse step may add more) and hands the loop
+  // back after BACKGROUND_BUILD_TICK_BUDGET_MS or as soon as a button is down, so a short press
+  // or tap is seen before more pages are built.
+  void backgroundBuildTick();
+  bool anyButtonPressed() const;
+  // A background build failed in this spine. The error would likely recur, so from then on the
+  // spine is built only as far as the reader goes; pages from earlier build steps stay readable.
+  int backgroundBuildFailedSpine = -1;
   // Bluetooth page turner: every chapter build stops the radio until the chapter is built and its
   // page is shown. False: the radio still holds or is taking the heap, and the build must not run.
   std::atomic<bool> radioReleasedForBuild{false};
@@ -164,7 +173,6 @@ class EpubReaderActivity final : public ReaderActivity {
   // Sized for the PNG decoder (~44 KB object behind a 60 KB free-heap gate); JPEG needs less.
   static constexpr size_t IMAGE_DECODE_MIN_FREE_HEAP = 72 * 1024;
   static constexpr size_t IMAGE_DECODE_MIN_MAX_ALLOC = 48 * 1024;
-  static constexpr int BUILD_WINDOW_AHEAD = 5;
   static constexpr int PARTIAL_REBUILD_START_MARGIN = 15;
   static constexpr int BUILD_POPUP_PAGE_THRESHOLD = 20;
   static constexpr size_t BUILD_POPUP_BYTE_THRESHOLD = 96 * 1024;
