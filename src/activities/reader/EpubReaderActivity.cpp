@@ -3216,7 +3216,6 @@ void EpubReaderActivity::applyReaderTextSettings() {
   // The reader otherwise only loads SD fonts on book open, so without this an
   // in-reader font change wouldn't take effect until re-opening the book.
   // Locked because the render task can load or unload SD font variants too.
-  RenderLock lock;
   sdFontSystem.ensureLoaded(renderer);
   // A render between the two locks may have rebuilt the section with the old fonts.
   resetSectionForRelayout();

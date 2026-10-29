@@ -1,4 +1,4 @@
-# X4 Pro Thai release workflow
+# Thai release workflow
 
 Build the firmware locally and assemble the following directory, relative to the repository root:
 
@@ -9,6 +9,19 @@ Release/x4pro-thai/
 ├── SHA256SUMS
 └── THCraft-Thai-Fonts.zip
 ```
+
+Select the production target with `RELEASE_TARGET` before running the build block:
+
+| Device | `RELEASE_TARGET` / output under `Release/` | PlatformIO environment |
+| --- | --- | --- |
+| X4 Pro (default) | `x4pro-thai` | `x4pro-gh_release` |
+| X4 Classic | `x4classic-thai` | `x4c-gh_release` |
+| X4 | `x4-thai` | `gh_release` |
+| X3 | `x3-thai` | `gh_release` |
+
+For example, `export RELEASE_TARGET=x4classic-thai` selects X4 Classic.
+Each output directory contains the same four filenames shown above. X4 and X3
+use the same firmware; their package binaries must match byte-for-byte.
 
 Use **`Release` (singular)** for new output. The existing example is in
 `Releases/x4pro-thai/` (plural); do not overwrite that input archive.
@@ -22,8 +35,8 @@ This workflow does not upload firmware, push Git changes, or publish a GitHub re
   setup in `README.md`. On a fresh checkout, initialize submodules with
   `git submodule update --init --recursive`.
 - Review the version in `[crosspoint]` in `platformio.ini` before building.
-  The production environment is **`x4pro-gh_release`**, not the default X4/C3
-  environment or the more verbose `x4pro` development environment.
+  Select the production environment from the table above, not a development
+  environment. Production builds use info-level logging.
 - Have the complete, previously prepared Thai font ZIP available. The default
   input is `Release/x4pro-thai/THCraft-Thai-Fonts.zip`; it is staged before any
   output is replaced. The older `Releases/` example lacks the additional sizes.
@@ -76,7 +89,7 @@ native coverage. Existing Jindara 20–26 pt pairs are preserved byte-for-byte.
 ## Build and package
 
 Run this entire block from the repository root. It validates the font input,
-compiles the X4 Pro production firmware, stages both generated binaries and the
+compiles the selected production firmware, stages both generated binaries and the
 font ZIP, then writes fresh SHA-256 checksums for those three files. A failed
 build or incomplete font archive stops packaging; no stale binaries are copied
 following a failed build. Existing copies of the four release files are replaced;
@@ -96,9 +109,18 @@ root = Path.cwd()
 if not (root / "platformio.ini").is_file():
     raise SystemExit("Run this workflow from the repository root")
 
-environment = "x4pro-gh_release"
+target = os.environ.get("RELEASE_TARGET", "x4pro-thai")
+environments = {
+    "x4pro-thai": "x4pro-gh_release",
+    "x4classic-thai": "x4c-gh_release",
+    "x4-thai": "gh_release",
+    "x3-thai": "gh_release",
+}
+if target not in environments:
+    raise SystemExit(f"Unknown RELEASE_TARGET: {target}")
+environment = environments[target]
 build = root / ".pio" / "build" / environment
-output = root / "Release" / "x4pro-thai"
+output = root / "Release" / target
 font_zip = Path(os.environ.get(
     "FONT_ZIP", "Release/x4pro-thai/THCraft-Thai-Fonts.zip"
 )).expanduser().resolve()
@@ -147,7 +169,7 @@ for name in artifacts[:2]:
         raise SystemExit(f"Missing or empty build artifact: {build / name}")
 
 output.parent.mkdir(parents=True, exist_ok=True)
-with tempfile.TemporaryDirectory(prefix="x4pro-thai-", dir=output.parent) as temporary:
+with tempfile.TemporaryDirectory(prefix=f"{target}-", dir=output.parent) as temporary:
     stage = Path(temporary)
     for name in artifacts[:2]:
         shutil.copyfile(build / name, stage / name)
@@ -177,20 +199,20 @@ older release bundles.
 From the repository root, verify the published files against the new manifest:
 
 ```bash
-(cd Release/x4pro-thai && shasum -a 256 -c SHA256SUMS)
+(cd "Release/${RELEASE_TARGET:-x4pro-thai}" && shasum -a 256 -c SHA256SUMS)
 ```
 
 On Linux/Windows Git Bash without `shasum`, use:
 
 ```bash
-(cd Release/x4pro-thai && sha256sum -c SHA256SUMS)
+(cd "Release/${RELEASE_TARGET:-x4pro-thai}" && sha256sum -c SHA256SUMS)
 ```
 
 All three entries must report `OK`. Confirm that the output directory contains
 exactly the four files shown above. Changing any binary or the font ZIP requires
 regenerating `SHA256SUMS`.
 
-Before distribution, test the firmware on an **X4 Pro** and install the ZIP's
+Before distribution, test the firmware on **each target device** and install the ZIP's
 `fonts/` directory at the SD-card root. Check that all seven families can be
 selected, Thai stacked marks render correctly, and page turns work in all four
 orientations. A successful build and checksum verification do not replace
