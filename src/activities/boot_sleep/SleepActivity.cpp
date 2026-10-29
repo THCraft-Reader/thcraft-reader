@@ -1,6 +1,7 @@
 #include "SleepActivity.h"
 
 #include <BitmapHelpers.h>
+#include <BmpToBmpConverter.h>
 #include <Epub/converters/PngToFramebufferConverter.h>
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <string>
 
@@ -50,6 +52,13 @@ HalDisplay::GrayscaleMode sleepGrayscaleMode(const GfxRenderer& renderer) {
   return renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Direct).supported()
              ? HalDisplay::GrayscaleMode::Direct
              : HalDisplay::GrayscaleMode::Absolute;
+}
+
+// SSD absolute images use the new thresholds; other panels retain legacy tuning.
+bool useOriginalCoverThresholds(const GfxRenderer& renderer) {
+  return renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
+         display.getController() == HalDisplay::Controller::SSD1677 &&
+         SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
 }
 
 // Kept separate from normal custom sleep sources so alpha-overlay art does not mix with full-screen wallpapers.
@@ -320,6 +329,28 @@ bool renderTransparentOverlayPass(HalFile& file, const OverlayBmpInfo& info, con
 
 // Starts a gray plane under an overlay. Absolute planes keep the B/W base; other gray planes carry only
 // the overlay's gray. Cover + Transparent redraws a gray cover (set only for absolute planes) to keep its gray levels.
+// Overlay gray leaves a mask plane in the framebuffer, so a later B/W update of
+// the retained sleep frame (the Picco USB charge strip) needs the B/W frame back.
+// Absolute planes must keep the gray baseline: restoring the B/W frame there
+// makes the next fast refresh drop the grays (Picco SSD1677).
+class BwFrameKeeper {
+ public:
+  BwFrameKeeper(GfxRenderer& renderer, const bool keep)
+      : renderer(renderer), keep(keep), stored(!keep || renderer.storeBwBuffer()) {}
+  ~BwFrameKeeper() {
+    if (keep && stored) renderer.restoreBwBuffer();
+  }
+  // False when the B/W frame could not be kept; callers must skip the gray passes.
+  bool ready() const { return stored; }
+  BwFrameKeeper(const BwFrameKeeper&) = delete;
+  BwFrameKeeper& operator=(const BwFrameKeeper&) = delete;
+
+ private:
+  GfxRenderer& renderer;
+  const bool keep;
+  const bool stored;
+};
+
 bool beginOverlayGrayPlane(GfxRenderer& renderer, const Bitmap* grayCover, const GfxRenderer::RenderMode plane,
                            const bool absolute) {
   if (grayCover) {
@@ -384,6 +415,11 @@ AlphaOverlayResult tryRenderTransparentOverlayBmp(HalFile& file, GfxRenderer& re
   if (!renderTransparentOverlayPass(file, info, placement, renderer, row.get(), TransparentOverlayPass::BW))
     return AlphaOverlayResult::Error;
   const bool absolute = renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported();
+  const BwFrameKeeper bwFrame(renderer, !absolute);
+  if (!bwFrame.ready()) {
+    renderer.displayBuffer(kSleepClean);
+    return AlphaOverlayResult::Rendered;
+  }
   if (absolute) {
     cleanBeforeAbsoluteGray(renderer);
     if (!renderer.displayGrayscaleBase(sleepGrayscaleMode(renderer))) return AlphaOverlayResult::Error;
@@ -626,44 +662,62 @@ void SleepActivity::onEnter() {
   }
 }
 
-void SleepActivity::renderCustomSleepScreen() const {
-  // Look for sleep.bmp on the root of the sd card to determine if we should
-  // render a custom sleep screen instead of the default.
-  // This takes priority over both custom sleep directories.
+bool SleepActivity::renderCustomSleepBmp(const std::string& path) const {
   HalFile file;
-  if (Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
-    Bitmap bitmap(file, true,
-                  renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                      display.getController() == HalDisplay::Controller::SSD1677 &&
-                      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
-    if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-      LOG_DBG("SLP", "Loading: /sleep.bmp");
-      renderBitmapSleepScreen(bitmap);
-      file.close();
-      return;
+  if (!Storage.openFileForRead("SLP", path, file)) return false;
+  Bitmap source(file);
+  if (source.parseHeaders() != BmpReaderError::Ok) return false;
+  LOG_DBG("SLP", "Loading: %s", path.c_str());
+
+  const bool thresholds = useOriginalCoverThresholds(renderer);
+  const bool screenReady = source.getWidth() == renderer.getScreenWidth() &&
+                           source.getHeight() == renderer.getScreenHeight() && source.getBpp() <= 2;
+  if (!screenReady) {
+    // Like book covers: scale and dither once into a cached screen-sized BMP, then draw it without dithering.
+    const bool crop = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
+    // Same-sized BMPs share a byte count, so the key also needs the modification time.
+    const std::string key = path + '|' + std::to_string(file.size()) + '|' + std::to_string(file.modificationTime()) +
+                            '|' + std::to_string(renderer.getScreenWidth()) + 'x' +
+                            std::to_string(renderer.getScreenHeight()) + (crop ? "|c" : "|f") +
+                            (thresholds ? "|t" : "");
+    const std::string cachePath = "/.crosspoint/sleep_" + std::to_string(std::hash<std::string>{}(key)) + ".bmp";
+    if (!Storage.exists(cachePath.c_str())) {
+      const std::string tmpPath = cachePath + ".tmp";
+      HalFile out;
+      bool ok = Storage.openFileForWrite("SLP", tmpPath, out) &&
+                BmpToBmpConverter::bmpFileToBmpStream(file, out, crop, thresholds);
+      if (out.isOpen()) ok = out.close() && ok;
+      ok = ok && Storage.rename(tmpPath.c_str(), cachePath.c_str());
+      if (!ok) Storage.remove(tmpPath.c_str());
     }
-    file.close();
+    HalFile cached;
+    if (Storage.openFileForRead("SLP", cachePath, cached)) {
+      Bitmap bitmap(cached);
+      if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+        renderBitmapSleepScreen(bitmap);
+        return true;
+      }
+      cached.close();
+      Storage.remove(cachePath.c_str());
+    }
+    LOG_ERR("SLP", "Sleep image conversion failed; drawing %s directly", path.c_str());
   }
+
+  Bitmap bitmap(file, true, thresholds);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok) return false;
+  renderBitmapSleepScreen(bitmap);
+  return true;
+}
+
+void SleepActivity::renderCustomSleepScreen() const {
+  // /sleep.bmp on the SD root takes priority over both custom sleep directories.
+  if (renderCustomSleepBmp("/sleep.bmp")) return;
 
   std::string selectedPath;
   selectRandomSleepFile("/.sleep", "/sleep", SleepRecentKind::Standard, selectedPath);
-
   if (!selectedPath.empty()) {
-    HalFile randFile;
-    if (Storage.openFileForRead("SLP", selectedPath, randFile)) {
-      LOG_DBG("SLP", "Randomly loading: %s", selectedPath.c_str());
-      delay(100);
-      Bitmap bitmap(randFile, true,
-                    renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                        display.getController() == HalDisplay::Controller::SSD1677 &&
-                        SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
-      if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-        renderBitmapSleepScreen(bitmap);
-        randFile.close();
-        return;
-      }
-      randFile.close();
-    }
+    delay(100);
+    if (renderCustomSleepBmp(selectedPath)) return;
   }
 
   renderDefaultSleepScreen();
@@ -723,6 +777,11 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
   }
 
   const bool absolute = hasGreyscale && renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported();
+  const BwFrameKeeper bwFrame(renderer, hasGreyscale && !absolute);
+  if (!bwFrame.ready()) {
+    renderer.displayBuffer(kSleepClean);
+    return;
+  }
   if (absolute) {
     cleanBeforeAbsoluteGray(renderer);
     if (!renderer.displayGrayscaleBase(sleepGrayscaleMode(renderer))) return;
@@ -809,6 +868,11 @@ bool SleepActivity::renderTransparentOverlayPng(const std::string& path) const {
 
   if (!converter.decodeToFramebuffer(path, renderer, config)) return false;
   const bool absolute = renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported();
+  const BwFrameKeeper bwFrame(renderer, !absolute);
+  if (!bwFrame.ready()) {
+    renderer.displayBuffer(kSleepClean);
+    return true;
+  }
   if (absolute) {
     // The cover replaces the previous screen, so clean it like the BMP paths do.
     if (overlayCover) cleanBeforeAbsoluteGray(renderer);

@@ -59,6 +59,11 @@ The report includes per-category capacities, allocated extra, trailing slack,
 cached inter-token spacing, and observed maximum glyph-translation increments.
 `--thai-space-weight 2|4|6` is host-only calibration; firmware always uses 4.
 
+The probe reads the nominal point size from a font filename ending in `_PT.cpfont`
+or `-PT.cpfont`. For other names, pass `--point-size PT`; the CPFont header does
+not store it. Line spacing uses this size, matching the reader. Token reports use
+`focus_split_x` for the second visual run offset in both LTR and RTL focus text.
+
 The comparison fixtures are `test/language/Thai/distributed.xhtml` and
 `distributed-edges.xhtml`. The 2026-10-04 comparison covered Noto Sans Thai,
 Noto Serif Thai, and Sarabun at 12/18/26 pt and widths 320/480/800. All 27

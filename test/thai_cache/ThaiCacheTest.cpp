@@ -144,6 +144,14 @@ class ThaiSectionCacheTest : public testing::TestWithParam<bool> {
   }
 };
 
+TEST(ThaiLayoutSignatureTest, ThaiIdentityDistinguishesPageLocalWordRanges) {
+  ReaderRenderSpec spec;
+  spec.thaiLayoutId = thai::layoutId();
+  const uint32_t original = readerRenderSpecSignature(spec);
+  spec.thaiLayoutId ^= 0x100;
+  EXPECT_NE(readerRenderSpecSignature(spec), original);
+}
+
 TEST_P(ThaiSectionCacheTest, ShapeFaultDuringIncrementalLayoutAbandonsCache) {
   Section section(epub, 0, renderer);
   ASSERT_TRUE(section.startBuild(spec));
@@ -265,7 +273,8 @@ TEST_P(ThaiSectionCacheTest, PriorFinalAndPartialVersionsAreRejected) {
   ASSERT_FALSE(HasFatalFailure());
   auto bytes = readBytes(root / "sections/0.bin");
   ASSERT_FALSE(bytes.empty());
-  for (const uint8_t version : {48, 49, 50, 51, 52, 53}) {
+  EXPECT_EQ(static_cast<uint8_t>(bytes[0]), GetParam() ? 210 : 72);
+  for (const uint8_t version : {48, 49, 50, 51, 52, 53, 65, 66, 67, 68, 69, 70, 71}) {
     SCOPED_TRACE(version);
     bytes[0] = static_cast<char>(GetParam() ? 0xFE - (version - 28) : version);
     writeBytes(root / "sections/0.bin", bytes);
@@ -418,7 +427,7 @@ TEST_P(ThaiSectionCacheTest, TextBlockExpansionRoundTripsAlongsideOptionalFocusA
     EXPECT_EQ(replayed->wordStyle(i), styles[i]);
     EXPECT_EQ(replayed->thaiExpansion(i), i == 1 ? 2 : 0);
     EXPECT_EQ(replayed->focusBoundary(i), GetParam() ? focus[i] : 0);
-    EXPECT_EQ(replayed->focusSuffixX(i), GetParam() ? suffix[i] : 0);
+    EXPECT_EQ(replayed->focusSplitX(i), GetParam() ? suffix[i] : 0);
   }
   EXPECT_EQ(replayed->wordXpos(1) + renderer.getTextAdvanceX(0, replayed->wordText(1), replayed->wordStyle(1), 0,
                                                              BidiUtils::BidiBaseDir::AUTO,

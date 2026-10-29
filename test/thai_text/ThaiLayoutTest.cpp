@@ -25,7 +25,8 @@ struct Line {
 using Lines = std::vector<Line>;
 
 void configure(ParsedText& text, CssTextAlign align = CssTextAlign::Left) { text.getBlockStyle().alignment = align; }
-Lines layout(ParsedText& text, uint16_t width, bool final = true, int8_t tracking = 0, uint8_t spacing = 100) {
+Lines layout(ParsedText& text, uint16_t width, bool final = true, int8_t tracking = 0, uint8_t spacing = 100,
+             size_t maxLines = SIZE_MAX) {
   GfxRenderer renderer;
   Lines lines;
   text.layoutAndExtractLines(
@@ -34,7 +35,7 @@ Lines layout(ParsedText& text, uint16_t width, bool final = true, int8_t trackin
         EXPECT_TRUE(block->valid());
         lines.push_back({std::move(block), offset});
       },
-      final, tracking, spacing);
+      final, tracking, spacing, maxLines);
   return lines;
 }
 std::vector<std::string> strings(const Lines& lines) {
@@ -106,6 +107,52 @@ TEST(ThaiLayoutTest, RightmostFittingWordBoundary) {
   configure(text);
   for (const char* word : {"ก", "ข", "ค", "ง"}) add(text, word, Kind::Word);
   EXPECT_EQ(strings(layout(text, 24)), (std::vector<std::string>{"กขค", "ง"}));
+}
+
+TEST(ThaiLayoutTest, BoundedLayoutLeavesLaterThaiRunUnsplitForFullWidth) {
+  for (const bool includeLastLine : {false, true}) {
+    ParsedText text(false, false, BlockStyle(), 0);
+    configure(text);
+    add(text, "กข", Kind::Space, 0);
+    add(text, "คงจฉ", Kind::Word, 2);
+
+    const auto besideCap = layout(text, 16, includeLastLine, 0, 100, 1);
+    EXPECT_EQ(strings(besideCap), (std::vector<std::string>{"กข"}));
+    ASSERT_EQ(text.words.size(), 1u);
+    EXPECT_EQ(text.wordAt(0), "คงจฉ");
+    EXPECT_EQ(strings(layout(text, 32)), (std::vector<std::string>{"คงจฉ"}));
+    EXPECT_FALSE(text.hadDroppedWords());
+  }
+}
+
+TEST(ThaiLayoutTest, OneBoundedThaiJustifyLineStillReceivesExpansion) {
+  ParsedText text(false, false, BlockStyle(), 0);
+  configure(text, CssTextAlign::ThaiJustify);
+  add(text, "กข", Kind::Space, 0);
+  add(text, "คง", Kind::Word, 2);
+  add(text, "จฉชซ", Kind::Word, 4);
+
+  const auto besideCap = layout(text, 35, true, 0, 100, 1);
+  ASSERT_EQ(besideCap.size(), 1u);
+  ASSERT_EQ(besideCap[0].block->wordCount(), 2u);
+  EXPECT_GT(besideCap[0].block->thaiExpansion(0) + besideCap[0].block->thaiExpansion(1), 0);
+  EXPECT_EQ(besideCap[0].block->wordXpos(1) + 16 + besideCap[0].block->thaiExpansion(1), 35);
+  ASSERT_EQ(text.words.size(), 1u);
+  EXPECT_EQ(text.wordAt(0), "จฉชซ");
+  const auto fullWidth = layout(text, 32);
+  EXPECT_EQ(strings(fullWidth), (std::vector<std::string>{"จฉชซ"}));
+  ASSERT_EQ(fullWidth.size(), 1u);
+  EXPECT_EQ(fullWidth[0].block->thaiExpansion(0), 0);
+}
+
+TEST(ThaiLayoutTest, ZeroBoundedLinesLeaveThaiTokensUntouched) {
+  ParsedText text(false, false, BlockStyle(), 0);
+  configure(text, CssTextAlign::ThaiJustify);
+  add(text, "กขคง", Kind::Space, 0);
+  EXPECT_TRUE(layout(text, 8, true, 0, 100, 0).empty());
+  ASSERT_EQ(text.words.size(), 1u);
+  EXPECT_EQ(text.wordAt(0), "กขคง");
+  EXPECT_EQ(strings(layout(text, 32)), (std::vector<std::string>{"กขคง"}));
 }
 
 TEST(ThaiLayoutTest, DictionaryCompoundPrefersKnownPrefixAndSuffixAcrossStyles) {
@@ -929,7 +976,7 @@ TEST(ThaiLayoutTest, GenericThaiFocusSplitRemainsAtomicAlongsideExpandableAnalyz
   const auto& first = *lines[0].block;
   ASSERT_EQ(first.wordCount(), 2u);
   EXPECT_EQ(first.focusBoundary(0), 3);
-  EXPECT_EQ(first.focusSuffixX(0), 8);
+  EXPECT_EQ(first.focusSplitX(0), 8);
   EXPECT_EQ(first.thaiExpansion(0), 0);
   GfxRenderer renderer;
   const int space = renderer.getSpaceWidth(0, regular);

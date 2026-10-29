@@ -304,7 +304,7 @@ TEST(ThaiShapeTest, PreparedFontRecipesPrewarmAlternatesAndSurviveCacheEviction)
   ASSERT_TRUE(font.load(path));
   const ThaiShapeView* shape = font.getEpdFont()->getThaiShape();
   ASSERT_NE(nullptr, shape);
-  EpdFontFamily family(font.getEpdFont());
+  EpdFontFamily family(16, font.getEpdFont());
   EXPECT_EQ(shape, family.getThaiShape(EpdFontFamily::BOLD_ITALIC));
   const char* text = "กี่ น้ำ ญู ฐุ ปี่";
   ASSERT_EQ(0, font.buildAdvanceTable(text, 1));

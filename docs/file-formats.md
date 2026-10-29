@@ -90,13 +90,78 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 65
+### Version 72
+
+Combines the Thai branch's version 65 header and TextBlock arena with upstream
+layout changes through version 71. Older completed and partial section caches
+from either branch rebuild; book metadata and reading progress are kept.
+The derived partial version is `0xFE - (72 - 28)` = 210. Version 0 remains the
+incomplete-write sentinel.
+
+The header retains `thaiLayoutId`, and TextBlock flag bit 1 still selects the
+optional `thaiExtraPixels` array. The existing 16-bit Focus Reading array is now
+named `focusSplitX`: it locates the second visual run from the word origin
+(bold prefix for RTL words, regular suffix for LTR words). Thai justification
+and shaping remain available alongside bounded drop-cap layout, corrected
+space handling, font-size-based line spacing and per-glyph advance rounding.
+Clipping layout signatures use calculation version 2 and include `thaiLayoutId`.
+
+The histories below distinguish upstream versions from Thai branch versions
+where the same version numbers described incompatible layouts.
+
+### Upstream version 71
+
+Version 71 keeps the binary layout and rebuilds completed and partial sections.
+Focus split offsets now locate the bold prefix in RTL words and the regular
+suffix in LTR words. Book metadata and saved progress are kept.
+
+### Upstream version 70
+
+Version 70 preserves the binary layout but rebuilds completed and partial
+sections because SD-font layout now rounds each scaled glyph advance to pixels,
+matching unkerned drawing. Cached line breaks and word positions change.
+Book metadata and saved progress are kept.
+
+### Upstream version 69
+
+Version 69 preserves the binary layout but rebuilds completed and partial
+sections because line spacing now multiplies font size instead of the font's
+newline distance (`advanceY`). Clipping layout signatures also distinguish the
+new calculation so old page-local word ranges are not reused for a new layout.
+Book metadata and saved progress are kept.
+
+### Upstream version 68
+
+Version 68 preserves the binary layout but rebuilds completed and partial
+sections to remove mid-line hyphens left by drop-cap layout. The lines beside
+the drop cap use bounded greedy wrapping; the rest keep their usual wrapping.
+Book metadata and saved progress are kept.
+
+### Upstream version 67
+
+Version 67 preserves the binary layout but rebuilds completed and partial
+sections for corrected justification of visually reordered text with attached
+spaces. Book metadata and saved progress are kept.
+
+### Upstream version 66
+
+Version 66 preserves the binary layout but rebuilds completed and partial
+sections to remove leading non-breaking spaces carried across soft line wraps.
+Explicit paragraph-leading spaces, book metadata, and saved progress are kept.
+
+### Upstream version 65
+
+Version 65 preserves the binary layout but rebuilds completed and partial
+sections for corrected justification of non-breaking spaces after hyphens and
+ellipses. Book metadata and reading progress are unchanged.
+
+### Thai branch version 65
 
 The serialized layout is unchanged from version 61. Upstream's static GIF images
 and alternative text, corrected paragraph boundaries (upstream version 63), and
 explicit font-weight/font-style inheritance (upstream version 64) are combined
 with the Thai layout. Upstream versions 62-64 described layouts without Thai
-metadata; this firmware never writes them. CSS cache version 19 stores `inherit`
+metadata; the Thai branch did not write them. CSS cache version 19 stores `inherit`
 as value 2 in the existing font-style and font-weight bytes; the winning
 declaration is resolved against the parent before applying the element's style.
 Older CSS caches and completed and partial section caches rebuild automatically;
@@ -357,7 +422,7 @@ import std.core;
 
 // Approximate: omits each TextBlock's paragraphStartWord and per-word source
 // ranges, and each Page's link records.
-#define EXPECTED_VERSION 65
+#define EXPECTED_VERSION 72
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -431,7 +496,7 @@ struct TextBlock {
         u16 textOff[wordCount] [[comment("Byte offset of word i's text within text[]")]];
         s16 wordXPos[wordCount];
         if ((flags & 1) != 0) {
-            u16 wordFocusSuffixX[wordCount] [[comment("Suffix x offset from word start")]];
+            u16 wordFocusSplitX[wordCount] [[comment("Second visual run offset: RTL bold prefix, LTR regular suffix")]];
         }
         if ((flags & 2) != 0) {
             u16 thaiExtraPixels[wordCount] [[comment("Internal Thai expansion budget in layout pixels")]];

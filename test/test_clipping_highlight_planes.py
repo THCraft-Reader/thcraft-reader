@@ -7,7 +7,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / "src/activities/reader/EpubReaderActivity.cpp").read_text()
 fill = "const auto fillHighlight =" + source.split("const auto fillHighlight =", 1)[1].split("\n  uint16_t pageWordIndex", 1)[0]
-render = "auto renderGrayscalePass =" + source.split("auto renderGrayscalePass =", 1)[1].split("\n\n  if (pageHasImagesNeedingDecode)", 1)[0]
+render = "auto renderGrayscalePass =" + source.split("auto renderGrayscalePass =", 1)[1].split("\n  };", 1)[0] + "\n  };"
 harness = r"""
 #include <cassert>
 #include <memory>

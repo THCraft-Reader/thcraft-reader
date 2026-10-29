@@ -97,6 +97,7 @@ class HalFile {
   }
   bool isOpen() const { return opened_; }
   size_t size() const { return shape() ? std::min(bytes_->size(), sdFontTestShapeEof) : bytes_->size(); }
+  size_t fileSize() const { return size(); }
   void open(const std::vector<uint8_t>* bytes = &sdFontTestFile) {
     if (bytes_) close();
     bytes_ = bytes;

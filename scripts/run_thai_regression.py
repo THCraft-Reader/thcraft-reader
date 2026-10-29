@@ -172,7 +172,7 @@ def semantic_findings(report: dict, case: dict, mode: str) -> list[dict]:
 def placement_signature(report: dict):
     line_fields = ("text", "x", "y", "baseline", "baseline_axis", "source_offset", "ink_bounds")
     token_fields = ("text", "x", "y", "baseline", "style", "source_offset", "focus_boundary",
-                    "focus_suffix_x", "advance", "render_advance", "ink_bounds")
+                    "focus_split_x", "advance", "render_advance", "ink_bounds")
     return [{"source_offset": page["source_offset"], "width": page["width"], "height": page["height"],
              "lines": [{**{key: line[key] for key in line_fields if key in line},
                         "tokens": [{key: token[key] for key in token_fields if key in token}

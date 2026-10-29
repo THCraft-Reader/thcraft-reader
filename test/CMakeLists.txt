@@ -36,17 +36,21 @@ if(WIN32)
 endif()
 
 if(MSVC)
-  add_compile_options(/utf-8 /Zc:preprocessor)
-  add_compile_definitions(_CRT_SECURE_NO_WARNINGS _USE_MATH_DEFINES strcasecmp=_stricmp strncasecmp=_strnicmp)
+  add_compile_options(/utf-8 /Zc:preprocessor /FIintrin.h)
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS _USE_MATH_DEFINES strcasecmp=_stricmp strncasecmp=_strnicmp
+                         __builtin_popcount=__popcnt)
 endif()
 
 add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
   ${REPO_ROOT}/lib
+  ${REPO_ROOT}/lib/BlePageTurner/include
+  ${REPO_ROOT}/freeink-sdk/libs/network/BleKeyboardHost/include
   ${REPO_ROOT}/lib/ThaiText
 )
 if(MSVC)
+  target_include_directories(crosspoint_test_common INTERFACE ${REPO_ROOT}/test/thai_ui/adapters)
   target_compile_options(crosspoint_test_common INTERFACE /W4)
 else()
   target_compile_options(crosspoint_test_common INTERFACE -Wall -Wextra -pedantic)
@@ -119,7 +123,10 @@ add_subdirectory(absolute_grayscale)
 
 add_subdirectory(gif_support)
 
+add_subdirectory(bmp_to_bmp)
+
 add_subdirectory(sd_card_font)
+add_subdirectory(sd_font_registry)
 add_subdirectory(clipping_preview)
 add_subdirectory(glyph_bitmap)
 add_subdirectory(thai_text)
@@ -132,6 +139,7 @@ add_subdirectory(clipping_store)
 add_subdirectory(reader_session)
 add_subdirectory(reading_stats)
 add_subdirectory(thcraft_home_layout)
+add_subdirectory(plugin_catalog_paging)
 add_subdirectory(plugin_manifest_classification)
 add_subdirectory(plugin_picker_layout)
 add_subdirectory(protected_paths)

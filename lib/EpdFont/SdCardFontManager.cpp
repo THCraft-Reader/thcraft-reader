@@ -28,34 +28,42 @@ int SdCardFontManager::computeFontId(uint32_t contentHash, const char* familyNam
   return id != 0 ? id : 1;  // 0 is reserved as "not found" sentinel
 }
 
-int SdCardFontManager::loadFile(const SdCardFontFileInfo& file, const char* familyName, GfxRenderer& renderer,
-                                const bool residentThaiShape, const int fontIdOverride) {
-  auto* font = new (std::nothrow) SdCardFont();
-  if (!font) {
-    LOG_ERR("SDMGR", "Failed to allocate SdCardFont for %s", file.path.c_str());
+int SdCardFontManager::loadFile(const SdCardFontFamilyInfo& family, const SdCardFontFileInfo& file,
+                                GfxRenderer& renderer, const bool residentThaiShape, const int fontIdOverride) {
+  char path[SdCardFontFamilyInfo::PATH_BUFFER_SIZE];
+  if (!family.filePath(file, path, sizeof(path))) {
+    LOG_ERR("SDMGR", "Font path too long in family %s", family.name.c_str());
     return 0;
   }
 
-  if (!font->load(file.path.c_str(), residentThaiShape)) {
-    LOG_ERR("SDMGR", "Failed to load %s", file.path.c_str());
+  auto* font = new (std::nothrow) SdCardFont();
+  if (!font) {
+    LOG_ERR("SDMGR", "Failed to allocate SdCardFont for %s", path);
+    return 0;
+  }
+
+  if (!font->load(path, residentThaiShape)) {
+    LOG_ERR("SDMGR", "Failed to load %s", path);
     delete font;
     return 0;
   }
 
+  const char* familyName = family.name.c_str();
   int fontId = fontIdOverride != 0 ? fontIdOverride : computeFontId(font->contentHash(), familyName, file.pointSize);
   // Guard against collision with built-in font IDs (astronomically unlikely
   // with FNV-1a hashes, but provides a safety net)
   if (renderer.getFontMap().count(fontId) != 0) {
-    LOG_ERR("SDMGR", "Font ID %d collides with existing font, skipping %s", fontId, file.path.c_str());
+    LOG_ERR("SDMGR", "Font ID %d collides with existing font, skipping %s", fontId, path);
     delete font;
     return 0;
   }
   renderer.registerSdCardFont(fontId, font);
   loaded_.push_back({font, fontId, file.pointSize});
 
-  LOG_DBG("SDMGR", "Loaded %s size=%u id=%d styles=%u", file.path.c_str(), file.pointSize, fontId, font->styleCount());
+  LOG_DBG("SDMGR", "Loaded %s size=%u id=%d styles=%u", path, file.pointSize, fontId, font->styleCount());
 
-  EpdFontFamily fontFamily(font->getEpdFont(0), font->getEpdFont(1), font->getEpdFont(2), font->getEpdFont(3));
+  EpdFontFamily fontFamily(file.pointSize, font->getEpdFont(0), font->getEpdFont(1), font->getEpdFont(2),
+                           font->getEpdFont(3));
   renderer.insertFont(fontId, fontFamily);
   return fontId;
 }
@@ -72,7 +80,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
-  if (loadFile(*selected, family.name.c_str(), renderer, residentThaiShape_) == 0) {
+  if (loadFile(family, *selected, renderer, residentThaiShape_) == 0) {
     return false;
   }
 
@@ -92,14 +100,14 @@ int SdCardFontManager::loadFamilyExtraSize(const SdCardFontFamilyInfo& family, G
 
   // UI fallbacks shape a few short labels: SD-backed shaping leaves the
   // companion tables of every extra size out of the heap.
-  return loadFile(*file, family.name.c_str(), renderer, /*residentThaiShape=*/false, fontId);
+  return loadFile(family, *file, renderer, /*residentThaiShape=*/false, fontId);
 }
 
 bool SdCardFontManager::loadFamilyVariant(const SdCardFontFamilyInfo& family, GfxRenderer& renderer,
                                           const uint8_t pointSize, const int fontId) {
   const SdCardFontFileInfo* file = family.findFile(pointSize);
   // Sized variants mostly draw headings and short runs; keep their shaping tables on SD.
-  return file && loadFile(*file, family.name.c_str(), renderer, /*residentThaiShape=*/false, fontId) != 0;
+  return file && loadFile(family, *file, renderer, /*residentThaiShape=*/false, fontId) != 0;
 }
 
 void SdCardFontManager::unloadFont(GfxRenderer& renderer, const int fontId) {

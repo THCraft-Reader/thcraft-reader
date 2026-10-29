@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -76,8 +77,8 @@ class SdCardFont {
               bool metadataOnly = false, bool loadKernLig = true, bool accumulate = true, bool shapeText = true);
 
   // Build a compact advance-only table for layout measurement.
-  // Extracts ALL unique codepoints from words (no MAX_PAGE_GLYPHS cap),
-  // batch-reads advanceX from SD, stores in a sorted per-style table.
+  // Extracts codepoints from words, batch-reads advanceX from SD, and stores
+  // a sorted, bounded per-style table.
   // extraText: optional additional codepoints to warm in the same SD pass
   // (e.g. shaped Arabic presentation forms the measurement path will look up).
   // Returns number of codepoints not found in font coverage.
@@ -85,10 +86,11 @@ class SdCardFont {
   // Packed variant: each segment holds consecutive NUL-terminated words
   // (paragraph word-arena chunks), scanned without per-word string objects.
   // loadKernLig prepares exact rendered metrics, including native ligature outputs.
-  // Scratch is sized from emitted codepoints and possible ligature closure,
-  // capped at 4096 main entries plus the two optional separator slots.
-  // includeSmallCaps also prepares uppercase codepoints for small caps, retaining the originals.
-  // Returns -1 on requested kern/ligature preparation failure or codepoint-cap overflow.
+  // Exact shaping/kern scratch is sized from emitted codepoints and possible
+  // ligature closure, capped at 4096 plus optional separator slots. Ordinary
+  // layout uses at most ADVANCE_CACHE_LIMIT entries per style (small runs inline).
+  // includeSmallCaps prepares uppercase codepoints while retaining the originals.
+  // Returns -1 on allocation, shaping, exact kern/ligature, or exact-cap failure.
   int buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
                               bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
                               const char* extraText = nullptr, bool loadKernLig = false, bool includeSmallCaps = false);
@@ -145,6 +147,9 @@ class SdCardFont {
   // Extract SdCardFont* from an opaque glyphMissCtx pointer.
   // Used by GfxRenderer::getGlyphBitmap() to recover the SdCardFont from EpdFontData::glyphMissCtx.
   static SdCardFont* fromMissCtx(void* ctx);
+
+  // True once after a loaded font first hits a corrupt glyph entry, so the UI can tell the user.
+  static bool takeCorruptGlyphNotice() { return corruptGlyphNotice_.exchange(false); }
 
   struct Stats {
     uint32_t prewarmTotalMs = 0;
@@ -212,11 +217,7 @@ class SdCardFont {
     static_assert(sizeof(BmpInterval16) == 6, "BmpInterval16 must remain compact");
     BmpInterval16* bmpIntervals = nullptr;
     bool intervalsAreBmp16 = false;
-    // True when bmpIntervals/fullIntervals above points at another style's table rather than
-    // this style's own allocation. Regular/bold/italic weights of the same family almost always
-    // cover the identical codepoint set, so a CJK font's multi-KB-per-style table is otherwise
-    // paid for once per style. Only the owning style frees it -- see freeStyleAll().
-    bool intervalsShared = false;
+    // The table may be shared with other styles and other loaded fonts; see releaseIntervals().
 
     // Ligature table (lazy-loaded on first prewarm). No kern table is resident:
     // buildMiniKernMatrix reads the class-table blocks (~3KB per side per style
@@ -366,6 +367,9 @@ class SdCardFont {
 
   Stats stats_;
   uint32_t contentHash_ = 0;
+  uint32_t fileSize_ = 0;  // bounds glyph bitmap offsets (glyphEntryValid)
+  uint8_t corruptGlyphsLogged_ = 0;
+  static inline std::atomic<bool> corruptGlyphNotice_{false};
   bool loaded_ = false;
 
   // Per-style helpers
@@ -382,6 +386,11 @@ class SdCardFont {
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
   int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const;
+  // Drops this style's reference to its interval table and frees the table with the last one.
+  static void releaseIntervals(PerStyle& s);
+  // False for a glyph entry the file cannot back (a corrupt .cpfont): its data length must be the
+  // packed size of its pixels and its bitmap must lie inside the file. Logs the first few per font.
+  bool glyphEntryValid(const PerStyle& s, const EpdGlyph& glyph, uint32_t codepoint);
   int fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCount, uint8_t styleMask);
   int prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly, bool loadKernLig,
                    bool accumulate);

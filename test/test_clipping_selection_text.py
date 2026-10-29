@@ -59,9 +59,10 @@ struct EpdFontFamily { enum Style { REGULAR, UNDERLINE = 4 }; };
 constexpr int TAG_PageLine = 1;
 struct Rect { int x = 0, y = 0, width = 0, height = 0; };
 enum class Color { LightGray };
+enum class CssTextAlign { Left, ThaiJustify };
 struct Renderer;
 struct Block {
-  struct Style { bool isRtl = false; int8_t characterSpacing = 0; } style;
+  struct Style { bool isRtl = false; int8_t characterSpacing = 0; CssTextAlign alignment = CssTextAlign::Left; } style;
   struct Range { uint32_t start = 0, end = 3; } range;
   using SourceRange = Range;
   const char* text = "one";
@@ -88,6 +89,7 @@ struct Block {
   uint16_t wordTextLen(uint16_t i) const { return std::char_traits<char>::length(wordText(i)); }
   EpdFontFamily::Style wordStyle(uint16_t i) const { return styles.empty() ? EpdFontFamily::REGULAR : styles[i]; }
   int wordXpos(uint16_t) const { return 0; }
+  uint16_t thaiExpansion(uint16_t) const { return 0; }
   Range wordSourceRange(uint16_t i) const {
     return prefixSpace && i == 0 ? Range{range.start, range.start + 1} : range;
   }
@@ -103,6 +105,7 @@ struct PageLine {
 struct Page { std::vector<std::unique_ptr<PageLine>> elements; };
 struct Renderer {
   enum RenderMode { BW };
+  enum class TextMeasureMode { Layout, Rendered };
   struct Draw { int x, width, tracking; };
   mutable std::vector<Draw> draws;
   mutable std::vector<Draw> fills;
@@ -116,7 +119,9 @@ struct Renderer {
   void getOrientedViewableTRBL(int* top, int* right, int* bottom, int* left) const {
     *top = *right = *bottom = *left = 0;
   }
-  int getTextAdvanceX(int, const char* text, EpdFontFamily::Style style, int8_t tracking = 0) const {
+  int getTextAdvanceX(int, const char* text, EpdFontFamily::Style style, int8_t tracking = 0,
+                      BidiUtils::BidiBaseDir = BidiUtils::BidiBaseDir::AUTO,
+                      TextMeasureMode = TextMeasureMode::Layout, uint16_t thaiExtraPixels = 0) const {
     if (sdFont) {
       const uint8_t* p = reinterpret_cast<const uint8_t*>(text);
       while (const uint32_t cp = utf8NextCodepoint(&p)) {
@@ -124,7 +129,7 @@ struct Renderer {
       }
     }
     const int length = std::char_traits<char>::length(text);
-    return length * 8 + (length - 1) * tracking;
+    return length * 8 + (length - 1) * tracking + thaiExtraPixels;
   }
   void ensureSdCardFontReady(int, const char*, uint8_t) {}
   void ensureSdCardFontReady(int, const char* const* segments, const size_t* lengths, size_t count,
@@ -145,8 +150,10 @@ struct Renderer {
     }
   }
   void drawText(int font, int x, int, const char* text, bool, EpdFontFamily::Style style,
-                BidiUtils::BidiBaseDir = BidiUtils::BidiBaseDir::AUTO, int8_t tracking = 0) const {
-    draws.push_back({x, getTextAdvanceX(font, text, style, tracking), tracking});
+                BidiUtils::BidiBaseDir = BidiUtils::BidiBaseDir::AUTO, int8_t tracking = 0,
+                uint16_t thaiExtraPixels = 0) const {
+    draws.push_back({x, getTextAdvanceX(font, text, style, tracking, BidiUtils::BidiBaseDir::AUTO,
+                                       TextMeasureMode::Rendered, thaiExtraPixels), tracking});
   }
   void fillRect(int x, int, int width, int, bool) const { fills.push_back({x, width, 0}); }
   void fillRectDither(int x, int, int width, int, Color) const { fills.push_back({x, width, 0}); }

@@ -38,6 +38,7 @@ struct Options {
   std::string alignment = "justify";
   int width = 480, height = 800, characterSpacing = 0, wordSpacing = 100;
   int thaiSpaceWeight = 4;
+  int pointSize = 0;
   float compression = 1.0f;
   bool hyphenation = false, focus = false;
   bool failThaiAllocation = false;
@@ -111,13 +112,15 @@ Options options(int argc, char** argv) {
                    "on|off --output DIR [--cache-roundtrip on|off] [--verify-thai-placement on|off] [--glyph-sheet "
                    "normal|rotated90cw] [--fail-thai-allocation on|off] [--fail-shape-allocation on|off] "
                    "[--shape-internal-free BYTES] [--shape-fail-read-phase none|layout|bw|gray-msb|gray-lsb] "
-                   "[--thai-space-weight 2|4|6]\n";
+                   "[--thai-space-weight 2|4|6] [--point-size PT (otherwise read trailing _PT or -PT in font name)]\n";
       std::exit(0);
     }
     if (++i == argc) throw std::runtime_error("Missing value for " + key);
     const std::string value = argv[i];
     if (key == "--font")
       o.font = value;
+    else if (key == "--point-size")
+      o.pointSize = integer(value);
     else if (key == "--xhtml")
       o.xhtml = value;
     else if (key == "--output")
@@ -163,6 +166,15 @@ Options options(int argc, char** argv) {
   }
   if (o.font.empty() || o.xhtml.empty() || o.output.empty())
     throw std::runtime_error("--font, --xhtml and --output are required");
+  if (o.pointSize == 0) {
+    const auto stem = std::filesystem::path(o.font).stem().string();
+    const auto separator = stem.find_last_of("_-");
+    if (separator == std::string::npos || separator + 1 == stem.size() ||
+        stem.find_first_not_of("0123456789", separator + 1) != std::string::npos)
+      throw std::runtime_error("Cannot infer font point size; pass --point-size PT");
+    o.pointSize = integer(stem.substr(separator + 1));
+  }
+  if (o.pointSize < 1 || o.pointSize > 255) throw std::runtime_error("Font point size must be within 1..255");
   if (o.font.size() >= 128)
     throw std::runtime_error("CPFont path exceeds production loader's 127-byte limit; use a relative path");
   if (o.width < 1 || o.height < 1 || o.width > 8192 || o.height > 8192)
@@ -410,7 +422,7 @@ void verifyNativeLigatures(const Options& options) {
   renderer.begin();
   SdCardFont font;
   if (!font.load(path.c_str())) throw std::runtime_error("Cannot load synthetic CPFont");
-  renderer.insertFont(FONT_ID, EpdFontFamily(font.getEpdFont()));
+  renderer.insertFont(FONT_ID, EpdFontFamily(12, font.getEpdFont()));
   renderer.registerSdCardFont(FONT_ID, &font);
   FontCacheManager cache(renderer.getFontMap(), renderer.getSdCardFonts(), renderer.getTtfFonts());
   renderer.setFontCacheManager(&cache);
@@ -646,13 +658,23 @@ class Probe {
         const int tracking = block.getBlockStyle().characterSpacing;
         const uint8_t focusBoundary = block.focusBoundary(i);
         const char* measuredText = block.wordText(i) + focusBoundary;
-        const int prefixAdvance = focusBoundary ? block.focusSuffixX(i) : 0;
+        const auto measuredAdvance = [&](const GfxRenderer::TextMeasureMode mode) {
+          if (focusBoundary && BidiUtils::startsWithRtl(block.wordText(i))) {
+            char prefix[40];
+            memcpy(prefix, block.wordText(i), focusBoundary);
+            prefix[focusBoundary] = '\0';
+            const auto boldStyle = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::BOLD);
+            return block.focusSplitX(i) + r.getTextAdvanceX(FONT_ID, prefix, boldStyle, tracking, baseDir, mode);
+          }
+          return (focusBoundary ? block.focusSplitX(i) : 0) +
+                 r.getTextAdvanceX(FONT_ID, measuredText, style, tracking, baseDir, mode, block.thaiExpansion(i));
+        };
         // Measure a single token through production TextBlock, retaining focus
         // prefix positioning and style handling rather than reimplementing it.
         const uint16_t expansion = block.thaiExpansion(i);
         const int observedMaximum = observeAddedGap(r, measuredText, style, baseDir, tracking, expansion);
         TextBlock isolated({block.wordText(i)}, {block.wordXpos(i)}, {style}, {block.focusBoundary(i)},
-                           {block.focusSuffixX(i)}, block.getBlockStyle(), {}, {}, {}, UINT16_MAX,
+                           {block.focusSplitX(i)}, block.getBlockStyle(), {}, {}, {}, UINT16_MAX,
                            std::span(&expansion, 1));
         r.clearScreen();
         isolated.render(r, FONT_ID, line.xPos, line.yPos + block.getRubyShift(r.getFontAscenderSize(FONT_ID)));
@@ -660,15 +682,12 @@ class Probe {
                << ",\"baseline\":" << y + r.getFontAscenderSize(FONT_ID) << ",\"style\":" << unsigned(style)
                << ",\"source_offset\":" << block.probeVisibleOffset(i)
                << ",\"focus_boundary\":" << unsigned(block.focusBoundary(i))
-               << ",\"focus_suffix_x\":" << block.focusSuffixX(i) << ",\"thai_extra_pixels\":" << expansion
+               << ",\"focus_split_x\":" << block.focusSplitX(i) << ",\"thai_extra_pixels\":" << expansion
                << ",\"thai_gap_count\":" << r.countThaiJustificationGaps(FONT_ID, measuredText, style, baseDir)
                << ",\"thai_gap_limit\":" << r.getThaiJustificationGapLimit(FONT_ID, measuredText, style)
-               << ",\"observed_max_added_gap\":" << observedMaximum << ",\"advance\":"
-               << prefixAdvance + r.getTextAdvanceX(FONT_ID, measuredText, style, tracking, baseDir,
-                                                    GfxRenderer::TextMeasureMode::Layout, expansion)
-               << ",\"render_advance\":"
-               << prefixAdvance + r.getTextAdvanceX(FONT_ID, measuredText, style, tracking, baseDir,
-                                                    GfxRenderer::TextMeasureMode::Rendered, expansion)
+               << ",\"observed_max_added_gap\":" << observedMaximum
+               << ",\"advance\":" << measuredAdvance(GfxRenderer::TextMeasureMode::Layout)
+               << ",\"render_advance\":" << measuredAdvance(GfxRenderer::TextMeasureMode::Rendered)
                << ",\"ink_bounds\":";
         boundsJson(report, inkBounds(r));
         report << ",\"clusters\":";
@@ -906,8 +925,8 @@ int main(int argc, char** argv) {
     if ((o.failShapeAllocation || o.shapeFailReadPhase != "none") && !font.getEpdFont()->getThaiShape())
       throw std::runtime_error("Requested cached companion mode did not preserve active shaping");
 #endif
-    renderer.insertFont(FONT_ID,
-                        EpdFontFamily(font.getEpdFont(), font.getEpdFont(1), font.getEpdFont(2), font.getEpdFont(3)));
+    renderer.insertFont(FONT_ID, EpdFontFamily(o.pointSize, font.getEpdFont(), font.getEpdFont(1), font.getEpdFont(2),
+                                               font.getEpdFont(3)));
     renderer.registerSdCardFont(FONT_ID, &font);
     FontDecompressor decompressor;
     decompressor.init();

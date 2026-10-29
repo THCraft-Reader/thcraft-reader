@@ -16,6 +16,9 @@ endif()
 add_library(animatedgif_host STATIC ${ANIMATEDGIF_SOURCE_DIR}/src/AnimatedGIF.cpp)
 target_include_directories(animatedgif_host PUBLIC ${ANIMATEDGIF_SOURCE_DIR}/src)
 target_compile_definitions(animatedgif_host PUBLIC __LINUX__ MAX_WIDTH=3072)
+if(MSVC)
+  target_compile_definitions(animatedgif_host PRIVATE __builtin_bswap16=_byteswap_ushort)
+endif()
 
 add_executable(GifSupportTest GifSupportTest.cpp PixelCacheTest.cpp GifDecoderTest.cpp)
 target_include_directories(GifSupportTest PRIVATE

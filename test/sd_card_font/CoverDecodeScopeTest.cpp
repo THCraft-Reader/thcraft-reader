@@ -7,9 +7,9 @@
 #include <ReaderFontSizes.h>
 #include <SdCardFont.h>
 #include <SdCardFontSystem.h>
-#include <builtinFonts/notosans_8_regular.h>
 #include <builtinFonts/ubuntu_10_regular.h>
 #include <builtinFonts/ubuntu_12_regular.h>
+#include <builtinFonts/ubuntu_8_regular.h>
 #include <fontIds.h>
 #include <gtest/gtest.h>
 
@@ -92,7 +92,7 @@ class CoverDecodeScopeTest : public testing::TestWithParam<bool> {
   FontDecompressor decompressor;
   FontCacheManager cache{renderer.getFontMap(), renderer.getSdCardFonts(), renderer.getTtfFonts()};
   SdCardFontSystem system;
-  EpdFont small{&notosans_8_regular}, ui10{&ubuntu_10_regular}, ui12{&ubuntu_12_regular};
+  EpdFont small{&ubuntu_8_regular}, ui10{&ubuntu_10_regular}, ui12{&ubuntu_12_regular};
   fs::path root;
 
   fs::path fontPath(unsigned size) const {
@@ -128,9 +128,9 @@ class CoverDecodeScopeTest : public testing::TestWithParam<bool> {
     probe::resetInternalHeapSamples();
     probe::resetShapeFaults();
     renderer.begin();
-    renderer.insertFont(SMALL_FONT_ID, EpdFontFamily(&small));
-    renderer.insertFont(UI_10_FONT_ID, EpdFontFamily(&ui10));
-    renderer.insertFont(UI_12_FONT_ID, EpdFontFamily(&ui12));
+    renderer.insertFont(SMALL_FONT_ID, EpdFontFamily(8, &small));
+    renderer.insertFont(UI_10_FONT_ID, EpdFontFamily(10, &ui10));
+    renderer.insertFont(UI_12_FONT_ID, EpdFontFamily(12, &ui12));
     decompressor.init();
     cache.setFontDecompressor(&decompressor);
     renderer.setFontCacheManager(&cache);

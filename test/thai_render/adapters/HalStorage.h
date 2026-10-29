@@ -153,6 +153,7 @@ class HalFile {
     std::fseek(file_, pos, SEEK_SET);
     return end > 0 ? static_cast<size_t>(end) : 0;
   }
+  size_t fileSize() const { return size(); }
 
  private:
   bool isShape() const { return shape_; }

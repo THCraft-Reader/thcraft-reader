@@ -148,9 +148,9 @@ class ParsedText {
                                         std::vector<bool>& noSpaceBeforeVec);
   std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                                  std::vector<bool>& noSpaceBeforeVec);
+                                                  std::vector<bool>& noSpaceBeforeVec, size_t maxLines);
   std::vector<size_t> computeThaiLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
-                                            std::vector<uint16_t>& wordWidths);
+                                            std::vector<uint16_t>& wordWidths, size_t maxLines);
   size_t splitThaiGroup(size_t begin, size_t end, int availableWidth, const GfxRenderer& renderer, int fontId,
                         std::vector<uint16_t>& wordWidths);
   bool splitThaiToken(size_t index, size_t offset, thai::BreakKind rank, const GfxRenderer& renderer, int fontId,
