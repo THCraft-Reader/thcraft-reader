@@ -17,7 +17,7 @@ endif()
 gtest_discover_tests(SdCardFontTest)
 
 # The real system/manager/renderer lifecycle, with only platform persistence and
-# hardware adapters. A paired CPSHAPE asset exercises both resident/cached modes.
+# hardware adapters. A Thai CPFont asset exercises native-metric restoration.
 add_executable(CoverDecodeScopeTest
   CoverDecodeScopeTest.cpp
   ${REPO_ROOT}/src/SdCardFontSystem.cpp
@@ -59,6 +59,6 @@ target_include_directories(CoverDecodeScopeTest PRIVATE
 )
 target_compile_definitions(CoverDecodeScopeTest PRIVATE THAI_RENDER_PROBE=1 CROSSPOINT_VECTOR_FONTS=0)
 target_link_libraries(CoverDecodeScopeTest PRIVATE crosspoint_test_common crosspoint_shape GTest::gtest)
-set(THAI_SHAPE_ASSET_FONT "${REPO_ROOT}/build/thai/assets-shaped/cpfonts/noto-sans-thai-16.cpfont"
-    CACHE FILEPATH "Prepared paired font used by real companion tests")
+set(THAI_SHAPE_ASSET_FONT "${REPO_ROOT}/build/thai/assets/cpfonts/noto-sans-thai-16.cpfont"
+    CACHE FILEPATH "Prepared Thai CPFont used by real font lifecycle tests")
 gtest_discover_tests(CoverDecodeScopeTest PROPERTIES ENVIRONMENT "THAI_SHAPE_TEST_FONT=${THAI_SHAPE_ASSET_FONT}")

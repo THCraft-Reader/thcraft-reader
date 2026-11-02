@@ -411,10 +411,8 @@ def sheet_clusters(probe: Path | None) -> dict:
     return result
 
 
-def prepare(output: Path, thai_shaping: bool = False, probe: Path | None = None) -> None:
+def prepare(output: Path, probe: Path | None = None) -> None:
     from PIL import Image, ImageDraw
-    if thai_shaping and probe is None:
-        raise RuntimeError("--thai-shaping reference preparation requires --probe for production cluster boundaries")
     clusters = sheet_clusters(probe)
     versions = dependencies()
     output.mkdir(parents=True, exist_ok=True)
@@ -434,7 +432,6 @@ def prepare(output: Path, thai_shaping: bool = False, probe: Path | None = None)
                 if 0xE00 <= ord(ch) <= 0xE7F or 0x20 <= ord(ch) <= 0x7E or 0x2000 <= ord(ch) <= 0x206F}
     required -= {0x200B, 0x2028, 0x2029, 0x202F}
     manifest = {"schema_version": 1, "dpi": 150, "sizes": list(SIZES), "intervals": INTERVALS,
-                "thai_shaping": thai_shaping,
                 "versions": versions, "converter_sha256": digest(CONVERTER),
                 "corpus_sha256": digest(corpus_path),
                 "fallback": {"path": fallback.relative_to(output).as_posix(),
@@ -473,8 +470,6 @@ def prepare(output: Path, thai_shaping: bool = False, probe: Path | None = None)
             command = [sys.executable, str(CONVERTER), "--regular", str(regular),
                        "--fallback-regular", str(fallback), "--intervals", INTERVALS,
                        "--size", str(size), "--output", str(cpfont)]
-            if thai_shaping:
-                command.append("--thai-shaping")
             subprocess.run(command, cwd=ROOT, check=True)
             renderer = ReferenceRenderer(regular, fallback, size)
             sheets = []
@@ -510,12 +505,6 @@ def prepare(output: Path, thai_shaping: bool = False, probe: Path | None = None)
                 "frozen_axes": axes, "license": (directory / "OFL.txt").relative_to(output).as_posix(),
                 "license_url": license_url, "license_sha256": digest(directory / "OFL.txt"),
                 "control_missing_glyphs": control_coverage, "reference_sheets": sheets})
-            if thai_shaping:
-                companion = cpfont.with_suffix(".cpshape")
-                if not companion.is_file():
-                    raise RuntimeError(f"Converter did not produce required companion: {companion}")
-                manifest["fonts"][-1].update(shape=companion.relative_to(output).as_posix(),
-                                             shape_sha256=digest(companion), shape_bytes=companion.stat().st_size)
     manifest["controls"] = prepare_controls(output, corpus, fallback)
     save_json(output / "manifest.json", manifest)
     print(f"Prepared {len(manifest['fonts'])} verified CPFonts: {output / 'manifest.json'}")
@@ -524,11 +513,10 @@ def prepare(output: Path, thai_shaping: bool = False, probe: Path | None = None)
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "build/thai/assets")
-    parser.add_argument("--thai-shaping", action="store_true", help="Prepare opt-in paired CPFont/CPSHAPE assets")
     parser.add_argument("--probe", type=Path, help="Production probe for reference tracking cluster boundaries")
     args = parser.parse_args()
     try:
-        prepare(args.output.resolve(), args.thai_shaping, args.probe)
+        prepare(args.output.resolve(), args.probe)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError,
             importlib.metadata.PackageNotFoundError) as error:
         parser.exit(1, f"Asset preparation failed: {error}\n")

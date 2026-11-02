@@ -23,8 +23,8 @@ For example, `export RELEASE_TARGET=x4classic-thai` selects X4 Classic.
 Each output directory contains the same four filenames shown above. X4 and X3
 use the same firmware; their package binaries must match byte-for-byte.
 
-Use **`Release` (singular)** for new output. The existing example is in
-`Releases/x4pro-thai/` (plural); do not overwrite that input archive.
+Use **`Release` (singular)** for new output. Leave historical packages under
+`Releases/` (plural) unchanged; neither directory is a source of fonts.
 This workflow does not upload firmware, push Git changes, or publish a GitHub release.
 
 ## Prerequisites
@@ -37,22 +37,18 @@ This workflow does not upload firmware, push Git changes, or publish a GitHub re
 - Review the version in `[crosspoint]` in `platformio.ini` before building.
   Select the production environment from the table above, not a development
   environment. Production builds use info-level logging.
-- Have the complete, previously prepared Thai font ZIP available. The default
-  input is `Release/x4pro-thai/THCraft-Thai-Fonts.zip`; it is staged before any
-  output is replaced. The older `Releases/` example lacks the additional sizes.
-  These assets are not recreated by compiling firmware. To use a different complete ZIP, set its path first:
-
-  ```bash
-  export FONT_ZIP="/absolute/path/to/THCraft-Thai-Fonts.zip"
-  ```
+- Use the repository's **`fontpacks/` library** as the font source. Do not reuse
+  a font ZIP from an older release or substitute the three-family packager output.
+  Update the library first when changing the release font selection.
 
 ## Font archive contract
 
-Keep this SD-card installation layout inside `THCraft-Thai-Fonts.zip`:
+`fontpacks/` is the authoritative library. Its current eight families are:
 
 ```text
-fonts/
+fontpacks/
 ├── BaiJamjuree/
+├── ChakraPetch/
 ├── Garuda/
 ├── JS-Jindara/
 ├── Mali/
@@ -61,45 +57,39 @@ fonts/
 └── THCraft-Sarabun/
 ```
 
-Every family must include matching `.cpfont` and `.cpshape` files at **8, 10,
-12, 14, 16, 18, 20, 22, 24, and 26 pt**. Each companion must be CPSHAPE version 2,
-paired with its `.cpfont`; this firmware ignores version 1 companions. Convert an
-older pack once with `python3 scripts/upgrade_thai_shape_v2.py OLD_DIR NEW_DIR`
-on its extracted `fonts/` folder, then put the converted pairs back in the ZIP.
-For example, `fonts/Mali/Mali_26.cpfont` must remain beside
-`fonts/Mali/Mali_26.cpshape`. The complete pack contains 70 pairs.
-Keep all license notices and any accompanying installation/source files.
+Each family contains `.cpfont` files at **8, 10, 12, 14, 16, 18, 20, 22, 24,
+and 26 pt**, named `<family>_<size>.cpfont`. The current library has **80 fonts**.
+The workflow discovers families from the library, validates their sizes and
+CPFont v4 headers, and creates `THCraft-Thai-Fonts.zip` with this installation
+layout:
 
-The workflow validates the archive and copies it **byte-for-byte**; it does not
-reconvert fonts, change Thai shaping, strip larger sizes, or alter font licenses.
-Do not substitute the output of `scripts/package_thai_fonts.py` alone: that
-script builds only THCraft-NotoSansThai, THCraft-NotoSerifThai, and THCraft-Sarabun,
-not this complete seven-family collection. After updating any fonts, supply an
-updated complete ZIP as `FONT_ZIP` before running the workflow.
+```text
+fonts/<family>/<family>_<size>.cpfont
+```
 
-The 20/22/24/26 pt pairs include 176 IPA/modifier characters, 112 arrows,
-1,166 Arabic/presentation-form characters, 87 Thai characters, and 1,045
-characters from the converter's Symbols preset. This is not exhaustive Unicode
-or emoji coverage. Source glyphs take precedence over the existing ordered
-Noto Sans/Symbols/Symbols 2/Math/Arabic fallbacks. The new Garuda sizes use that
-fallback chain too; its original 8–18 pt pairs remain unchanged and retain their
-native coverage. Existing Jindara 20–26 pt pairs are preserved byte-for-byte.
+Only `.cpfont` files are included. Do not add notice files or warning text to the
+font ZIP or firmware. The workflow preserves every font file's bytes and does
+not reconvert fonts, select fallbacks, or copy assets from previous releases.
+It stages a fresh ZIP before building and replacing output files.
 
+Firmware derives Thai placement from native glyph metrics. No `.cpshape` files
+are needed. Glyph coverage is whatever the library's converted files contain;
+do not infer coverage from a family name or an older release's reports.
 
 ## Build and package
 
-Run this entire block from the repository root. It validates the font input,
-compiles the selected production firmware, stages both generated binaries and the
-font ZIP, then writes fresh SHA-256 checksums for those three files. A failed
-build or incomplete font archive stops packaging; no stale binaries are copied
-following a failed build. Existing copies of the four release files are replaced;
-unrelated files in the destination cause an error rather than being deleted.
+Run this entire block from the repository root. It validates `fontpacks/`,
+creates a fresh font ZIP, compiles the selected production firmware, and writes
+fresh SHA-256 checksums. A failed build or invalid font library stops packaging;
+no stale binaries are copied after a failed build. Existing copies of the four
+release files are replaced; unrelated destination files cause an error rather
+than being deleted.
 
 ```bash
 python3 - <<'PY'
 import hashlib
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import shutil
 import subprocess
 import tempfile
@@ -121,59 +111,53 @@ if target not in environments:
 environment = environments[target]
 build = root / ".pio" / "build" / environment
 output = root / "Release" / target
-font_zip = Path(os.environ.get(
-    "FONT_ZIP", "Release/x4pro-thai/THCraft-Thai-Fonts.zip"
-)).expanduser().resolve()
+font_root = root / "fontpacks"
 artifacts = ("firmware.bin", "firmware.factory.bin", "THCraft-Thai-Fonts.zip")
-families = {
-    "BaiJamjuree", "Garuda", "JS-Jindara", "Mali",
-    "THCraft-NotoSansThai", "THCraft-NotoSerifThai", "THCraft-Sarabun",
+fonts = sorted(font_root.rglob("*.cpfont"))
+if not fonts or any(len(path.relative_to(font_root).parts) != 2 for path in fonts):
+    raise SystemExit("Expected fontpacks/<family>/<family>_<size>.cpfont")
+families = sorted({path.parent.name for path in fonts})
+sizes = (8, 10, 12, 14, 16, 18, 20, 22, 24, 26)
+expected = {
+    font_root / family / f"{family}_{size}.cpfont"
+    for family in families for size in sizes
 }
-
-with zipfile.ZipFile(font_zip) as archive:
-    bad_member = archive.testzip()
-    if bad_member is not None:
-        raise SystemExit(f"Damaged font ZIP member: {bad_member}")
-    members = set(archive.namelist())
-    fonts = {PurePosixPath(name) for name in members
-             if name.startswith("fonts/") and name.endswith(".cpfont")}
-    shapes = {PurePosixPath(name) for name in members
-              if name.startswith("fonts/") and name.endswith(".cpshape")}
-    if {p.parts[1] for p in fonts} != families:
-        raise SystemExit("Font ZIP must contain all seven specified families, and no others")
-    if {p.with_suffix(".cpshape") for p in fonts} != shapes:
-        raise SystemExit("Every .cpfont must have a matching .cpshape, and vice versa")
-    for shape in sorted(shapes):
-        with archive.open(str(shape)) as companion, archive.open(str(shape.with_suffix(".cpfont"))) as font:
-            header, font_header = companion.read(32), font.read(32)
-        # Firmware reads only CPSHAPE v2, paired by bytes 16-19 of both headers.
-        if header[:10] != b"CPSHAPE\0\x02\x00" or header[16:20] != font_header[16:20]:
-            raise SystemExit(f"Not a paired CPSHAPE v2 companion: {shape}; "
-                             "run scripts/upgrade_thai_shape_v2.py")
-    for family in sorted(families):
-        sizes = (8, 10, 12, 14, 16, 18, 20, 22, 24, 26)
-        for size in sizes:
-            name = f"fonts/{family}/{family}_{size}.cpfont"
-            if name not in members:
-                raise SystemExit(f"Missing required font: {name}")
-    print(f"Validated {len(families)} families, {len(fonts)} font/shaping pairs", flush=True)
+if set(fonts) != expected:
+    raise SystemExit("Every fontpacks family must contain exactly the ten documented sizes")
+for path in fonts:
+    with path.open("rb") as font:
+        header = font.read(32)
+    if len(header) != 32 or header[:10] != b"CPFONT\0\0\x04\x00":
+        raise SystemExit(f"Not a CPFont v4 file: {path}")
 
 if output.exists():
     unexpected = {p.name for p in output.iterdir()} - set(artifacts) - {"SHA256SUMS"}
     if unexpected:
         raise SystemExit(f"Destination contains unrelated entries: {sorted(unexpected)}")
 
-subprocess.run(["pio", "run", "-e", environment], check=True)
-for name in artifacts[:2]:
-    if not (build / name).is_file() or (build / name).stat().st_size == 0:
-        raise SystemExit(f"Missing or empty build artifact: {build / name}")
-
 output.parent.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory(prefix=f"{target}-", dir=output.parent) as temporary:
     stage = Path(temporary)
+    font_zip = stage / artifacts[2]
+    with zipfile.ZipFile(
+        font_zip, "w", compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9, strict_timestamps=False,
+    ) as archive:
+        for path in fonts:
+            archive.write(path, "fonts/" + path.relative_to(font_root).as_posix())
+    with zipfile.ZipFile(font_zip) as archive:
+        bad_member = archive.testzip()
+        if bad_member is not None:
+            raise SystemExit(f"Damaged font ZIP member: {bad_member}")
+    print(f"Staged {len(families)} families, {len(fonts)} fonts from fontpacks", flush=True)
+
+    build_env = os.environ.copy()
+    build_env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    subprocess.run(["pio", "run", "-e", environment], check=True, env=build_env)
     for name in artifacts[:2]:
+        if not (build / name).is_file() or (build / name).stat().st_size == 0:
+            raise SystemExit(f"Missing or empty build artifact: {build / name}")
         shutil.copyfile(build / name, stage / name)
-    shutil.copyfile(font_zip, stage / artifacts[2])
     checksums = []
     for name in artifacts:
         with (stage / name).open("rb") as stream:
@@ -192,7 +176,8 @@ PY
 `firmware.factory.bin` is generated by the build; do not rename `firmware.bin`
 to create it. Copy both from the **same successful build**. `SHA256SUMS` contains
 three lines, using the bare artifact filenames, and does not include itself or
-older release bundles.
+older release bundles. When packaging X3 and X4 together, build `gh_release`
+once and use those same two binaries for both destinations.
 
 ## Verify and hand off
 
@@ -213,28 +198,22 @@ exactly the four files shown above. Changing any binary or the font ZIP requires
 regenerating `SHA256SUMS`.
 
 Before distribution, test the firmware on **each target device** and install the ZIP's
-`fonts/` directory at the SD-card root. Check that all seven families can be
+`fonts/` directory at the SD-card root. Check that all library families can be
 selected, Thai stacked marks render correctly, and page turns work in all four
 orientations. A successful build and checksum verification do not replace
 hardware testing.
 
 ### Public-distribution licensing gate
 
-**JS-Jindara is GPL v2**, as clarified by the project owner. The existing ZIP's
-`SOURCE-NOTICE.txt` reproduces embedded copyright metadata but does not state
-that license. Before public distribution, update that notice to identify GPL v2,
-retain the original copyright attribution, and include the GPL v2 license text
-and corresponding source materials required by the license.
+The current `fontpacks/` library contains converted font files without license
+or source materials. Packaging it does not establish redistribution rights.
+No notice or warning files are embedded by this workflow.
 
-Garuda is GPL-2.0-or-later with a font-embedding exception. The current example ZIP
-contains Garuda's converted font pairs but omits its notices/source package.
-Before public distribution, retain the applicable notices and provide the
-corresponding source as required by that license. The local
-`build/thai/garuda-pack/` holds its `COPYING`, `GPL`, source archive, and
-conversion information; inspect and include the required material in the complete
-font archive before packaging a public release. Preserve the other families'
-OFL and source notices as well.
+Before public distribution, arrange the required notices and corresponding
+source materials separately. **JS-Jindara is GPL v2**, as clarified by the
+project owner. Garuda is GPL-2.0-or-later with a font-embedding exception.
+Preserve the applicable copyright attributions, license texts and source
+obligations. Preserve the OFL requirements for the other families and any Noto
+fallback glyphs as well; those do not relicense Garuda or JS-Jindara.
 
-The expanded Garuda 20–26 pt files also contain OFL-licensed fallback glyphs.
-Their named Noto OFL files are included, but do not relicense Garuda itself.
-Review the combined GPL/OFL distribution conditions before public release.
+Hardware testing and licensing clearance remain separate from local packaging.

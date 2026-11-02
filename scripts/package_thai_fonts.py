@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build an offline, paired CPFont/CPSHAPE SD-card installer from verified Thai assets.
+"""Build an offline CPFont SD-card installer from verified Thai assets.
 
-Requires the converter's desktop dependencies (freetype-py, fonttools, uharfbuzz).
+Requires the converter's desktop dependencies (freetype-py and fonttools).
 No sources are downloaded, and no generated fonts enter the firmware assets.
 """
 from __future__ import annotations
@@ -16,7 +16,6 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-import zlib
 
 from prepare_thai_test_assets import (
     ARABIC_FALLBACK_SHA256, CONVERTER, FALLBACK_SHA256, FONTS, PACK_FALLBACK_FONTS, ROOT,
@@ -30,12 +29,12 @@ FAMILIES = {
 }
 INTERVALS = "latin-ext,ipa-chars,greek,(0x0300-0x036F),punctuation,symbols,thai,arabic"
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
-INSTALL = """THCraft Thai paired bitmap fonts
+INSTALL = """THCraft Thai bitmap fonts
 
 1. Extract the fonts folder from this archive to the SD card root. Merge it
    with an existing fonts folder; keep all your original fonts and books.
-2. Keep each .cpfont and its same-basename .cpshape together. Install all ten
-   sizes (8, 10, 12, 14, 16, 18, 20, 22, 24, 26) for each family you use, including the UI sizes.
+2. Install the .cpfont files at all ten sizes
+   (8, 10, 12, 14, 16, 18, 20, 22, 24, 26) for each family you use, including the UI sizes.
 3. Reinsert the SD card and restart the reader. In Settings > Reader > Font
    Family select THCraft-NotoSansThai; 16 pt is recommended for reading.
    The selected family also supplies missing Thai glyphs at UI sizes 8/10/12.
@@ -43,10 +42,9 @@ INSTALL = """THCraft Thai paired bitmap fonts
    under the hidden .fonts folder, update that copy too: .fonts takes priority
    over fonts for duplicate family names.
 
-This pack uses the CPFont bitmap path with optional CPSHAPE Thai positioning.
+This pack uses native Unicode CPFont bitmap glyphs with Thai positioning in firmware.
 It is not a direct TTF/OTF/TTC installation: copying the source TTF alone does
-not install these paired bitmap recipes. Use firmware with Thai CPSHAPE v2 support;
-other firmware can read the CPFont but will not apply the companion positioning.
+not install a bitmap font. Use firmware with native Thai shaping support.
 The fonts contain a regular face; existing reader style fallback still applies.
 OFL.txt and the named fallback OFL files retain all source copyright notices.
 Coverage includes IPA, arrows, mathematical/decorative symbols, and Arabic
@@ -127,40 +125,39 @@ def load_sources(assets: Path) -> tuple[list[dict], list[dict]]:
     return sources, fallbacks
 
 
-def validate_pair(cpfont: Path, source: dict, size: int, fallbacks: list[dict]) -> tuple[dict, int]:
-    companion = cpfont.with_suffix(".cpshape")
-    report_path = companion.with_suffix(".cpshape.json")
-    for path in (cpfont, companion, report_path):
-        if not path.is_file() or not path.stat().st_size:
-            raise ValueError(f"Converter produced an incomplete font pair: missing or empty {path}")
+def validate_cpfont(cpfont: Path) -> None:
+    """Validate the regular CPFont v4 sections before publishing the installer."""
     font = cpfont.read_bytes()
-    shape = companion.read_bytes()
-    if len(font) < 64 or font[:8] != b"CPFONT\0\0" or struct.unpack_from("<H", font, 8)[0] != 4:
-        raise ValueError(f"Expected CPFont v4: {cpfont}")
-    if len(shape) < 44:
-        raise ValueError(f"Truncated companion: {companion}")
-    magic, version, header, font_bytes, metrics_crc, payload_crc, total, styles = struct.unpack_from(
-        "<8sHHIIIII", shape)
-    # CPSHAPE v2 pairs by repeating its metrics CRC in CPFont header bytes 16-19.
-    if (magic != b"CPSHAPE\0" or version != 2 or header != 32 or font_bytes != len(font)
-            or total != len(shape) or total > 384 * 1024 or styles != 1 or font[12] != styles
-            or struct.unpack_from("<I", font, 16)[0] != metrics_crc
-            or zlib.crc32(shape[header:]) != payload_crc):
-        raise ValueError(f"Invalid or mismatched companion: {companion}")
-    style, offset, length = struct.unpack_from("<B3xII", shape, 32)
-    if style != 0 or offset != 44 or not 12 + 46 * 82 * 3 <= length <= 96 * 1024 or offset + length != total:
-        raise ValueError(f"Invalid regular companion payload: {companion}")
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    if (report["dpi"] != 150 or report["point_size"] != size or report["format_version"] != version
-            or report["companion_bytes"] != total or report["companion_sha256"] != digest(companion)
-            or report["metrics_crc32"] != metrics_crc or report["payload_crc32"] != payload_crc
-            or set(report["styles"]) != {"0"}
-            or report["styles"]["0"]["source_sha256"] != source["regular_sha256"]
-            or report["styles"]["0"]["fallback_sha256s"] != [record["sha256"] for record in fallbacks]):
-        raise ValueError(f"Converter provenance does not match the requested font pair: {cpfont}")
-    # Keep desktop reports reproducible across checkout and staging directory paths.
-    report["styles"]["0"]["source"] = source["regular"]
-    return report, styles
+    if (len(font) < 64 or font[:8] != b"CPFONT\0\0"
+            or struct.unpack_from("<HHB", font, 8) != (4, 1, 1) or any(font[13:32])):
+        raise ValueError(f"Expected a native regular CPFont v4: {cpfont}")
+    (style, intervals, glyphs, line, ascender, descender, kern_left, kern_right,
+     left_classes, right_classes, ligatures, offset) = struct.unpack_from("<B3xIIBhhHHBBBI4x", font, 32)
+    if style != 0 or offset != 64 or not intervals or not glyphs:
+        raise ValueError(f"Invalid regular CPFont table: {cpfont}")
+    glyph_start = offset + intervals * 12
+    kern_start = glyph_start + glyphs * 16
+    bitmap_start = kern_start + (kern_left + kern_right) * 3 + left_classes * right_classes + ligatures * 8
+    if bitmap_start > len(font):
+        raise ValueError(f"Truncated CPFont sections: {cpfont}")
+    count, previous = 0, -1
+    for index in range(intervals):
+        start, end, first = struct.unpack_from("<III", font, offset + index * 12)
+        if start <= previous or end < start or end > 0x10FFFF or first != count:
+            raise ValueError(f"Invalid CPFont Unicode intervals: {cpfont}")
+        previous = end
+        count += end - start + 1
+    if count != glyphs:
+        raise ValueError(f"CPFont glyph count does not match intervals: {cpfont}")
+    bitmap_bytes = 0
+    for index in range(glyphs):
+        width, height, advance, left, top, length, bitmap_offset = struct.unpack_from(
+            "<BBHhhH2xI", font, glyph_start + index * 16)
+        if length != (width * height + 3) // 4 or bitmap_offset != bitmap_bytes:
+            raise ValueError(f"Invalid CPFont glyph bitmap: {cpfont}")
+        bitmap_bytes += length
+    if bitmap_start + bitmap_bytes != len(font):
+        raise ValueError(f"Invalid CPFont bitmap bounds: {cpfont}")
 
 
 def file_record(path: Path, root: Path) -> dict:
@@ -189,7 +186,7 @@ def package(assets: Path, output: Path, archive: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="thai-font-pack-", dir=output.parent) as temporary:
         stage = Path(temporary) / "pack"
         stage.mkdir()
-        pairs = []
+        fonts = []
         for source in sources:
             family = source["family"]
             family_dir = stage / "fonts" / family
@@ -200,30 +197,24 @@ def package(assets: Path, output: Path, archive: Path) -> None:
             for size in SIZES:
                 cpfont = family_dir / f"{family}_{size}.cpfont"
                 command = [sys.executable, str(CONVERTER), "--regular", str(assets / source["regular"]),
-                           "--intervals", INTERVALS, "--size", str(size), "--thai-shaping",
+                           "--intervals", INTERVALS, "--size", str(size),
                            "--output", str(cpfont)]
                 for fallback in fallbacks:
                     command.extend(["--fallback-regular", str(assets / fallback["path"])])
                 subprocess.run(command, cwd=ROOT, check=True)
-                report, styles = validate_pair(cpfont, source, size, fallbacks)
-                report_path = stage / "reports" / f"{family}_{size}.cpshape.json"
-                save_json(report_path, report)
-                cpfont.with_suffix(".cpshape.json").unlink()
-                pairs.append({"family": family, "point_size": size, "companion_style_count": styles,
-                              "cpfont": file_record(cpfont, stage),
-                              "cpshape": file_record(cpfont.with_suffix(".cpshape"), stage),
-                              "report": report_path.relative_to(stage).as_posix()})
+                validate_cpfont(cpfont)
+                fonts.append({"family": family, "point_size": size,
+                              "cpfont": file_record(cpfont, stage)})
         (stage / "INSTALL.txt").write_text(INSTALL, encoding="utf-8", newline="\n")
         save_json(stage / "build-report.json", {
-            "schema_version": 2, "dpi": 150, "sizes": list(SIZES), "intervals": INTERVALS,
-            "thai_shaping": True, "style": "regular", "source_manifest_sha256": digest(assets / "manifest.json"),
+            "schema_version": 3, "dpi": 150, "sizes": list(SIZES), "intervals": INTERVALS,
+            "style": "regular", "source_manifest_sha256": digest(assets / "manifest.json"),
             "sources": sources, "fallbacks": fallbacks,
             "converter_sha256": digest(CONVERTER),
-            "shaping_converter_sha256": digest(CONVERTER.with_name("thai_shape.py")),
-            "packager_sha256": digest(Path(__file__)), "pairs": pairs,
+            "packager_sha256": digest(Path(__file__)), "fonts": fonts,
             "files": [file_record(path, stage) for path in sorted(stage.rglob("*")) if path.is_file()],
         })
-        # Publish only after all 30 pairs and their licenses have been validated.
+        # Publish only after all fonts and their licenses have been validated.
         files = [path for path in stage.rglob("*") if path.is_file()]
         expected = {path.relative_to(stage) for path in files}
         if output.exists():
@@ -240,7 +231,7 @@ def package(assets: Path, output: Path, archive: Path) -> None:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, destination)
             staged_zip.replace(archive)
-    print(f"Packaged {len(pairs)} paired fonts: {archive}")
+    print(f"Packaged {len(fonts)} CPFonts: {archive}")
     print(f"SHA-256: {digest(archive)}")
     print(f"Build report: {output / 'build-report.json'}")
 

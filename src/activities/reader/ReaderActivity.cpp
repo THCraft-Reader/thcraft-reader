@@ -375,10 +375,6 @@ void ReaderActivity::render(RenderLock&&) {
   }
 
   renderBook();
-  if (renderer.hasThaiShapeError()) {
-    readerSession.noteTurn(false, false);
-    return;
-  }
   noteRenderComplete();
 }
 

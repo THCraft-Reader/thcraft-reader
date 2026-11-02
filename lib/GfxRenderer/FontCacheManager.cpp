@@ -125,8 +125,6 @@ uint8_t FontCacheManager::resolveScanStyle(int fontId, EpdFontFamily::Style styl
 
 void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
   if (!text || *text == '\0') return;
-  const auto owner = sdCardFonts_.find(fontId);
-  if (owner != sdCardFonts_.end() && owner->second->hasThaiShapeError()) return;
 
   uint8_t fontSlot = scanFontCount_;
   for (uint8_t i = 0; i < scanFontCount_; i++) {
@@ -178,7 +176,7 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
 #if THAI_SHAPING
     if (shape && cursor >= nativeUntil) {
       ThaiGlyphCursor shaped;
-      if (shaped.begin(std::string_view(cursor, end - cursor), *shape)) {
+      if (shaped.begin(std::string_view(cursor, end - cursor), *shape, !(style & EpdFontFamily::SMALL_CAPS))) {
         // Cold scans also need source coverage: native ligatures may consume a
         // later shaped cluster once SD tables are loaded during prewarm.
         const char* raw = cursor;
@@ -193,7 +191,6 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
         cursor += shaped.consumedBytes();
         continue;
       }
-      if (shape->failed()) return;
       nativeUntil = cursor + shaped.consumedBytes();
     }
 #endif
@@ -246,8 +243,6 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
 
     const uint8_t fontSlot = static_cast<uint8_t>(group) / 4;
     const uint8_t style = static_cast<uint8_t>(group) & 0x03;
-    const auto owner = manager_->sdCardFonts_.find(manager_->scanFontIds_[fontSlot]);
-    if (owner != manager_->sdCardFonts_.end() && owner->second->hasThaiShapeError()) continue;
     // This group is the complete glyph set for one font/style in this render.
     manager_->prewarmCache(manager_->scanFontIds_[fontSlot], utf8Text, 1 << style, /*accumulate=*/false,
                            /*shapeText=*/false);

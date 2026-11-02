@@ -433,29 +433,6 @@ bool EpubReaderActivity::buildTickHeapGate() {
   return !buildHeapPaused;
 }
 
-void EpubReaderActivity::shedResidentThaiShapeIfStarved() {
-  const bool renderStarved = renderHeapStarved;
-  renderHeapStarved = false;
-  if (!renderStarved) {
-    if (!heapBelowBuildFloors()) return;
-    // Shedding lasts until reboot, while a running page-turner radio is stopped before every
-    // chapter build. Don't trade the resident shape for heap the radio only borrows.
-    const auto radio = bleturner::status();
-    if (radio.running || radio.starting || radio.stopping) return;
-  }
-  const int fontId = SETTINGS.getReaderFontId();
-  const unsigned freeBefore = ESP.getFreeHeap();
-  const unsigned maxBlockBefore = ESP.getMaxAllocHeap();
-  if (!sdFontSystem.dropResidentThaiShape(renderer)) return;
-  LOG_ERR("ERS", "Heap starved (free=%u max_block=%u); Thai shape now SD-backed (free=%u max_block=%u)", freeBefore,
-          maxBlockBefore, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-  if (section && SETTINGS.getReaderFontId() != fontId) {
-    // The section and any paused build are bound to the font identity that did not come back.
-    LOG_ERR("ERS", "Reader font not restored after Thai shape reload");
-    resetSectionForRelayout();
-  }
-}
-
 void EpubReaderActivity::showBuildPopup(GfxRenderer& renderer, int& pagesUntilFullRefresh) {
   if (!buildPopupPending || !renderer.hasFrameBuffer()) return;
   GUI.drawPopup(renderer, tr(STR_INDEXING));
@@ -1697,14 +1674,7 @@ void EpubReaderActivity::renderBook() {
     renderer.clearScreen();
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    if (renderer.hasThaiShapeError()) {
-      currentPageFootnotes.clear();
-      pageBufferStale = true;
-      sdFontSystem.markRegistryDirty();
-      GUI.drawPopup(renderer, tr(STR_PAGE_LOAD_ERROR));
-    } else {
-      GUI.drawPopup(renderer, message ? message : tr(STR_INDEX_FAILED));
-    }
+    GUI.drawPopup(renderer, message ? message : tr(STR_INDEX_FAILED));
     automaticPageTurnActive = false;
   };
 
@@ -1737,9 +1707,6 @@ void EpubReaderActivity::renderBook() {
   const uint16_t viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
   buildViewportWidth = viewportWidth;
   buildViewportHeight = viewportHeight;
-
-  // Before the render spec: a reload that loses the reader font changes it.
-  shedResidentThaiShapeIfStarved();
 
   const ReaderRenderSpec renderSpec = SETTINGS.readerRenderSpec(viewportWidth, viewportHeight);
 
@@ -2174,7 +2141,6 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     if (storedBw) renderer.restoreBwBuffer(false);
     if (grayscaleStarted) renderer.cleanupGrayscaleWithFrameBuffer();
   }};
-  if (renderer.hasThaiShapeError()) return false;
 
   auto* fcm = renderer.getFontCacheManager();
   const bool imageGrayscale = SETTINGS.imageRendering != CrossPointSettings::IMAGES_DISPLAY_BW;
@@ -2220,7 +2186,6 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // its own SD pass after the scope ends.
   renderStatusBar();
   scope.endScanAndPrewarm();
-  if (renderer.hasThaiShapeError()) return false;
   const auto tPrewarm = millis();
 
   const bool manualRefreshPending = forcedRefreshPending;
@@ -2256,7 +2221,6 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   drawClippingHighlights(*page, fontId, orientedMarginTop, orientedMarginLeft);
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   renderStatusBar();
-  if (renderer.hasThaiShapeError()) return false;
   const auto tBwRender = millis();
 
   if (absoluteImageGrayscale) {
@@ -2311,9 +2275,7 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.clearScreen(0x00);
         renderGrayscalePass();
         renderer.endStripTarget();
-        if (renderer.hasThaiShapeError()) return false;
       }
-      return true;
     };
 
     constexpr size_t PLANE_BUF_HEADROOM = 60000;
@@ -2326,8 +2288,8 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     auto msbPlaneBuf = (lsbPlaneBuf && planeBufFits()) ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
 
     if (lsbPlaneBuf) {
-      if (!renderPlaneToBuffer(true, lsbPlaneBuf.get())) return false;
-      if (msbPlaneBuf && !renderPlaneToBuffer(false, msbPlaneBuf.get())) return false;
+      renderPlaneToBuffer(true, lsbPlaneBuf.get());
+      if (msbPlaneBuf) renderPlaneToBuffer(false, msbPlaneBuf.get());
       const auto tGrayRender = millis();
 
       renderer.waitRefreshComplete();
@@ -2337,7 +2299,7 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       if (msbPlaneBuf) {
         renderer.writeGrayscalePlaneStrip(false, msbPlaneBuf.get(), 0, gh);
       } else {
-        if (!renderPlaneToBuffer(false, lsbPlaneBuf.get())) return false;
+        renderPlaneToBuffer(false, lsbPlaneBuf.get());
         renderer.writeGrayscalePlaneStrip(false, lsbPlaneBuf.get(), 0, gh);
       }
       const auto tGrayWrite = millis();
@@ -2359,7 +2321,6 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.waitRefreshComplete();
       if (!scratch) {
         LOG_ERR("ERS", "OOM: grayscale strip scratch (%d bytes); skipping AA this page", gwBytes * STRIP_ROWS);
-        renderHeapStarved = true;
         if (overlapRefresh || combinedGrayscaleBase) {
           // The BW refresh ran the shadow-free async path, so controller RAM's
           // differential baseline was never rebuilt. Even with AA skipped it must
@@ -2377,7 +2338,6 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           renderer.clearScreen(0x00);
           renderGrayscalePass();
           renderer.endStripTarget();
-          if (renderer.hasThaiShapeError()) return false;
           renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
         }
         const auto tGrayLsb = millis();
@@ -2389,7 +2349,6 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           renderer.clearScreen(0x00);
           renderGrayscalePass();
           renderer.endStripTarget();
-          if (renderer.hasThaiShapeError()) return false;
           renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
         }
         const auto tGrayMsb = millis();
@@ -2422,14 +2381,12 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
       renderGrayscalePass();
-      if (renderer.hasThaiShapeError()) return false;
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
       renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       renderGrayscalePass();
-      if (renderer.hasThaiShapeError()) return false;
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
 

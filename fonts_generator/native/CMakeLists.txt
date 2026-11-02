@@ -24,7 +24,7 @@ target_include_directories(harfbuzz PUBLIC "${FG_HARFBUZZ_SOURCE}/src")
 target_compile_definitions(harfbuzz PRIVATE HB_NO_MT HB_NO_MMAP)
 target_compile_options(harfbuzz PRIVATE -fno-exceptions -fno-rtti)
 
-# FreeType's auto-hinter needs OpenType coverage for unencoded Thai alternates.
+# FreeType's auto-hinter uses OpenType coverage through HarfBuzz.
 add_library(HarfBuzz::HarfBuzz ALIAS harfbuzz)
 set(HarfBuzz_INCLUDE_DIR "${FG_HARFBUZZ_SOURCE}/src")
 set(HarfBuzz_LIBRARY harfbuzz)

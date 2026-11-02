@@ -43,9 +43,6 @@
   }
   for (const size of [8,10,12,14,16,18,20,22,24,26]) checkbox('sizes', size, size <= 18, 'size');
   Object.keys(presets).forEach(preset => checkbox('presets', preset, defaultCoverage.has(preset), 'preset'));
-  const thaiCoverage = document.querySelector('input[name=preset][value=Thai]');
-  thaiCoverage.addEventListener('change', () => { if (!thaiCoverage.checked) $('thai').checked = false; });
-  $('thai').addEventListener('change', () => { if ($('thai').checked) thaiCoverage.checked = true; });
   for (let id = 1; id < 4; ++id) {
     const row = document.createElement('div'); row.className = 'style-row';
     row.innerHTML = `<label for="style-${id}">${styleNames[id]} font</label><input id="style-${id}" type="file" accept=".ttf,.otf"><label for="fallback-${id}" style="margin-top:12px">${styleNames[id]} fallback fonts</label><input id="fallback-${id}" type="file" accept=".ttf,.otf" multiple><p class="hint" id="fallback-order-${id}">No fallback fonts selected.</p>`;
@@ -98,7 +95,6 @@
       if (start > end || end > 0x10ffff || (start <= 0xdfff && end >= 0xd800)) throw new Error(`Invalid Unicode scalar range: ${part.trim()}.`);
       result.push([start, end]);
     }
-    if ($('thai').checked) result.push(...presets.Thai);
     return result;
   }
 
@@ -110,7 +106,7 @@
       if (!globalThis.WebAssembly || !globalThis.Worker) throw new Error('This browser needs WebAssembly and Web Worker support. Use a current desktop browser.');
       const sizes = Array.from(document.querySelectorAll('input[name=size]:checked'), input => Number(input.value));
       if (!sizes.length) throw new Error('Select at least one point size.');
-      const request = {family: $('family').value.trim(), sizes, intervals: intervals(), thai: $('thai').checked, autohint: $('autohint').checked, styles: []};
+      const request = {family: $('family').value.trim(), sizes, intervals: intervals(), autohint: $('autohint').checked, styles: []};
       const inputs = [], licenses = [];
       busy(true); status('Reading font files…'); $('progress').value = 0;
       async function addInput(file) {
@@ -197,37 +193,6 @@
       return null;
     }};
   }
-  function shapeRecipe(bytes, styleId, cps) {
-    if (!bytes || cps[0] < 0xe01 || cps[0] > 0xe2e) return null;
-    const firstSigns = [null,0xe31,0xe34,0xe35,0xe36,0xe37,0xe38,0xe39,0xe3a,0xe47,0xe4d];
-    const terminals = [null,0xe48,0xe49,0xe4a,0xe4b,0xe4c,0xe4e];
-    let suffix;
-    if (cps.at(-1) === 0xe33) {
-      const tone = cps.length === 3 ? cps[1] : null;
-      const index = [null,0xe48,0xe49,0xe4a,0xe4b].indexOf(tone);
-      if (index < 0) return null;
-      suffix = 77 + index;
-    } else {
-      let first = null, terminal = null;
-      if (cps.length > 1 && firstSigns.includes(cps[1])) { first = cps[1]; terminal = cps[2] ?? null; }
-      else terminal = cps[1] ?? null;
-      if (!terminals.includes(terminal)) return null;
-      suffix = firstSigns.indexOf(first) * 7 + terminals.indexOf(terminal);
-    }
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), u32 = pos => view.getUint32(pos, true), u16 = pos => view.getUint16(pos, true);
-    let style;
-    for (let index = 0; index < u32(28); ++index) if (bytes[32 + index * 12] === styleId) style = u32(36 + index * 12);
-    if (style === undefined) return null;
-    const key = (cps[0] - 0xe01) * 82 + suffix;
-    const dense = style + u32(style + 4) + key * 4;
-    const baseId = u16(dense), suffixId = u16(dense + 2);
-    if (baseId === 0xffff || suffixId === 0xffff) return null;
-    const record = at => ({cp: u16(at), advance: u16(at + 2), x: view.getInt16(at + 4, true), y: view.getInt16(at + 6, true)});
-    const records = [record(style + u32(style + 8) + baseId * 8)];
-    const suffixAt = style + u32(style + u32(style + 12) + suffixId * 4);
-    for (let index = 0; index < bytes[suffixAt]; ++index) records.push(record(suffixAt + 1 + index * 8));
-    return records;
-  }
   function updatePreviewStyles() {
     const file = previews.find(file => file.name === $('proof-file').value);
     $('proof-style').replaceChildren();
@@ -240,35 +205,27 @@
   function renderPreview() {
     try {
       const file = previews.find(file => file.name === $('proof-file').value), styleId = Number($('proof-style').value);
-      const companion = previews.find(item => item.name === file.name.replace(/\.cpfont$/, '.cpshape'));
-      const font = parseFont(file.data, styleId), samples = ['A','g','f','é','กิ','กี้','กุ','กู้','กำ','ก้ำ','ญุ','ปี่'];
+      const font = parseFont(file.data, styleId), samples = ['A','g','f','é','ก','ญ','ป','า','ิ','ุ','้','ํ'];
       const canvas = $('preview'), columns = 4, tileW = 90, tileH = Math.max(88, font.ascender - font.descender + 32);
       canvas.width = columns * tileW; canvas.height = Math.ceil(samples.length / columns) * tileH;
       const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       samples.forEach((text, index) => {
         const x = (index % columns) * tileW, y = Math.floor(index / columns) * tileH;
-        const cps = Array.from(text, ch => ch.codePointAt(0));
-        const recipe = shapeRecipe(companion?.data, styleId, cps) || cps.map(cp => ({cp, advance: font.glyph(cp)?.advance || 0, x: 0, y: 0}));
-        const width = recipe.reduce((sum, record) => sum + record.advance, 0) / 16;
-        let pen = 0;
+        const cp = text.codePointAt(0), glyph = font.glyph(cp), width = (glyph?.advance || 0) / 16;
         ctx.strokeStyle = '#e9d9e2'; ctx.strokeRect(x + .5, y + .5, tileW - 1, tileH - 1);
         const baseline = y + 10 + font.ascender;
         ctx.fillStyle = '#e9d9e2'; ctx.fillRect(x + 8, baseline, tileW - 16, 1);
         ctx.save(); ctx.beginPath(); ctx.rect(x + 1, y + 1, tileW - 2, tileH - 22); ctx.clip();
-        for (const record of recipe) {
-          const glyph = font.glyph(record.cp);
-          if (glyph) {
-            const gx = x + Math.floor((tileW - width) / 2) + Math.floor((pen + record.x + 8) / 16) + glyph.left;
-            const gy = baseline - glyph.top - Math.floor((record.y + 8) / 16);
-            for (let py = 0; py < glyph.height; ++py) for (let px = 0; px < glyph.width; ++px) {
-              const pixel = py * glyph.width + px, coverage = (glyph.pixels[pixel >> 2] >> (6 - (pixel % 4) * 2)) & 3;
-              if (coverage) { const gray = 255 - coverage * 85; ctx.fillStyle = `rgb(${gray},${gray},${gray})`; ctx.fillRect(gx + px, gy + py, 1, 1); }
-            }
+        if (glyph) {
+          const gx = x + Math.floor((tileW - width) / 2) + glyph.left;
+          const gy = baseline - glyph.top;
+          for (let py = 0; py < glyph.height; ++py) for (let px = 0; px < glyph.width; ++px) {
+            const pixel = py * glyph.width + px, coverage = (glyph.pixels[pixel >> 2] >> (6 - (pixel % 4) * 2)) & 3;
+            if (coverage) { const gray = 255 - coverage * 85; ctx.fillStyle = `rgb(${gray},${gray},${gray})`; ctx.fillRect(gx + px, gy + py, 1, 1); }
           }
-          pen += record.advance;
         }
         ctx.restore(); ctx.fillStyle = '#786b75'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
-        ctx.fillText(cps.map(cp => cp.toString(16).toUpperCase()).join(' '), x + tileW / 2, y + tileH - 8);
+        ctx.fillText(cp.toString(16).toUpperCase(), x + tileW / 2, y + tileH - 8);
       });
       canvas.hidden = false; $('empty-proof').hidden = true;
     } catch (error) {

@@ -146,22 +146,6 @@ TEST(FontCacheManagerTest, IncrementalPrewarmRequestsAccumulation) {
   EXPECT_TRUE(font.prewarmCalls[0].accumulate);
 }
 
-TEST(FontCacheManagerTest, FaultedOwnerIsNotScannedOrPrewarmed) {
-  SdCardFont failed;
-  SdCardFont healthy;
-  const std::map<int, EpdFontFamily> noBuiltinFonts;
-  const std::map<int, SdCardFont*> sdFonts{{7, &failed}, {8, &healthy}};
-  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
-  auto scope = manager.createPrewarmScope();
-  manager.recordText("before", 7, EpdFontFamily::REGULAR);
-  failed.thaiShapeError = true;
-  manager.recordText("after", 7, EpdFontFamily::BOLD);
-  manager.recordText("healthy", 8, EpdFontFamily::REGULAR);
-  scope.endScanAndPrewarm();
-  EXPECT_EQ(0, failed.prewarmCallCount);
-  ASSERT_EQ(1, healthy.prewarmCallCount);
-}
-
 TEST(FontCacheManagerTest, ReleaseCallbackFiresOnReleaseSdFontCaches) {
   const std::map<int, EpdFontFamily> noBuiltinFonts;
   const std::map<int, SdCardFont*> noSdFonts;

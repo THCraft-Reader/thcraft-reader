@@ -74,9 +74,9 @@ int32_t scaleThaiFP(const int32_t value, const bool scaled) {
 }
 
 bool beginThaiCluster(const char* text, const char* end, const char*& nativeUntil, const ThaiShapeView* shape,
-                      ThaiGlyphCursor& cursor) {
+                      ThaiGlyphCursor& cursor, const EpdFontFamily::Style style) {
   if (!shape || text < nativeUntil) return false;
-  if (cursor.begin(std::string_view(text, end - text), *shape)) return true;
+  if (cursor.begin(std::string_view(text, end - text), *shape, !(style & EpdFontFamily::SMALL_CAPS))) return true;
   nativeUntil = text + cursor.consumedBytes();
   return false;
 }
@@ -88,7 +88,7 @@ bool placeThaiCluster(const char*& text, const char* end, const char*& nativeUnt
                       const EpdFontFamily& font, EpdFontFamily::Style style, SdCardFont* sdFont, int8_t tracking,
                       int& origin, uint32_t& previous, int32_t& previousAdvance, Expand&& expand, Visit&& visit) {
   ThaiGlyphCursor cursor;
-  if (!beginThaiCluster(text, end, nativeUntil, shape, cursor)) return false;
+  if (!beginThaiCluster(text, end, nativeUntil, shape, cursor, style)) return false;
   const bool scaled = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
   const uint8_t sdStyle = sdFont ? resolveSdCardStyle(*sdFont, style) : 0;
   ThaiGlyphPlacement placement;
@@ -163,7 +163,7 @@ class RenderedThaiBoundaryCursor {
           if (current_ == shapedStart_ + shaped_.consumedBytes()) shapedStart_ = nullptr;
           continue;
         }
-        if (beginThaiCluster(current_, end_, nativeUntil_, shape_, shaped_)) {
+        if (beginThaiCluster(current_, end_, nativeUntil_, shape_, shaped_, style_)) {
           shapedStart_ = current_;
           continue;
         }
@@ -306,13 +306,6 @@ const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const Ep
     }
   }
   return &fontData->bitmap[glyph->dataOffset];
-}
-
-bool GfxRenderer::hasThaiShapeError() const {
-  for (const auto& entry : sdCardFonts_) {
-    if (entry.second && entry.second->hasThaiShapeError()) return true;
-  }
-  return false;
 }
 
 void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask) const {

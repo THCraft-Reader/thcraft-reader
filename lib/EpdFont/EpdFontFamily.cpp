@@ -19,7 +19,7 @@ const EpdFont* EpdFontFamily::getFont(const Style style) const {
 }
 
 void EpdFontFamily::getTextDimensions(const char* string, int* w, int* h, const Style style) const {
-  getFont(style)->getTextDimensions(string, w, h);
+  getFont(style)->getTextDimensions(string, w, h, !(style & SMALL_CAPS));
 }
 
 const EpdFontData* EpdFontFamily::getData(const Style style) const { return getFont(style)->data; }
@@ -42,5 +42,5 @@ int8_t EpdFontFamily::getKerning(const uint32_t leftCp, const uint32_t rightCp, 
 }
 
 uint32_t EpdFontFamily::applyLigatures(const uint32_t cp, const char*& text, const Style style) const {
-  return getFont(style)->applyLigatures(cp, text);
+  return (style & SMALL_CAPS) ? cp : getFont(style)->applyLigatures(cp, text);
 }

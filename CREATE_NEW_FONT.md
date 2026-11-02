@@ -1,14 +1,14 @@
 # Create a new Thai SD-card font
 
 Agent workflow for adding a user-supplied Thai font to THCraft Reader. This creates
-paired bitmap fonts, not a new typeface and not a firmware-embedded font.
+SD-card bitmap fonts, not a new typeface or a firmware-embedded font.
 
 ## Invoke this workflow
 
 Tell the agent:
 
 > Follow `CREATE_NEW_FONT.md`. Convert `/path/to/Font-Regular.ttf` into the SD-card
-> family `MyThaiFont`. Keep all existing families unchanged. Produce the paired
+> family `MyThaiFont`. Keep all existing families unchanged. Produce the bitmap
 > fonts, license/source notices, conversion reports, a per-family ZIP, and visual
 > verification. Do not build or publish firmware unless I also request it.
 
@@ -19,9 +19,9 @@ larger sizes or real bold/italic faces when requested; do not manufacture styles
 ## Rules for the agent
 
 - Read the repository development rules, [font documentation](docs/sd-card-fonts.md#thai-bitmap-positioning),
-  and [Thai rendering guidance](docs/thai-reading-engine.md#optional-positioning).
-- Use `lib/EpdFont/scripts/fontconvert_sdcard.py` with **`--thai-shaping`**.
-  Every `.cpfont` must stay beside its same-basename `.cpshape`.
+  and [Thai rendering guidance](docs/thai-reading-engine.md#firmware-positioning).
+- Use `lib/EpdFont/scripts/fontconvert_sdcard.py` for ordinary CPFont v4 output.
+  Firmware derives Thai placement from native metrics; no companion is required.
 - Work under an isolated `build/` directory. Never overwrite the supplied font,
   existing family assets, or the current complete release ZIP while experimenting.
 - Treat source coverage, shaping quality, and licensing as separate checks.
@@ -29,8 +29,8 @@ larger sizes or real bold/italic faces when requested; do not manufacture styles
 - Reuse the existing converter and host renderer. Do not modify firmware,
   global font metrics, Thai line breaking, or unrelated families to fix one font.
 - Do not claim device heap usage, speed, or e-ink quality from host measurements.
-- No firmware rebuild is needed to install paired fonts on firmware that already
-  supports CPSHAPE v2. Do not run the firmware release workflow automatically.
+- No firmware rebuild is needed to install another CPFont on firmware with generic
+  Thai positioning. Do not run the firmware release workflow automatically.
 
 ## 1. Select inputs and prepare desktop tools
 
@@ -57,7 +57,7 @@ export WORK="build/font-new/$FONT_FAMILY"
 
 For TTC input, explicitly select and extract the intended face before conversion.
 For a variable font, inspect its `fvar` axes, then freeze a static face with
-FontTools at the intended coordinates. The Thai baker rejects variable faces.
+FontTools at the intended coordinates so the conversion is reproducible.
 Record the original hash, chosen face/axis values, derivative hash, and command;
 point `FONT_SOURCE` at that static derivative. Do not silently choose an arbitrary
 face or weight.
@@ -104,13 +104,10 @@ PY
 
 Before continuing:
 
-1. Resolve missing Thai coverage and any variable axes. The baker additionally
-   checks all characters required by its shaping contexts; do not suppress those
-   errors or weaken its validation.
-2. Inspect actual vowel/tone positioning, not just the presence of GPOS/GSUB.
-   Legacy fonts may use prepositioned glyphs or nonstandard mappings. The baker
-   records HarfBuzz output; it cannot invent correct positioning absent from the
-   source. Do not assume `--thai-shaping` repairs every legacy font.
+1. Resolve missing native Unicode Thai coverage and any variable axes before conversion.
+2. Inspect actual vowel/tone positioning. Firmware uses bitmap bounds rather than
+   OpenType anchors or unencoded alternates. Legacy and decorative fonts may need
+   font-local repair; successful conversion alone does not establish good placement.
 3. If source repair is necessary, keep the original immutable, document the
    exact font-local change in a reproducible script, check modification rights
    and reserved font names, and compare before/after rendering. Do not copy
@@ -120,7 +117,7 @@ Before continuing:
    Garuda is **GPL-2.0-or-later with a font-embedding exception**. Do not apply
    those licenses to unrelated new fonts by assumption.
 
-## 3. Convert the paired fonts
+## 3. Convert the bitmap fonts
 
 The following baseline includes only glyphs supplied by the selected source.
 Requesting an interval does not guarantee the source covers it.
@@ -131,13 +128,11 @@ python3 lib/EpdFont/scripts/fontconvert_sdcard.py \
   --name "$FONT_FAMILY" \
   --sizes "$FONT_SIZES" \
   --intervals 'latin-ext,ipa-chars,greek,(0x0300-0x036F),punctuation,symbols,thai,arabic' \
-  --thai-shaping \
   --output-dir "$WORK/fonts/$FONT_FAMILY"
 ```
 
-Expect one `.cpfont`, `.cpshape`, and `.cpshape.json` per size. Preserve the JSON
-reports as desktop provenance; they record source hashes, fallback order, tool
-versions, metrics/payload CRCs, and shaping glyph mappings.
+Expect one `.cpfont` per size. Preserve source hashes, fallback order, converter
+version and output hashes in the conversion report; no shaping report is generated.
 
 Optional additions, only when appropriate:
 
@@ -150,8 +145,7 @@ Optional additions, only when appropriate:
   face wins. Record fallback hashes and include all required license notices.
 - Use only license-compatible fallbacks. In particular, the existing Garuda
   conversion keeps its GPL font data separate from Noto/OFL fallback glyphs;
-  do not merge them without resolving compatibility. The baker requires Thai
-  shaping coverage in the primary face, not merely in a fallback.
+  do not merge them without resolving compatibility.
 - Do not enable `--force-autohint` by default. If needed, compare native and
   autohinted output at every supported size before choosing.
 
@@ -196,8 +190,8 @@ specimen.write_text('''<html xmlns="http://www.w3.org/1999/xhtml"><body>
 </body></html>''', encoding="utf-8")
 for size in sizes:
     font = work / "fonts" / family / f"{family}_{size}.cpfont"
-    if not font.is_file() or not font.with_suffix(".cpshape").is_file():
-        raise SystemExit(f"Missing font/shaping pair: {font}")
+    if not font.is_file():
+        raise SystemExit(f"Missing font: {font}")
     for orientation in ("portrait", "inverted", "cw", "ccw"):
         width, height = (480, 800) if orientation in ("portrait", "inverted") else (800, 480)
         output = work / "smoke" / f"{size}-{orientation}"
@@ -210,7 +204,7 @@ for size in sizes:
         ], check=True)
         report = json.loads((output / "report.json").read_text())
         if not report["settings"]["thai_shape_active"]:
-            raise SystemExit(f"Companion was not accepted: {output}")
+            raise SystemExit(f"Native Thai metric snapshot was not accepted: {output}")
         if report["measurements"]["thai_analysis_unavailable"]:
             raise SystemExit(f"Thai analysis fell back: {output}")
 print(f"Passed {len(sizes) * 4} host rendering scenarios; visual review still required")
@@ -239,7 +233,7 @@ PY
 Inspect the smallest UI sizes and all reader sizes, plus all four orientations.
 Check missing boxes, lost vowels/tones, overlapping marks, clipped ascenders or
 descenders, word gaps, and line spacing. Distinguish a font problem from a layout
-problem. An active companion and a zero exit status do not prove visual quality.
+problem. An active metric snapshot and a zero exit status do not prove visual quality.
 
 If extended fallbacks were included, add coverage-specific specimens such as
 `/ˈθɪŋk/`, `← → ⇒`, `∞ ≠ ✓ ★`, and `مرحبا بالعالم`; do not claim support for
@@ -254,9 +248,8 @@ Before packaging, put the actual license texts and source notices under
 source distribution under `$WORK/sources/`. Do not invent a license or declare
 public distribution cleared merely because this step produces a ZIP.
 
-This command moves converter reports out of the SD installation directory,
-packages the family with its reports/source materials, and writes a checksum.
-It does not include temporary smoke images or touch any other family.
+This command packages the family with its reports/source materials and writes a
+checksum. It does not include temporary smoke images or touch any other family.
 
 ```bash
 python3 - <<'PY'
@@ -267,9 +260,6 @@ import zipfile
 
 work = Path(os.environ["WORK"])
 family = os.environ["FONT_FAMILY"]
-reports = work / "reports"
-for report in (work / "fonts" / family).glob("*.cpshape.json"):
-    report.replace(reports / report.name)
 archive_path = work.parent / f"{family}-Thai-Font.zip"
 with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
     for directory in ("fonts", "reports", "sources"):
@@ -298,8 +288,8 @@ the actual family name.
 1. Extract only `fonts/` to the SD-card root, merging without deleting other fonts
    or books. If this family already exists in `/.fonts/`, update that copy instead:
    the hidden root takes priority over `/fonts/` for duplicate families.
-2. Keep every `.cpfont` and matching `.cpshape` together. Restart the reader,
-   select the family in **Settings → Reader → Font Family**, and test its sizes.
+2. Restart the reader, select the family in **Settings → Reader → Font Family**,
+   and test its sizes. Only `.cpfont` files are needed for installation.
 3. Do not delete progress or book caches simply to install a font. Verify stacked
    marks, page turns, and all orientations on hardware. If monitoring memory,
    confirm internal free heap remains above 50 KB without a downward trend across

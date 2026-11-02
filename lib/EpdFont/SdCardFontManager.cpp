@@ -29,7 +29,7 @@ int SdCardFontManager::computeFontId(uint32_t contentHash, const char* familyNam
 }
 
 int SdCardFontManager::loadFile(const SdCardFontFamilyInfo& family, const SdCardFontFileInfo& file,
-                                GfxRenderer& renderer, const bool residentThaiShape, const int fontIdOverride) {
+                                GfxRenderer& renderer, const int fontIdOverride) {
   char path[SdCardFontFamilyInfo::PATH_BUFFER_SIZE];
   if (!family.filePath(file, path, sizeof(path))) {
     LOG_ERR("SDMGR", "Font path too long in family %s", family.name.c_str());
@@ -42,7 +42,7 @@ int SdCardFontManager::loadFile(const SdCardFontFamilyInfo& family, const SdCard
     return 0;
   }
 
-  if (!font->load(path, residentThaiShape)) {
+  if (!font->load(path)) {
     LOG_ERR("SDMGR", "Failed to load %s", path);
     delete font;
     return 0;
@@ -80,7 +80,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
-  if (loadFile(family, *selected, renderer, residentThaiShape_) == 0) {
+  if (loadFile(family, *selected, renderer) == 0) {
     return false;
   }
 
@@ -98,16 +98,13 @@ int SdCardFontManager::loadFamilyExtraSize(const SdCardFontFamilyInfo& family, G
   // happens to match a UI size) instead of double-loading the file.
   if (const int loadedId = getFontId(family.name, pointSize); loadedId != 0) return loadedId;
 
-  // UI fallbacks shape a few short labels: SD-backed shaping leaves the
-  // companion tables of every extra size out of the heap.
-  return loadFile(family, *file, renderer, /*residentThaiShape=*/false, fontId);
+  return loadFile(family, *file, renderer, fontId);
 }
 
 bool SdCardFontManager::loadFamilyVariant(const SdCardFontFamilyInfo& family, GfxRenderer& renderer,
                                           const uint8_t pointSize, const int fontId) {
   const SdCardFontFileInfo* file = family.findFile(pointSize);
-  // Sized variants mostly draw headings and short runs; keep their shaping tables on SD.
-  return file && loadFile(family, *file, renderer, /*residentThaiShape=*/false, fontId) != 0;
+  return file && loadFile(family, *file, renderer, fontId) != 0;
 }
 
 void SdCardFontManager::unloadFont(GfxRenderer& renderer, const int fontId) {
@@ -131,21 +128,6 @@ void SdCardFontManager::unloadAll(GfxRenderer& renderer) {
   loaded_.clear();
   loadedFamilyName_.clear();
   loadedPointSize_ = 0;
-}
-
-bool SdCardFontManager::holdsResidentThaiShape() const {
-  for (const auto& lf : loaded_) {
-    if (lf.font->hasResidentThaiShape()) return true;
-  }
-  return false;
-}
-
-bool SdCardFontManager::demoteResidentThaiShape() {
-  bool demoted = true;
-  for (const auto& lf : loaded_) {
-    if (!lf.font->demoteResidentThaiShape()) demoted = false;
-  }
-  return demoted;
 }
 
 int SdCardFontManager::getFontId(const std::string& familyName, const uint8_t pointSize) const {

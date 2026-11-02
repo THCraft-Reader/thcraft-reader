@@ -35,7 +35,7 @@ def check_assets(assets: Path, manifest: dict) -> None:
     for entry in [manifest["fallback"], *manifest["fonts"], *manifest["controls"]]:
         pairs = [("path", "sha256"), ("cpfont", "cpfont_sha256"),
                  ("regular", "regular_sha256"), ("source", "source_sha256"),
-                 ("fallback", "fallback_sha256"), ("license", "license_sha256"), ("shape", "shape_sha256")]
+                 ("fallback", "fallback_sha256"), ("license", "license_sha256")]
         for field, hash_field in pairs:
             if field in entry and hash_field in entry:
                 path = assets / entry[field]

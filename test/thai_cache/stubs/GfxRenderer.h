@@ -14,9 +14,6 @@ enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 
 // Deterministic host metrics, not visual/font proof. Cache and layout remain real.
 class GfxRenderer {
  public:
-  mutable bool thaiShapeError = false;
-  mutable int shapeMeasurementsBeforeFailure = -1;
-  bool hasThaiShapeError() const { return thaiShapeError; }
   enum class TextMeasureMode { Layout, Rendered };
   // The fixture has no framebuffer to lend; image probes run as without a loan.
   class FrameBufferLoan {
@@ -71,8 +68,6 @@ class GfxRenderer {
   int getTextAdvanceX(int font, const char* text, EpdFontFamily::Style style, int8_t tracking = 0,
                       BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO,
                       TextMeasureMode = TextMeasureMode::Layout, uint16_t thaiExtraPixels = 0) const {
-    if (shapeMeasurementsBeforeFailure == 0) thaiShapeError = true;
-    if (shapeMeasurementsBeforeFailure > 0) --shapeMeasurementsBeforeFailure;
     if (!text) return 0;
     int width = thaiExtraPixels && countThaiJustificationGaps(font, text, style, baseDir) ? thaiExtraPixels : 0;
     uint32_t previous = 0;

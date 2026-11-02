@@ -5,7 +5,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <limits>
 #include <string>
 #include <utility>
 
@@ -13,16 +12,6 @@
 
 namespace probe {
 inline uint64_t readCalls = 0, readBytes = 0;
-// Companion-only HAL requests, including failed attempts; not physical SD transactions.
-inline uint64_t shapeReadCalls = 0, shapeReadBytes = 0, shapeSeekCalls = 0;
-inline uint64_t shapeReadFailures = 0, shapeSeekFailures = 0;
-// Zero disables an ordinal failure; ordinals are absolute companion request counts.
-inline uint64_t shapeFailSeekAt = 0, shapeFailReadAt = 0, shapeZeroReadAt = 0, shapeShortReadAt = 0;
-inline size_t shapeTruncateAt = std::numeric_limits<size_t>::max();
-inline void resetShapeFaults() {
-  shapeFailSeekAt = shapeFailReadAt = shapeZeroReadAt = shapeShortReadAt = 0;
-  shapeTruncateAt = std::numeric_limits<size_t>::max();
-}
 // Empty for the ordinary render probe; UI discovery mounts a host SD root.
 inline std::filesystem::path sdRoot;
 inline std::filesystem::path hostPath(const char* path) {
@@ -44,7 +33,6 @@ class HalFile {
   HalFile& operator=(const HalFile&) = delete;
   HalFile(HalFile&& other) noexcept
       : file_(std::exchange(other.file_, nullptr)),
-        shape_(std::exchange(other.shape_, false)),
         initialized_(std::exchange(other.initialized_, false)),
         path_(std::move(other.path_)),
         directory_(std::exchange(other.directory_, false)),
@@ -53,7 +41,6 @@ class HalFile {
     if (this != &other) {
       if (initialized_) close();
       file_ = std::exchange(other.file_, nullptr);
-      shape_ = std::exchange(other.shape_, false);
       initialized_ = std::exchange(other.initialized_, false);
       path_ = std::move(other.path_);
       directory_ = std::exchange(other.directory_, false);
@@ -65,7 +52,6 @@ class HalFile {
     if (initialized_) close();
     initialized_ = true;
     path_ = probe::hostPath(path);
-    shape_ = path_.extension() == ".cpshape";
     std::error_code error;
     if (std::filesystem::is_directory(path_, error)) {
       next_ = std::filesystem::directory_iterator(path_, error);
@@ -90,27 +76,8 @@ class HalFile {
   int available() const { return file_ ? static_cast<int>(size() - position()) : 0; }
   int read(void* buffer, size_t count) {
     ++probe::readCalls;
-    const bool shape = isShape();
-    if (shape) {
-      ++probe::shapeReadCalls;
-      if (probe::shapeReadCalls == probe::shapeFailReadAt) {
-        ++probe::shapeReadFailures;
-        return -1;
-      }
-    }
-    size_t request = count;
-    if (shape) {
-      const size_t pos = position();
-      request = pos >= probe::shapeTruncateAt ? 0 : std::min(request, probe::shapeTruncateAt - pos);
-      if (probe::shapeReadCalls == probe::shapeShortReadAt && request) --request;
-      if (probe::shapeReadCalls == probe::shapeZeroReadAt) request = 0;
-    }
-    const size_t got = file_ ? std::fread(buffer, 1, request, file_) : 0;
+    const size_t got = file_ ? std::fread(buffer, 1, count, file_) : 0;
     probe::readBytes += got;
-    if (shape) {
-      probe::shapeReadBytes += got;
-      if (got != count) ++probe::shapeReadFailures;
-    }
     return static_cast<int>(got);
   }
   int read() {
@@ -120,23 +87,13 @@ class HalFile {
   size_t write(const void* buffer, size_t count) { return file_ ? std::fwrite(buffer, 1, count, file_) : 0; }
   size_t write(uint8_t byte) { return write(&byte, 1); }
   bool flush() { return file_ && std::fflush(file_) == 0; }
-  bool seekSet(size_t offset) {
-    if (isShape()) {
-      ++probe::shapeSeekCalls;
-      if (probe::shapeSeekCalls == probe::shapeFailSeekAt) {
-        ++probe::shapeSeekFailures;
-        return false;
-      }
-    }
-    return file_ && std::fseek(file_, static_cast<long>(offset), SEEK_SET) == 0;
-  }
+  bool seekSet(size_t offset) { return file_ && std::fseek(file_, static_cast<long>(offset), SEEK_SET) == 0; }
   bool seek(size_t offset) { return seekSet(offset); }
   bool seekCur(size_t offset) { return file_ && std::fseek(file_, static_cast<long>(offset), SEEK_CUR) == 0; }
   bool close() {
     if (!initialized_) std::abort();  // Production HAL asserts on an uninitialized handle.
     const bool wasOpen = isOpen();
     directory_ = false;
-    shape_ = false;
     next_ = {};
     const bool ok = !file_ || std::fclose(file_) == 0;
     file_ = nullptr;
@@ -156,9 +113,7 @@ class HalFile {
   size_t fileSize() const { return size(); }
 
  private:
-  bool isShape() const { return shape_; }
   std::FILE* file_ = nullptr;
-  bool shape_ = false;
   bool initialized_ = false;
   std::filesystem::path path_;
   bool directory_ = false;

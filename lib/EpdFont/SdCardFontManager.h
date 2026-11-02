@@ -22,17 +22,6 @@ class SdCardFontManager {
   // one size's worth of memory. Returns true on success.
   bool loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t pointSize);
 
-  // false keeps the reader-size CPSHAPE companion SD-backed as well, for
-  // sessions that need the heap more than shaping speed. Applies to later loads.
-  void setResidentThaiShape(bool resident) { residentThaiShape_ = resident; }
-
-  // True if any loaded font holds its CPSHAPE companion in RAM.
-  bool holdsResidentThaiShape() const;
-
-  // Switch every resident companion to SD-backed without reloading fonts.
-  // False: at least one font refused, and the family must be reloaded.
-  bool demoteResidentThaiShape();
-
   // Additively load the .cpfont of `family` at the exact physical `pointSize`
   // (used for size-matched CJK UI fallback alongside the reader-size font).
   // Does not unload anything. If a font of that size is already loaded its id
@@ -73,10 +62,9 @@ class SdCardFontManager {
   // Load+register one .cpfont of `family` and append it to loaded_.
   // Returns the font id, or 0 on failure (allocation, read, or id collision).
   int loadFile(const SdCardFontFamilyInfo& family, const SdCardFontFileInfo& file, GfxRenderer& renderer,
-               bool residentThaiShape, int fontIdOverride = 0);
+               int fontIdOverride = 0);
 
   std::string loadedFamilyName_;
   uint8_t loadedPointSize_ = 0;
-  bool residentThaiShape_ = true;
   std::vector<LoadedFont> loaded_;
 };

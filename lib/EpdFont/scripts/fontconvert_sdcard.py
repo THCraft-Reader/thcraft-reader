@@ -20,14 +20,10 @@ Usage:
       NotoSansCJKsc-Regular.otf \\
       --output-dir NotoSansCJK/
 
-    # Optional desktop-baked Thai positioning; source face must be frozen
+    # Thai uses native Unicode glyphs; positioning is handled by firmware
     python fontconvert_sdcard.py \\
-      --intervals ascii,punctuation,thai --thai-shaping --size 16 \\
+      --intervals ascii,punctuation,thai --size 16 \\
       NotoSansThai-Regular.ttf -o NotoSansThai_16.cpfont
-
-The shaping option additionally writes same-basename .cpshape and .cpshape.json
-files (format/metrics CRCs, source hashes, versions and original glyph-ID mapping).
-It requires desktop uharfbuzz; ordinary conversion never imports that dependency.
 
 """
 
@@ -579,7 +575,7 @@ def extract_ligatures_fonttools(font_path, codepoints):
 
 
 def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=False,
-                         fallback_fontfiles=(), glyph_indices=None, strict=False):
+                         fallback_fontfiles=()):
     """Rasterize one style, using ordered fallbacks after the primary face."""
     import freetype
 
@@ -593,10 +589,6 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
     # Invalid_Size_Handle on some fonts.
     face.set_char_size(size << 6, size << 6, 150, 150)
     ligature_glyph_indices = extract_ligature_glyph_indices_fonttools(fontfile)
-    glyph_indices = glyph_indices or {}
-    for cp in glyph_indices:
-        if face.get_char_index(cp):
-            raise ValueError(f"Alternate glyph would overwrite source cmap U+{cp:04X}")
     fallback_faces = []
     for fallback_fontfile in fallback_fontfiles:
         fallback_face = freetype.Face(fallback_fontfile)
@@ -609,8 +601,6 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
 
     def load_glyph(code_point):
         glyph_index = face.get_char_index(code_point)
-        if glyph_index == 0:
-            glyph_index = glyph_indices.get(code_point, 0)
         if glyph_index == 0:
             glyph_index = ligature_glyph_indices.get(code_point, 0)
         if glyph_index > 0:
@@ -633,7 +623,7 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
         start = i_start
         for code_point in range(i_start, i_end + 1):
             has_primary = (face.get_char_index(code_point) != 0 or
-                           code_point in ligature_glyph_indices or code_point in glyph_indices)
+                           code_point in ligature_glyph_indices)
             has_fallback = not has_primary and any(
                 fallback_face.get_char_index(code_point) != 0 for fallback_face in fallback_faces)
             if not has_primary and not has_fallback:
@@ -769,8 +759,6 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
     # entry returned here is already 16-bit safe.
     ligature_pairs = extract_ligatures_fonttools(fontfile, all_cps)
     if len(ligature_pairs) > 255:
-        if strict:
-            raise ValueError("Thai paired CPFont exceeds 255 ligature pairs")
         print(f"  [{style_label}] WARNING: {len(ligature_pairs)} ligature pairs exceeds uint8_t max (255), truncating",
               file=sys.stderr)
         ligature_pairs = ligature_pairs[:255]
@@ -849,8 +837,7 @@ def style_sections_total_size(sections):
 # --- File writers ---
 
 def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
-                               force_autohint=False, fallback_style_fonts=None,
-                               thai_shaping=False):
+                               force_autohint=False, fallback_style_fonts=None):
     """Generate a multi-style v4 .cpfont file.
 
     style_fonts: dict of {style_id: fontfile_path} e.g. {0: "Regular.ttf", 2: "Italic.ttf"}
@@ -865,28 +852,14 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
     # Rasterize each style
     raster_data = {}  # style_id -> StyleRasterData
     fallback_style_fonts = fallback_style_fonts or {}
-    shape_models = {}
-    if thai_shaping:
-        from thai_shape import (bake_style, expanded_intervals, finish_style, make_companion, paired_header,
-                                write_report)
     for style_id in sorted(style_fonts.keys()):
         fontfile = style_fonts[style_id]
         fallback_fontfiles = fallback_style_fonts.get(style_id, ())
-        style_intervals = intervals
-        glyph_indices = None
-        if thai_shaping:
-            model = bake_style(fontfile, size, fallback_fontfiles)
-            shape_models[style_id] = model
-            style_intervals = expanded_intervals(intervals, model.codepoints.values())
-            glyph_indices = model.alternates
         print(f"  Rasterizing style {style_id}...", file=sys.stderr)
         raster_data[style_id] = rasterize_font_style(
-            fontfile, size, style_intervals, style_id=style_id,
+            fontfile, size, intervals, style_id=style_id,
             force_autohint=force_autohint,
-            fallback_fontfiles=fallback_fontfiles, glyph_indices=glyph_indices,
-            strict=thai_shaping)
-        if thai_shaping:
-            raster_data[style_id] = finish_style(shape_models[style_id], raster_data[style_id])
+            fallback_fontfiles=fallback_fontfiles)
 
     # Pack binary sections for each style
     packed_sections = {}  # style_id -> tuple of section bytearrays
@@ -904,8 +877,6 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
 
     # Build global header
     # V4 header: magic(8) + version(2) + flags(2) + styleCount(1) + reserved(19) = 32
-    # Reserved bytes 16-19 hold the CPSHAPE pair tag when --thai-shaping is used
-    # (thai_shape.paired_header); every other writer must leave them zero.
     header = struct.pack("<8sHHB19s", MAGIC, CPFONT_VERSION, flags, style_count, bytes(19))
     assert len(header) == HEADER_SIZE
 
@@ -934,12 +905,6 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
                                 len(sd.ligature_pairs),
                                 style_offsets[style_id])
 
-    # Validate the whole optional companion before publishing either file.
-    companion = None
-    if thai_shaping:
-        companion = make_companion(header, toc_data, packed_sections, shape_models)
-        header = paired_header(header, companion)
-
     # Write output
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
     total_file_size = 0
@@ -951,12 +916,6 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
                 f.write(section)
         total_file_size = f.tell()
 
-    if companion is not None:
-        companion_path = os.path.splitext(output_path)[0] + ".cpshape"
-        with open(companion_path, "wb") as f:
-            f.write(companion)
-        write_report(companion_path + ".json", companion, shape_models,
-                     style_fonts, fallback_style_fonts, size, force_autohint)
 
     # Print summary
     print(f"  Output: {output_path} (v4, {style_count} styles)", file=sys.stderr)
@@ -996,8 +955,6 @@ def main():
                         help="Font family name for output filenames (default: derived from font filename).")
     parser.add_argument("--force-autohint", dest="force_autohint", action="store_true",
                         help="Force FreeType auto-hinter instead of native font hinting.")
-    parser.add_argument("--thai-shaping", action="store_true",
-                        help="Bake optional Thai positioning and contextual glyphs into a paired .cpshape.")
     parser.add_argument("-o", "--output", dest="output",
                         help="Output file path (for single-size mode).")
     parser.add_argument("--output-dir", dest="output_dir",
@@ -1121,8 +1078,7 @@ def main():
         total_size += generate_cpfont_multistyle(
             style_fonts, sz, intervals, output_path,
             force_autohint=args.force_autohint,
-            fallback_style_fonts=fallback_style_fonts,
-            thai_shaping=args.thai_shaping)
+            fallback_style_fonts=fallback_style_fonts)
     print(f"\nTotal: {len(sizes)} files, {total_size / 1024 / 1024:.2f} MB", file=sys.stderr)
 
 

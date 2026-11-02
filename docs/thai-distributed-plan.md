@@ -162,7 +162,7 @@ natural Thai typography but do not claim Word compatibility.
 In the existing Thai boundary and shaping files, implement a shared allocation-free
 spacing traversal. Keep `nextCluster`, dictionary analysis, and emergency cuts
 unchanged. Carry enough source/attachment information through shaped placement to
-identify independent units without changing CPFont/CPSHAPE files. Follow native
+identify independent units without changing CPFont files. Follow native
 ligature consumption rather than expanding inside substituted glyphs.
 
 Connect counting, measuring, normal/rotated drawing, and scaled styles to the
@@ -215,7 +215,7 @@ Permanent behavioral regressions must establish:
   never become new legal line breaks. Source/progress offsets stay unchanged.
 - Count, measure, draw, selection, decoration, and link geometry agree.
 - Cache replay matches BW and both grayscale planes; old full/partial caches
-  rebuild. Cold/full prewarm, missing shape companions, shaping-disabled builds,
+  rebuild. Cold/full prewarm, missing native metrics, shaping-disabled builds,
   and allocation failures preserve the existing safety contracts.
 - Equivalent text with harmless inline markup does not acquire visible seams;
   rounding differences stay within the stated one-pixel bound.

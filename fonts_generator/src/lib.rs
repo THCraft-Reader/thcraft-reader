@@ -1,6 +1,5 @@
 mod native;
 mod opentype;
-mod thai;
 
 use native::{Bitmap, Face, Metrics};
 use serde::{Deserialize, Serialize};
@@ -18,7 +17,6 @@ struct Request {
     family: String,
     sizes: Vec<u8>,
     intervals: Vec<[u32; 2]>,
-    thai: bool,
     autohint: bool,
     styles: Vec<Style>,
 }
@@ -34,9 +32,7 @@ struct Style {
 
 struct Source {
     bytes: Vec<u8>,
-    unicode: BTreeSet<u32>,
     sha256: String,
-    variable: bool,
 }
 
 struct Glyph {
@@ -146,26 +142,23 @@ fn load_source(path: &str) -> Result<Source, String> {
     let face = ttf_parser::Face::parse(&bytes, 0).map_err(|e| {
         format!("Invalid or unsupported font {path}: {e:?}. Use a TTF or OTF source.")
     })?;
-    let variable = face.is_variable();
-    let mut unicode = BTreeSet::new();
+    let mut has_unicode = false;
     if let Some(cmap) = face.tables().cmap {
         for subtable in cmap.subtables {
             if subtable.is_unicode() {
-                subtable.codepoints(|cp| {
-                    unicode.insert(cp);
+                subtable.codepoints(|_| {
+                    has_unicode = true;
                 });
             }
         }
     }
-    if unicode.is_empty() {
+    if !has_unicode {
         return Err(format!("Font {path} has no supported Unicode cmap"));
     }
     let sha256 = hash(&bytes);
     Ok(Source {
         bytes,
-        unicode,
         sha256,
-        variable,
     })
 }
 
@@ -242,17 +235,8 @@ fn rasterize(
     intervals: &[[u32; 2]],
     faces: &mut [Face],
     overrides: &BTreeMap<u32, u16>,
-    alternates: &BTreeMap<u32, u32>,
-    strict: bool,
     warnings: &mut Vec<String>,
 ) -> Result<Raster, String> {
-    for &cp in alternates.keys() {
-        if faces[0].glyph_index(cp) != 0 {
-            return Err(format!(
-                "Thai alternate would overwrite source cmap U+{cp:04X}"
-            ));
-        }
-    }
     let mut glyphs = Vec::new();
     let mut bitmap = Vec::new();
     let mut present = BTreeSet::new();
@@ -267,8 +251,6 @@ fn rasterize(
             let primary_gid = faces[0].glyph_index(cp);
             let gid = if primary_gid != 0 {
                 primary_gid
-            } else if let Some(&gid) = alternates.get(&cp) {
-                gid
             } else {
                 u32::from(overrides.get(&cp).copied().unwrap_or(0))
             };
@@ -315,12 +297,6 @@ fn rasterize(
         warnings.push(format!("Style {} at {size} pt: {warning}", style.id));
     }
     if layout.ligatures.len() > 255 {
-        if strict {
-            return Err(format!(
-                "Thai paired CPFont style {} exceeds 255 ligature pairs",
-                style.id
-            ));
-        }
         warnings.push(format!(
             "Style {} at {size} pt: {} ligature pairs exceed 255; keeping the first 255",
             style.id,
@@ -511,7 +487,7 @@ impl Staging {
             return Err(format!("Cannot publish output: {error}"));
         }
         // The generated output is already complete. A backup cleanup failure
-        // must not turn successful publication into a reported failed pair.
+        // must not turn successful publication into a reported failure.
         if had_previous {
             let _ = fs::remove_dir_all(backup);
         }
@@ -536,9 +512,6 @@ fn run(mut request: Request) -> Result<Value, String> {
             }
         }
         let source = &sources[&style.path];
-        if request.thai && source.variable {
-            return Err(format!("Thai shaping requires a frozen/static primary font, not variable axes: {}. Export the desired instance as a static TTF/OTF first.", style.path));
-        }
         overrides.insert(style.id, opentype::ligature_overrides(&source.bytes)?);
     }
     let staging = Staging::new()?;
@@ -556,40 +529,16 @@ fn run(mut request: Request) -> Result<Value, String> {
                 .chain(&style.fallbacks)
                 .map(|path| Face::open(path, size, request.autohint))
                 .collect::<Result<Vec<_>, _>>()?;
-            let mut model = if request.thai {
-                let mut occupied = source.unicode.clone();
-                for path in &style.fallbacks {
-                    occupied.extend(&sources[path].unicode);
-                }
-                Some(
-                    thai::bake(&mut faces[0], &source.unicode, &occupied)
-                        .map_err(|e| format!("Style {} at {size} pt: {e}", style.id))?,
-                )
-            } else {
-                None
-            };
-            let mut intervals = request.intervals.clone();
-            if let Some(model) = &model {
-                intervals.extend(model.mapping.values().map(|&cp| [cp, cp]));
-                intervals = merged(intervals);
-            }
-            let empty = BTreeMap::new();
-            let alternates = model.as_ref().map(|m| &m.alternates).unwrap_or(&empty);
             let mut raster = rasterize(
                 style,
                 source,
                 size,
-                &intervals,
+                &request.intervals,
                 &mut faces,
                 &overrides[&style.id],
-                alternates,
-                request.thai,
                 &mut warnings,
             )?;
-            if let Some(model) = &mut model {
-                model.finish(&mut raster)?;
-            }
-            let mut report = json!({"source": style.path, "source_sha256": source.sha256,
+            let report = json!({"source": style.path, "source_sha256": source.sha256,
                 "fallbacks": style.fallbacks, "fallback_sha256s": style.fallbacks.iter().map(|p| &sources[p].sha256).collect::<Vec<_>>(),
                 "fallback_glyph_counts": raster.fallback_glyphs, "glyph_count": raster.glyphs.len(),
                 "interval_count": raster.intervals.len(), "bitmap_bytes": raster.bitmap.len(),
@@ -598,12 +547,8 @@ fn run(mut request: Request) -> Result<Value, String> {
                 "kern_left_entries": raster.layout.left.len(), "kern_right_entries": raster.layout.right.len(),
                 "kern_left_classes": raster.layout.left_count, "kern_right_classes": raster.layout.right_count,
                 "ligature_pairs": raster.layout.ligatures.len()});
-            if let Some(model) = &model {
-                report["thai"] = model.counts.clone();
-                report["glyph_mapping"] = json!(model.mapping_report());
-            }
             style_reports.insert(style.id.to_string(), report);
-            packed.push((style.id, raster.sections()?, model));
+            packed.push(raster.sections()?);
             rasters.push(raster);
         }
         let mut header_toc = Vec::with_capacity(32 + 32 * request.styles.len());
@@ -613,7 +558,7 @@ fn run(mut request: Request) -> Result<Value, String> {
         header_toc.push(request.styles.len() as u8);
         header_toc.extend_from_slice(&[0; 19]);
         let mut offset = 32 + 32 * request.styles.len();
-        for (raster, (_, sections, _)) in rasters.iter().zip(&packed) {
+        for (raster, sections) in rasters.iter().zip(&packed) {
             raster.toc(offset, &mut header_toc)?;
             for section in sections {
                 offset = offset
@@ -622,16 +567,9 @@ fn run(mut request: Request) -> Result<Value, String> {
             }
         }
         u32::try_from(offset).map_err(|_| "CPFont file exceeds uint32 size bounds")?;
-        let companion = if request.thai {
-            let companion = thai::companion(&header_toc, &packed)?;
-            header_toc[thai::PAIR_TAG].copy_from_slice(&companion[16..20]);
-            Some(companion)
-        } else {
-            None
-        };
         let mut cpfont = Vec::with_capacity(offset);
         cpfont.extend_from_slice(&header_toc);
-        for (_, sections, _) in &packed {
+        for sections in &packed {
             for section in sections {
                 cpfont.extend_from_slice(section);
             }
@@ -639,7 +577,7 @@ fn run(mut request: Request) -> Result<Value, String> {
         let basename = format!("{}_{}", request.family, size);
         let font_path = format!("fonts/{}/{}.cpfont", request.family, basename);
         let mut report = json!({"generator": "fonts_generator", "generator_version": env!("CARGO_PKG_VERSION"),
-            "cpfont_version": 4, "cpshape_version": if request.thai { Some(2) } else { None },
+            "cpfont_version": 4,
             "dpi": 150, "point_size": size, "force_autohint": request.autohint,
             "settings": request, "versions": {"freetype": freetype, "harfbuzz": harfbuzz,
                 "ttf_parser": "0.25.1", "rust": option_env!("FG_RUST_VERSION"),
@@ -647,25 +585,6 @@ fn run(mut request: Request) -> Result<Value, String> {
             "cpfont_bytes": cpfont.len(), "cpfont_sha256": hash(&cpfont),
             "styles": style_reports});
         files.push(staging.write(&font_path, &cpfont, "cpfont")?);
-        if let Some(companion) = companion {
-            report["companion_bytes"] = json!(companion.len());
-            report["companion_sha256"] = json!(hash(&companion));
-            report["metrics_crc32"] = json!(u32::from_le_bytes(
-                companion[16..20]
-                    .try_into()
-                    .map_err(|_| "Invalid companion CRC field")?
-            ));
-            report["payload_crc32"] = json!(u32::from_le_bytes(
-                companion[20..24]
-                    .try_into()
-                    .map_err(|_| "Invalid companion CRC field")?
-            ));
-            files.push(staging.write(
-                &format!("fonts/{}/{}.cpshape", request.family, basename),
-                &companion,
-                "cpshape",
-            )?);
-        }
         report["warnings"] = json!(&warnings[warning_start..]);
         let mut report_bytes = serde_json::to_vec_pretty(&report)
             .map_err(|e| format!("Cannot serialize report: {e}"))?;
@@ -727,7 +646,6 @@ mod tests {
             family: "Test".into(),
             sizes: vec![16, 12, 16],
             intervals: vec![[32, 64], [65, 126]],
-            thai: false,
             autohint: false,
             styles: vec![Style {
                 id: 0,
@@ -761,6 +679,20 @@ mod tests {
         value.intervals = vec![[0, 0x110000]];
         assert!(validate(&mut value).is_err());
     }
+    #[test]
+    fn native_request_needs_only_coverage_and_raster_settings() {
+        let mut value: Request = serde_json::from_value(json!({
+            "family": "NativeThai",
+            "sizes": [16],
+            "intervals": [[0xe00, 0xe7f]],
+            "autohint": false,
+            "styles": [{"id": 0, "path": "/input/thai.ttf"}]
+        })).unwrap();
+        validate(&mut value).unwrap();
+        assert_eq!(value.intervals, vec![[0xe00, 0xe7f], [0xfffd, 0xfffd]]);
+        assert!(value.styles[0].fallbacks.is_empty());
+    }
+
 
     fn bitmap(pixels: &[u8], pitch: i32) -> Bitmap {
         Bitmap {

@@ -90,6 +90,21 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 75
+
+The serialized header and TextBlock layout are unchanged. Generic firmware Thai
+positioning replaces font-specific CPSHAPE recipes, changing glyph placement,
+Sara Am advances and potentially line breaks. Completed and partial sections
+rebuild automatically; book metadata and saved progress are kept. The derived
+partial version is `0xFE - (75 - 28)` = 207. CPFont remains version 4; companions
+are ignored. Font identity includes the algorithm revision and validated native
+metric snapshot, including whether the style could allocate it.
+
+Thai shaping algorithm revision 2 limits horizontal ascender avoidance to ป/ฝ/ฟ.
+Upper vowels over ส/ช and other bases retain their native horizontal bearings.
+The section schema remains version 75: the changed font identity invalidates
+affected completed and partial layouts without deleting book metadata or progress.
+
 ### Version 74
 
 Combines the Thai branch's version 72 header and TextBlock arena with upstream

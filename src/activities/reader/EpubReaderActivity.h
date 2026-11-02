@@ -148,11 +148,6 @@ class EpubReaderActivity final : public ReaderActivity {
   bool buildTickHeapGate();
   bool buildHeapPaused = false;
   bool heapBelowBuildFloors() const;
-  // Latched when a page render could not allocate its grayscale scratch.
-  bool renderHeapStarved = false;
-  // Switches the reader font to SD-backed Thai shaping when the working set no
-  // longer fits beside the resident companion. Requires the render lock.
-  void shedResidentThaiShapeIfStarved();
   // One bounded build step on the loop task, in a frame whose input did nothing. Lays out about
   // BACKGROUND_BUILD_PAGES_PER_TICK pages (one 1 KB parse step may add more) and hands the loop
   // back after BACKGROUND_BUILD_TICK_BUDGET_MS or as soon as a button is down, so a short press

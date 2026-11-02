@@ -105,7 +105,8 @@ namespace {
 // Upstream v72: Ruby spacing and overhang follow Chromium's default layout.
 // Upstream v73: TrueType vector fonts load and advance .notdef for missing glyphs.
 // v74: Combined Thai metadata and upstream v72-v73 layout.
-constexpr uint8_t SECTION_FILE_VERSION = 74;
+// v75: Generic native-metric Thai shaping replaces font-specific companion recipes.
+constexpr uint8_t SECTION_FILE_VERSION = 75;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
@@ -146,10 +147,6 @@ Section::Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRen
 Section::~Section() { suspendBuild(); }
 
 uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
-  if (renderer.hasThaiShapeError()) {
-    LOG_ERR("SCT", "CPShape failed; refusing page serialization");
-    return 0;
-  }
   if (!file) {
     LOG_ERR("SCT", "File not open for writing page %d", builtPageCount_);
     return 0;
@@ -718,10 +715,6 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
     Storage.remove(binTmpPath().c_str());
     return false;
   };
-  if (renderer.hasThaiShapeError()) {
-    LOG_ERR("SCT", "CPShape failed; refusing section cache commit");
-    return failCommit();
-  }
 
   const uint32_t lutOffset = file.position();
   for (const auto& entry : build_->lut) {

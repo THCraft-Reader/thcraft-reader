@@ -74,6 +74,6 @@ target_include_directories(ThaiShapeTest PRIVATE
   ${REPO_ROOT}/lib/Memory
 )
 target_link_libraries(ThaiShapeTest PRIVATE crosspoint_test_common crosspoint_shape GTest::gtest_main)
-set(THAI_SHAPE_ASSET_FONT "${REPO_ROOT}/build/thai/assets-shaped/cpfonts/noto-sans-thai-16.cpfont"
-    CACHE FILEPATH "Prepared paired font used by real companion tests")
+set(THAI_SHAPE_ASSET_FONT "${REPO_ROOT}/build/thai/assets/cpfonts/noto-sans-thai-16.cpfont"
+    CACHE FILEPATH "Prepared native Thai font used by shaping integration tests")
 gtest_discover_tests(ThaiShapeTest PROPERTIES ENVIRONMENT "THAI_SHAPE_TEST_FONT=${THAI_SHAPE_ASSET_FONT}")

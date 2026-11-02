@@ -10,11 +10,7 @@
 #include "EpdFontData.h"
 #include "ThaiShape.h"
 
-struct ThaiShapeStorage;
-
-struct ThaiShapeBufferDeleter {
-  void operator()(uint8_t* bytes) const;
-};
+class HalFile;
 
 // On-disk binary format version for .cpfont files. Defined as a preprocessor
 // macro (rather than a constexpr) so it can be stringified into the SD-fonts
@@ -47,9 +43,8 @@ class SdCardFont {
   // Load .cpfont file: reads header + intervals into RAM, records file layout offsets.
   // Supports v4 (multi-style) format.
   // Returns true on success.
-  // residentThaiShape=false keeps the CPSHAPE companion SD-backed through the
-  // shared working cache: no whole-file buffer and no dense indexes.
-  bool load(const char* path, bool residentThaiShape = true);
+  // Thai shaping uses a bounded native-metrics snapshot; no companion is needed.
+  bool load(const char* path);
 
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
   // styleMask: bitmask of styles to prewarm (bit 0=regular, 1=bold, 2=italic, 3=bolditalic).
@@ -115,8 +110,8 @@ class SdCardFont {
   // mini glyph/kern arenas, ligature tables, the overflow ring, and
   // the persistent advance tables. Coverage intervals stay so hasCodepoint()
   // and reloads keep working; glyphs fault back in on demand and the next
-  // prewarm rebuilds the arenas. Validated shaping sources/indexes and admitted
-  // clusters remain resident; only this font's paged shape blocks are invalidated.
+  // prewarm rebuilds the arenas. Native Thai metrics remain resident for the
+  // lifetime of the loaded font, independently of these rebuildable caches.
   // For heap-critical transitions (e.g. starting WiFi + the web server), where
   // retained font data is the difference between a clean start and an OOM abort.
   void releaseResidentCaches();
@@ -162,18 +157,9 @@ class SdCardFont {
   void resetStats();
   const Stats& getStats() const { return stats_; }
 
-  // Header/TOC identity plus shaping flag/state and validated pair tag/payload CRC.
+  // Header/TOC identity plus shaping algorithm revision, flag and native metrics.
   // Used to generate deterministic font IDs for section cache invalidation.
   uint32_t contentHash() const { return contentHash_; }
-
-  // Runtime companion I/O/structure faults remain latched until a validated reload.
-  bool hasThaiShapeError() const;
-  // True while the whole CPSHAPE companion is held in RAM (not SD-backed).
-  bool hasResidentThaiShape() const;
-  // Frees a resident companion and serves the same validated views from SD,
-  // keeping font identity and glyph caches. Call under the render lock.
-  // False: the caller must reload this font; the companion may already be released.
-  bool demoteResidentThaiShape();
 
  private:
   // Per-style metadata (parsed from file header/TOC)
@@ -195,6 +181,8 @@ class SdCardFont {
   struct PerStyle {
     CpFontHeader header{};
     ThaiShapeView thaiShape;
+    // At most 504 bytes per Thai-covered style, owned until font unload.
+    ThaiGlyphMetrics* thaiMetrics = nullptr;
 
     // File layout offsets for this style's data sections
     uint32_t intervalsFileOffset = 0;
@@ -306,11 +294,7 @@ class SdCardFont {
   PerStyle& styleData(uint8_t style) { return styles_[styleSlots_[style] - 1]; }
   const PerStyle& styleData(uint8_t style) const { return styles_[styleSlots_[style] - 1]; }
   uint8_t styleCount_ = 0;
-  std::unique_ptr<ThaiShapeStorage> thaiShapeStorage_;
-  bool residentThaiShape_ = true;
-  // pairTag: CPFont header bytes 16-19, which a paired companion repeats.
-  void loadThaiShape(uint32_t fontBytes, uint32_t pairTag);
-  bool thaiShapePath(char* path, size_t capacity) const;
+  void loadThaiMetrics(HalFile& file);
   using CodepointVisitor = bool (*)(void* context, uint32_t codepoint);
   bool visitTextCodepoints(const char* text, uint8_t styleMask, bool shapeText, bool nativeLigatures,
                            CodepointVisitor visitor, void* context) const;

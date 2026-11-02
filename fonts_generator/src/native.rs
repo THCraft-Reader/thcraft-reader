@@ -22,15 +22,6 @@ pub struct Bitmap {
     pub pixels: *const u8,
 }
 
-#[repr(C)]
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
-pub struct ShapedGlyph {
-    pub glyph_id: u32,
-    pub advance_fp: i32,
-    pub x_fp: i32,
-    pub y_fp: i32,
-    pub y_advance_fp: i32,
-}
 
 extern "C" {
     fn fg_open(path: *const c_char, point_size: c_int, autohint: c_int) -> *mut c_void;
@@ -38,13 +29,6 @@ extern "C" {
     fn fg_glyph_index(face: *mut c_void, cp: u32) -> u32;
     fn fg_metrics(face: *mut c_void, metrics: *mut Metrics) -> c_int;
     fn fg_raster(face: *mut c_void, gid: u32, bitmap: *mut Bitmap) -> c_int;
-    fn fg_shape(
-        face: *mut c_void,
-        cps: *const u32,
-        count: u32,
-        output: *mut ShapedGlyph,
-        capacity: u32,
-    ) -> c_int;
     fn fg_error() -> *const c_char;
     fn fg_freetype_version() -> *const c_char;
     fn fg_harfbuzz_version() -> *const c_char;
@@ -109,27 +93,6 @@ impl Face {
         consume(&bitmap)
     }
 
-    pub fn shape(&mut self, cps: &[u32]) -> Result<Vec<ShapedGlyph>, String> {
-        let mut glyphs = [ShapedGlyph::default(); 6];
-        let count = unsafe {
-            fg_shape(
-                self.0.as_ptr(),
-                cps.as_ptr(),
-                cps.len() as u32,
-                glyphs.as_mut_ptr(),
-                glyphs.len() as u32,
-            )
-        };
-        if count < 0 {
-            return Err(error());
-        }
-        if !(1..=6).contains(&count) {
-            return Err(format!(
-                "Thai context produced {count} glyphs; CPSHAPE allows 1–6"
-            ));
-        }
-        Ok(glyphs[..count as usize].to_vec())
-    }
 }
 
 impl Drop for Face {

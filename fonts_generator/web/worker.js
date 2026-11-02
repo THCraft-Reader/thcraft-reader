@@ -76,7 +76,7 @@ self.onmessage = async ({data}) => {
     }
     self.postMessage({type: 'progress', done: request.sizes.length, total: request.sizes.length, text: 'Packaging font pack…'});
     const zip = makeZip(files);
-    const previews = files.filter(file => /\.(cpfont|cpshape)$/.test(file.name));
+    const previews = files.filter(file => file.name.endsWith('.cpfont'));
     self.postMessage({type: 'complete', zip, warnings: [...warnings],
       files: files.map(file => ({name: file.name, size: file.data.length})), previews},
       previews.map(file => file.data.buffer));

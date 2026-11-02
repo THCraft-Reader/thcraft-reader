@@ -55,7 +55,7 @@ void SdCardFontSystem::CoverDecodeScope::releaseFonts() {
   released_ = true;
   restoreSelected_ = SETTINGS.sdFontFamilyName[0] != '\0';
   // unregister first: both the renderer and its cache manager borrow these
-  // fonts. Actual unload also frees CPSHAPE resident data and lookup indexes.
+  // fonts. Actual unload also frees their metrics and lookup indexes.
   system_.unloadCpfonts(renderer_);
 #if CROSSPOINT_VECTOR_FONTS
   system_.unloadTtf(renderer_);
@@ -93,8 +93,7 @@ constexpr UiFontSize kUiFontSizes[] = {
 
 }  // namespace
 
-void SdCardFontSystem::begin(GfxRenderer& renderer, const bool residentThaiShape) {
-  manager_.setResidentThaiShape(residentThaiShape);
+void SdCardFontSystem::begin(GfxRenderer& renderer) {
   registry_.discover();
   renderer_ = &renderer;
   cpfontVariants_.reserve(MAX_CPFONT_VARIANTS);
@@ -152,17 +151,6 @@ void SdCardFontSystem::begin(GfxRenderer& renderer, const bool residentThaiShape
   }
 
   LOG_DBG("SDFS", "SD font system ready (%d families discovered)", registry_.getFamilyCount());
-}
-
-bool SdCardFontSystem::dropResidentThaiShape(GfxRenderer& renderer) {
-  manager_.setResidentThaiShape(false);
-  if (!manager_.holdsResidentThaiShape()) return false;
-  if (manager_.demoteResidentThaiShape()) return true;
-  LOG_ERR("SDFS", "In-place demotion failed; reloading %s with SD-backed shaping",
-          manager_.currentFamilyName().c_str());
-  unloadCpfonts(renderer);
-  ensureLoadedInternal(renderer, /*preserveSelection=*/true);
-  return true;
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {

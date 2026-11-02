@@ -21,9 +21,6 @@ enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 
 
 class GfxRenderer {
  public:
-  mutable bool thaiShapeError = false;
-  mutable int shapeMeasurementsBeforeFailure = -1;
-  bool hasThaiShapeError() const { return thaiShapeError; }
   int boldGlyphAdvance = 8;
   mutable size_t fontPreparations = 0;
   std::function<void()> onFontPrepare;
@@ -122,8 +119,6 @@ class GfxRenderer {
   int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style, int8_t tracking = 0,
                       BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO,
                       TextMeasureMode = TextMeasureMode::Layout, uint16_t thaiExtraPixels = 0) const {
-    if (shapeMeasurementsBeforeFailure == 0) thaiShapeError = true;
-    if (shapeMeasurementsBeforeFailure > 0) --shapeMeasurementsBeforeFailure;
     if (!text) return 0;
     int width = thaiExtraPixels && countThaiJustificationGaps(fontId, text, style, baseDir) ? thaiExtraPixels : 0;
     uint32_t previous = 0;

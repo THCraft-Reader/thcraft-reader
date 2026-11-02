@@ -4,28 +4,14 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <limits>
 #include <utility>
 #include <vector>
 
 inline std::vector<uint8_t> sdFontTestFile;
-inline std::vector<uint8_t> sdFontTestCompanion;
 inline size_t sdFontTestReads = 0;
-inline size_t sdFontTestShapeReads = 0;
-inline size_t sdFontTestShapeBytes = 0;
-inline size_t sdFontTestShapeSeeks = 0;
-inline size_t sdFontTestShapeFailures = 0;
-inline size_t sdFontTestShapeOpenHandles = 0;
-inline size_t sdFontTestFailShapeSeekAt = 0;
-inline size_t sdFontTestFailShapeReadAt = 0;
-inline size_t sdFontTestShortShapeReadAt = 0;
-inline size_t sdFontTestZeroShapeReadAt = 0;
-inline size_t sdFontTestShapeEof = std::numeric_limits<size_t>::max();
-
-inline void sdFontTestResetShapeFaults() {
-  sdFontTestFailShapeSeekAt = sdFontTestFailShapeReadAt = sdFontTestShortShapeReadAt = sdFontTestZeroShapeReadAt = 0;
-  sdFontTestShapeEof = std::numeric_limits<size_t>::max();
-}
+inline size_t sdFontTestOpenHandles = 0;
+inline size_t sdFontTestOpenCalls = 0;
+inline size_t sdFontTestFailReadOffset = static_cast<size_t>(-1);
 
 struct SdFontTestEsp {
   size_t largestBlock = 200 * 1024;
@@ -39,88 +25,58 @@ class HalFile {
  public:
   HalFile() = default;
   ~HalFile() {
-    if (bytes_) close();
+    if (opened_) close();
   }
   HalFile(const HalFile&) = delete;
   HalFile& operator=(const HalFile&) = delete;
   HalFile(HalFile&& other) noexcept { *this = std::move(other); }
   HalFile& operator=(HalFile&& other) noexcept {
     if (this == &other) return *this;
-    if (bytes_) close();
-    bytes_ = std::exchange(other.bytes_, nullptr);
+    if (opened_) close();
     position_ = other.position_;
     opened_ = std::exchange(other.opened_, false);
     return *this;
   }
   bool seekSet(size_t position) {
-    if (shape() && ++sdFontTestShapeSeeks == sdFontTestFailShapeSeekAt) {
-      ++sdFontTestShapeFailures;
-      return false;
-    }
     position_ = position;
-    const bool ok = opened_ && position <= size();
-    if (!ok && shape()) ++sdFontTestShapeFailures;
-    return ok;
+    return opened_ && position <= size();
   }
   int read(void* output, size_t count) {
     ++sdFontTestReads;
-    if (shape()) {
-      ++sdFontTestShapeReads;
-      if (sdFontTestShapeReads == sdFontTestFailShapeReadAt) {
-        ++sdFontTestShapeFailures;
-        return -1;
-      }
-      if (sdFontTestShapeReads == sdFontTestZeroShapeReadAt) {
-        ++sdFontTestShapeFailures;
-        return 0;
-      }
-    }
-    if (!opened_ || position_ > size()) {
-      if (shape()) ++sdFontTestShapeFailures;
-      return 0;
-    }
-    const size_t requested = count;
+    if (position_ == sdFontTestFailReadOffset) return -1;
+    if (!opened_ || position_ > size()) return 0;
     count = std::min(count, size() - position_);
-    if (shape() && sdFontTestShapeReads == sdFontTestShortShapeReadAt && count) --count;
-    std::memcpy(output, bytes_->data() + position_, count);
+    std::memcpy(output, sdFontTestFile.data() + position_, count);
     position_ += count;
-    if (shape()) {
-      sdFontTestShapeBytes += count;
-      if (count != requested) ++sdFontTestShapeFailures;
-    }
     return static_cast<int>(count);
   }
   void close() {
-    if (!bytes_) std::abort();  // Production HAL asserts on an uninitialized handle.
-    if (opened_ && shape()) --sdFontTestShapeOpenHandles;
+    if (!opened_) std::abort();  // Production HAL asserts on an uninitialized handle.
+    --sdFontTestOpenHandles;
     opened_ = false;
   }
   bool isOpen() const { return opened_; }
-  size_t size() const { return shape() ? std::min(bytes_->size(), sdFontTestShapeEof) : bytes_->size(); }
+  size_t size() const { return sdFontTestFile.size(); }
   size_t fileSize() const { return size(); }
-  void open(const std::vector<uint8_t>* bytes = &sdFontTestFile) {
-    if (bytes_) close();
-    bytes_ = bytes;
+  void open() {
+    if (opened_) close();
     opened_ = true;
     position_ = 0;
-    if (shape()) ++sdFontTestShapeOpenHandles;
+    ++sdFontTestOpenHandles;
   }
 
  private:
-  bool shape() const { return bytes_ == &sdFontTestCompanion; }
-  const std::vector<uint8_t>* bytes_ = nullptr;
   size_t position_ = 0;
   bool opened_ = false;
 };
 
 class HalStorage {
  public:
-  bool exists(const char* path) const {
-    return std::strstr(path, ".cpshape") ? !sdFontTestCompanion.empty() : !sdFontTestFile.empty();
-  }
-  bool openFileForRead(const char*, const char* path, HalFile& file) {
-    if (!exists(path)) return false;
-    file.open(std::strstr(path, ".cpshape") ? &sdFontTestCompanion : &sdFontTestFile);
+  bool exists(const char*) const { return !sdFontTestFile.empty(); }
+  bool openFileForRead(const char*, const char*, HalFile& file) {
+    ++sdFontTestOpenCalls;
+    if (sdFontTestFile.empty()) return false;
+    file.open();
     return true;
   }
 };

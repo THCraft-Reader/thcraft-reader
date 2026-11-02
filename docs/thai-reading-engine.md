@@ -36,8 +36,8 @@ Thai bidi classes preserve LTR Thai runs inside RTL paragraphs; Thai marks do
 not enter the renderer's Hebrew/Arabic overlay path.
 
 Thai-bearing paragraphs prepare exact rendered metrics, including native
-ligature outputs and kerning. Paired CPSHAPE, absent companions, and shaping
-disabled builds use the same expansion rules; fallback does not repair a font's
+ligature outputs and kerning. Firmware-shaped, native-fallback and shaping-disabled
+builds use the same expansion rules; fallback does not repair a font's
 existing mark design. Failed exact preparation or scratch allocation fails the
 section build rather than caching incomplete layout.
 
@@ -116,7 +116,8 @@ kerning uses signed 4.4 values. Measurement and drawing use differential roundin
 codepoints) and persistent per-style advance caches (768 entries)
 (`SdCardFont.h:23,297–310`). Pair kerning adjusts adjacent pen positions; it is
 not contextual shaping, mark substitution or stacked-mark attachment. Font
-identity currently hashes the header/style TOC (`SdCardFont.h:144–146`).
+identity hashes the header/style TOC, shaping algorithm/build state, and each
+successfully published native metric snapshot.
 
 ## Thai analysis contract
 
@@ -366,10 +367,10 @@ completion, including transfer/settle and deferred observation delay—not an
 exact BUSY-edge waveform measurement. Reader-exit samples follow parser teardown;
 global loaded fonts remain resident under the existing application policy.
 
-## Native CPFont visual gate
+## Historical unpositioned CPFont visual gate
 
-**Failed native gate; companion positioning is required.** The production
-probe's Noto Sans Thai 16pt normal glyph sheet at tracking 0 shows merged
+**Unpositioned native glyphs failed this gate.** The baseline production
+probe's Noto Sans Thai 16pt normal glyph sheet at tracking 0 showed merged
 tone/vowel marks in `กี่` and tall-consonant cases, and colliding descender/lower
 vowels in `ญู` and `ฐุ`. The same frozen source face rendered through desktop
 HarfBuzz/FreeType separates those marks. Evidence:
@@ -389,209 +390,58 @@ before final baseline/candidate acceptance.
 CPFont v4 stays unchanged. Native files without companions remain valid; no
 device HarfBuzz, FreeType or OpenType parser is introduced by this milestone.
 
-## Optional positioning
+## Firmware positioning
 
-The opt-in converter bakes 3,772 finite contexts per style into unchanged CPFont v4
-glyph records and a `.cpshape` companion. Unencoded alternates use deterministic
-unused BMP PUA slots; native Unicode records remain intact. The device consumes
-an allocation-free outer-cluster cursor in bounds, measurement, normal drawing,
-rotated drawing and source-ordered glyph prewarming. Both measurement modes use
-the same signed 12.4 pen/offset rounding; tracking occurs only between outer
-clusters. Unsupported clusters remain wholly native.
+Thai positioning is implemented in firmware for ordinary CPFont v4 fonts with
+native Unicode Thai glyphs. No `.cpshape` file, font-specific recipe table,
+desktop shaping library, or new setting is required on the reader.
+Older paired CPFonts remain readable; their companions and extra recipe-only
+PUA glyphs are not used for Thai positioning.
 
-Companion v2 is little-endian: 32-byte `CPSHAPE\\0` header, 12-byte style TOC entries,
-12-byte style headers, then per style 3,772 three-byte lookup entries, base records
-and mark records (eight bytes each). An entry packs a base ID (bits 0-6), a mark
-count (bits 7-9) and the first mark record (bits 10-23); mark sequences contained
-in a longer one reuse its records. Limits are 127 bases, five marks per recipe,
-16,383 mark records, 96 KiB/style and 384 KiB/family. Converting the current
-70-pair Thai pack reduces its companions by 31% in total, from 2,925,836 to
-2,017,720 bytes (Mali 26 pt: 80,890 to 54,092 bytes).
+At font load, each Thai-covered style reads and validates a bounded snapshot:
+46 bases, 16 combining signs and Sara AA, each with eight bytes of bitmap
+geometry and advance. The allocation is **504 bytes per Thai-covered style**,
+plus view/ownership metadata and allocator overhead. Non-Thai styles allocate
+no snapshot. The existing font allocator prefers PSRAM where available; X3/X4
+use internal RAM. Snapshots survive page-cache eviction and are freed at font
+unload. Allocation or metric-read failure leaves that style on the native path;
+incomplete snapshots are never published.
 
-CRC32 protects the payload. The converter also takes the CRC32 of the CPFont
-header (pair-tag bytes zeroed), TOC, intervals, glyph metadata, kerning and
-ligatures in file order (excluding bitmaps), and writes it as the pair tag in both
-headers: CPSHAPE bytes 16-19 and the reserved CPFont v4 bytes 16-19. The reader
-compares the two tags instead of re-reading CPFont metadata, so a companion is
-ignored after its CPFont is rebuilt without it; the CPFont still loads. Counts, entries, glyph coverage and metrics are
-checked before publishing any style. `scripts/upgrade_thai_shape_v2.py` converts
-v1 pairs without re-baking; this firmware ignores v1 companions.
+The cursor allocates nothing and performs no storage reads. It preserves native
+horizontal mark bearings, and applies right-side ascender avoidance only to
+ป, ฝ and ฟ when their metrics show a raised stem. Taller outlines such as ส,
+ช and ฬ keep their native horizontal mark placement. It separates stacked
+upper marks and moves lower marks below the actual descender. Sara Am is
+decomposed and reordered for drawing
+without changing the source bytes: its components share one atomic source span.
+Native font ligatures have priority unless the active style suppresses them
+(Small Caps). Missing glyphs and unsupported/malformed
+stacks leave their whole outer cluster native.
 
-Storage is chosen at font load, without a setting or font conversion, and a
-resident companion may later switch to SD-backed (below).
-The whole companion prefers PSRAM and is retained only when internal free memory
-is greater than 50 KiB before and after allocation. Otherwise the validated
-companion stays open through HAL and uses one shared cache across all fonts,
-sizes and styles. Minimum cached admission depends on actual nullable allocations,
-not the 50 KiB reserve. Missing, corrupt, incompatible or genuinely unaffordable
-companions leave the native font usable.
+These are geometry-based rules, not OpenType GPOS/GSUB interpretation. They do
+not select a font's unencoded Thai alternate glyphs or reproduce every designer's
+anchors. Below signs on descenders may sit lower than a font-specific cut-tail
+alternate would. Check each font and size visually, including small UI sizes.
+Line spacing and clipping still need device verification.
 
-The reserve is measured at font load, before a book's working set exists. The
-EPUB reader therefore demotes a resident companion once per boot: when a page
-render cannot allocate its grayscale scratch, or internal heap is below the
-background build floors (32 KiB free, 16 KiB largest block) at the start of a
-render, it switches the companion to SD-backed in place and logs the heap before
-and after. The views were validated against the same file, so only its 32-byte
-header is re-read and compared; font identity, glyph caches and loaded fonts are
-kept. If the file cannot be reopened, its size or header differs, or the shared
-cache cannot be allocated, the reader reloads the family with SD-backed shaping.
-Starting the File Transfer hotspot switches a resident companion the same way.
+Bounds, both measurement modes, normal/rotated drawing, scaled styles, source
+spacing boundaries and prewarming use the same cursor. Snapshot content,
+availability, the shaping build flag and algorithm revision enter the font
+identity. Algorithm revision 2 corrects upper-vowel placement over ส/ช and
+changes SD-font identity so affected completed and partial sections rebuild.
+Section format stays at version 75; book metadata and reading progress are preserved.
 
-The shared object contains eight 512-byte MRU blocks, two complete-cluster
-stages and 128 resolved recipes. Its compiled size is **12,604 bytes on C3/S3**
-and **13,664 bytes on macOS arm64**, enforced below 14 KiB by a static assertion.
-Two stages hold 32 byte-packed 51-byte units each (3,264 bytes total), including
-at most six encoded records per unit. Cache misses and cursor admission/iteration
-allocate nothing after load. Cached admission reads the entire cluster before
-exposing placements; cursor copies share immutable stage leases. Iteration
-performs no further SD reads.
-
-A recipe lookup touches its lookup entry, one base record and one contiguous run
-of mark records, which may lie in different blocks, so eight blocks alone hold
-only a few clusters' worth of mixed text. The resolved recipes (16 sets of eight, 40 bytes
-each on C3/S3) keep each recently used cluster's records, or the fact that its
-key has no recipe, keyed by owner and lookup-entry offset. A repeated cluster then
-stages without companion reads whatever the block cache holds. Recipes longer
-than four records stay on the block path. Invalidating a source drops its blocks
-and its recipes together.
-
-Optional dense indexes (RAM copies of the lookup table) cost **11,316 bytes per
-present style**, at most 45,264 bytes for four styles. They are allocated before
-validation and filled by it, and retained only as a complete set that preserves
-greater than 50 KiB internal headroom; failure falls back to fully paged lookup.
-Firmware ELF type information (C3 `default` build) reports per-font storage of
-72 bytes (including the 32-byte source, 12-byte HAL handle, buffer/index
-ownership and companion size), one 28-byte style view per present style (inside
-the heap-allocated style array), a four-byte owning
-pointer, and an additional 80-byte retained HAL file implementation in cached
-mode. Allocator overhead and ordinary CPFont caches are extra. Host object sizes
-differ and are not device-memory evidence.
-The shared working object is heap-owned because it cannot fit the render stack.
-
-The companion is laid out in read order, so the payload CRC, structural
-validation and any dense-index copy share one sequential pass through bounded
-scratch before publishing any style; SD-backed loads read each block once. Font
-identity includes exactly the accepted pair tag, payload CRC, version and
-active/disabled state; backing mode and cache warmth never enter it. The CPFont
-v4 format and healthy rendered-cache versions are unchanged; a paired CPFont's
-new header tag changes its identity, so books lay out again once. Ordinary glyph-cache clears retain shaping; resident-cache release
-invalidates this font's SD blocks without invalidating staged cursors, indexes,
-views or identity. The last cached owner and last stage lease release the shared
-allocation.
-
-Actual read/seek/structure failures latch until a fully validated reload, log
-once, and prevent further companion reads. Unsupported recipes still fall back
-as whole native clusters, but storage faults do not commit fallback measurements:
-prewarm/layout fail, final and suspended section commits are refused, and the
-reader displays the existing page-load error without successful-page accounting,
-progress saving or screenshot capture. Failed grayscale rendering is never
-activated; cleanup restores stored BW and settles outstanding refresh/controller
-state. An already-started BW waveform cannot be physically rolled back.
-
-Observed regular companion file sizes across 12/14/16/18 pt:
-
-| Family | Minimum bytes | Maximum bytes |
-| --- | ---: | ---: |
-| Noto Sans Thai | 51,173 | 56,846 |
-| Noto Serif Thai | 50,203 | 53,005 |
-| Sarabun | 25,983 | 27,941 |
-
-Initial positioning verification: seven offline baker tests passed, including
-every-key HarfBuzz oracle checks, determinism, original bitmap preservation and
-byte-identical conversion without the option. The original 499-test host suite
-covered paired-font eviction, native binding and resident-allocation fallback.
-Actual Noto Sans Thai 16pt glyph sheets match reference ink exactly for all
-18 supplied rows after applying the specified 12.4/outer-cluster rounding.
-Sarabun 16pt and superscript/subscript smoke output also match reference ink;
-Serif 16pt retains 200 differing ink pixels in two word rows without broken marks.
-Native no-companion output remains pixel-identical across the three saved
-baseline glyph pages. Enlarged inspected output is under `build/thai/shaped-smoke/`.
-
-Prepare paired test assets with:
+Prepare native test assets with:
 
 ```text
-python scripts/prepare_thai_test_assets.py --output build/thai/assets-shaped --thai-shaping --probe build/test/thai_render/ThaiRenderProbe.exe
+python scripts/prepare_thai_test_assets.py --output build/thai/assets --probe build/test/thai_render/ThaiRenderProbe.exe
 ```
 
-The reference uses production analyzer cluster spans, desktop HarfBuzz/FreeType,
-the converter's quantization and the prescribed cluster rounding. Comparisons
-match glyph-sheet source rows across metric-driven repagination, not unrelated
-pages with the same page number. Exact desktop typography is not required.
-
-### Adaptive storage verification
-
-The adaptive cutover passes 638 host tests, including four distinct styles and
-all 3,772 keys, exactly-50-KiB/45-KiB simulated headroom, resident/index/shared-cache
-allocation failures, retained-owner/stage lifetimes, cross-block reads, eviction,
-zero-allocation admission and faulted final/suspended cache commits.
-Both firmware profiles build successfully: `default` (X3/X4 C3) reports 58,976
-bytes static RAM and 6,212,267 bytes app flash; `x4pro` reports 103,320 bytes static
-RAM and 6,255,018 bytes app flash. These link-time totals are not runtime heap
-measurements. The builds retain wolfSSL macro-redefinition warnings.
-
-Font-size reload teardown closes the companion handle only when it is open;
-resident shaping owns no retained HAL file. Both host HAL adapters reject
-`close()` on default or moved-from handles, matching the device precondition.
-The size/backing-transition regression aborts without this guard. A real-font
-smoke completes 45 BaiJamjuree 16/18/20 loads over five font lifetimes through
-resident/paged/resident backing, with tracked C++ allocations returning to zero.
-Production rendering, marked-placement checks and cache roundtrips pass at
-16 and 18 pt. Recheck font-size changes on X4 Pro hardware after installing the
-corrected firmware; host verification does not establish panel/overlay recovery.
-
-Before/after production-probe comparisons cover 1,728 configurations each in
-resident, indexed-cache and fully paged modes: Noto Sans Thai 16, Mali 26 and
-JS Jindara 26; both distributed XHTML fixtures; all four orientations; 480×800
-and 800×480; tracking 0/2; focus off/on; left/justify/Thai Justify; paragraph,
-normal-sheet and rotated-sheet rendering. Each mode preserves all 6,864 pages,
-13,728 PBM/PGM files byte-for-byte, non-timing geometry/source/link reports and
-active content hashes. Marked-placement and cache-roundtrip checks pass.
-
-Host-only probe controls:
-
-- `--fail-shape-allocation on`: fail whole-file allocation, require active cached shaping.
-- `--shape-internal-free 46080`: simulate 45 KiB internal headroom, selecting fully paged access.
-- `--shape-fail-read-phase layout|bw|gray-msb|gray-lsb`: invalidate cached blocks and
-  fail the next real companion read at that phase. All four exercised phases exit
-  nonzero after one failed HAL request, without publishing a successful report.
-- `THAI_SHAPING=0`: native production-render smoke passes with zero companion reads.
-
-For Noto Sans Thai 16, distributed-edges, portrait 480×800, Thai Justify, tracking
-0 and focus off (two pages), companion HAL requests were:
-
-| Backing | Load calls / bytes | BW calls / bytes | Each gray plane calls / bytes |
-| --- | ---: | ---: | ---: |
-| Resident | 2 / 56,878 | 0 / 0 | 0 / 0 |
-| Indexed cache | 256 / 129,596 | 0 / 0 | 0 / 0 |
-| Fully paged | 226 / 114,236 | 0 / 0 | 0 / 0 |
-
-Draw columns exclude prewarm, cache replay and diagnostic renders. These are HAL
-requests, not physical SD transactions or device timings. A repeated cluster adds
-zero reads while its recipe stays resolved; these two pages' clusters all do, so
-layout and prewarm pay the reads and drawing pays none. Simulated heap samples do
-not establish usable device headroom.
-
-The UI-fallback sizes are always fully paged, and a list screen measures and
-draws every visible row on each repaint. Replaying one File Browser repaint (8 pt
-fallback, 380 px label, two-line names) through the production renderer and
-FreeInkUI text layout gives these companion HAL requests per repaint, for
-THCraft-Sarabun / THCraft-NotoSerifThai:
-
-| Page | Blocks only | With resolved recipes |
-| --- | ---: | ---: |
-| 10 short names | 616 / 761 | 0 / 0 |
-| 8 long names with spaces | 6,216 / 7,009 | 0 / 12 |
-| 8 long names without spaces | 39,585 / 44,613 | 35 / 36 |
-
-Physical acceptance remains unverified: no reader was enumerated by `pio device
-list`, and no flashing was performed. On X3 and X4, plus a PSRAM comparison when
-available, use the paired fonts and `test_thai_reading.epub`; verify all orientations,
-AA on/off, mixed styles, font/size changes and cache reopen. Record actual internal
-free/minimum/largest-block bytes at load, pagination, prewarm, drawing and exit;
-run 50 turns and five open/turn/exit cycles without progressive leaks. Controlled
-development-build read faults must show the page error, leave progress unchanged,
-balance AA/strip resources on the real panel, and recover on clean reload. Physical
-refresh recovery and cold/warm device costs cannot be established by host probes.
+The desktop reference still uses HarfBuzz/FreeType for comparison. It is not the
+device implementation. Host checks cover placement geometry, source atomicity,
+whole-cluster fallback, native-ligature priority, allocation-free cursor use,
+snapshot lifetime, allocation/read failures and cache roundtrips. Physical heap,
+refresh timing and visual acceptance cannot be established by host probes.
 
 ## Acceptance evidence
 
@@ -626,8 +476,8 @@ image for firmware updates; the factory image is a separate merged flash image,
 not an interchangeable update file.
 
 Extract the font pack's `fonts` directory to the SD root, restart, and select
-`THCraft-NotoSansThai` as the reader family. Keep matching `.cpfont` and
-`.cpshape` files together. The 8/10/12 pt files provide size-matched UI fallback;
+`THCraft-NotoSansThai` as the reader family. This branch requires only `.cpfont`
+files. The 8/10/12 pt files provide size-matched UI fallback;
 14/16/18 pt files provide additional reader sizes. See
 [SD card fonts](sd-card-fonts.md) for details.
 
@@ -677,4 +527,4 @@ Verification of the regenerated archive:
 
 These are host checks, not physical-device heap or display acceptance. The font
 coverage refresh itself required no firmware changes; install the updated
-`.cpfont` and `.cpshape` pairs together as described in [SD card fonts](sd-card-fonts.md).
+`.cpfont` files as described in [SD card fonts](sd-card-fonts.md).

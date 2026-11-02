@@ -3180,10 +3180,6 @@ bool ChapterHtmlSlimParser::beginParse() {
 
 ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
   if (stopRequested) return ParseStatus::Error;
-  if (renderer.hasThaiShapeError()) {
-    LOG_ERR("EHP", "CPShape failed; failing section build");
-    return ParseStatus::Error;
-  }
   // Layout OOM latched during the previous buffer's callbacks: fail the build
   // instead of emitting pages with silently missing text.
   if (layoutOom || (currentTextBlock && currentTextBlock->hadDroppedWords())) {
@@ -3207,10 +3203,6 @@ ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
   const int done = parseFile_.available() == 0;
 
   const auto parseStatus = XML_ParseBuffer(xmlParser_, static_cast<int>(len), done);
-  if (renderer.hasThaiShapeError()) {
-    LOG_ERR("EHP", "CPShape failed during layout; failing section build");
-    return ParseStatus::Error;
-  }
   if (parseStatus == XML_STATUS_ERROR) {
     if (stopRequested) return ParseStatus::Error;
     if (htmlEnded_) {
@@ -3250,10 +3242,6 @@ bool ChapterHtmlSlimParser::finishParse() {
     scalarCarryBytes = 0;
   }
   endTextRun();
-  if (renderer.hasThaiShapeError()) {
-    LOG_ERR("EHP", "CPShape failed during final text flush; failing section build");
-    return false;
-  }
   // Same check as parseStep(): drops in the final buffer would otherwise slip
   // through because Done is returned before the next step's check runs.
   if (layoutOom || (currentTextBlock && currentTextBlock->hadDroppedWords())) {
@@ -3272,10 +3260,6 @@ bool ChapterHtmlSlimParser::finishParse() {
   if (currentTextBlock) {
     makePages();
     if (stopRequested) return false;
-    if (renderer.hasThaiShapeError()) {
-      LOG_ERR("EHP", "CPShape failed during final layout; failing section build");
-      return false;
-    }
     // Re-check: makePages() latches layoutOom for lines dropped DURING this
     // final layout, which the entry check above cannot have seen.
     if (layoutOom) {
@@ -3287,10 +3271,6 @@ bool ChapterHtmlSlimParser::finishParse() {
       pendingAnchorId.clear();
     }
     setCurrentPageVisibleOffset(visibleTextOffset);
-    if (renderer.hasThaiShapeError()) {
-      LOG_ERR("EHP", "CPShape failed; refusing trailing page");
-      return false;
-    }
     emitCurrentPage();
     completedPageCount++;
     currentPage.reset();

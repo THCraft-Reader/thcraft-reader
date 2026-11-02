@@ -85,7 +85,7 @@ constexpr int kUiIds[] = {SMALL_FONT_ID, UI_10_FONT_ID, UI_12_FONT_ID};
 static_assert(!std::is_copy_constructible_v<SdCardFontSystem::CoverDecodeScope>);
 static_assert(!std::is_move_constructible_v<SdCardFontSystem::CoverDecodeScope>);
 
-class CoverDecodeScopeTest : public testing::TestWithParam<bool> {
+class CoverDecodeScopeTest : public testing::Test {
  protected:
   HalDisplay display{800, 480};
   GfxRenderer renderer{display};
@@ -102,14 +102,11 @@ class CoverDecodeScopeTest : public testing::TestWithParam<bool> {
   void SetUp() override {
     const char* asset = std::getenv("THAI_SHAPE_TEST_FONT");
     if (!asset || !*asset) {
-      GTEST_SKIP() << "Run THAI_SHAPE_TEST_FONT=/path/to/paired.cpfont CoverDecodeScopeTest";
+      GTEST_SKIP() << "Run THAI_SHAPE_TEST_FONT=/path/to/font.cpfont CoverDecodeScopeTest";
     }
     const fs::path font(asset);
-    fs::path shape = font;
-    shape.replace_extension(".cpshape");
-    if (!fs::exists(font) || !fs::exists(shape)) {
-      GTEST_SKIP()
-          << "Optional paired asset absent; run THAI_SHAPE_TEST_FONT=/path/to/paired.cpfont CoverDecodeScopeTest";
+    if (!fs::exists(font)) {
+      GTEST_SKIP() << "Optional font asset absent; run THAI_SHAPE_TEST_FONT=/path/to/font.cpfont CoverDecodeScopeTest";
     }
     root = fs::temp_directory_path() /
            ("cover-font-lifecycle-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -117,16 +114,9 @@ class CoverDecodeScopeTest : public testing::TestWithParam<bool> {
     for (unsigned size : {8, 10, 12, 16}) {
       const auto path = fontPath(size);
       fs::copy_file(font, path);
-      auto companion = path;
-      companion.replace_extension(".cpshape");
-      fs::copy_file(shape, companion);
     }
     probe::sdRoot = root;
-    // Both real admission paths are exercised. This is simulated headroom,
-    // not a host or device heap measurement, and does not replace allocation.
-    probe::internalHeadroomBytes = GetParam() ? 32 * 1024 : 256 * 1024 * 1024;
     probe::resetInternalHeapSamples();
-    probe::resetShapeFaults();
     renderer.begin();
     renderer.insertFont(SMALL_FONT_ID, EpdFontFamily(8, &small));
     renderer.insertFont(UI_10_FONT_ID, EpdFontFamily(10, &ui10));
@@ -180,8 +170,7 @@ class CoverDecodeScopeTest : public testing::TestWithParam<bool> {
   void writeFrame(const char* name, const std::vector<uint8_t>& frame) {
     if (smokeOutput.empty()) return;
     fs::create_directories(smokeOutput);
-    const std::string mode = GetParam() ? "cached-" : "resident-";
-    std::ofstream output(smokeOutput / (mode + name), std::ios::binary);
+    std::ofstream output(smokeOutput / name, std::ios::binary);
     output << "P4\n800 480\n";
     // The display buffer uses white=1, PBM uses black=1.
     for (uint8_t byte : frame) output.put(static_cast<char>(~byte));
@@ -189,7 +178,7 @@ class CoverDecodeScopeTest : public testing::TestWithParam<bool> {
   }
 };
 
-TEST_P(CoverDecodeScopeTest, UnusedScopeDoesNotAllocateReadReloadOrClearCaches) {
+TEST_F(CoverDecodeScopeTest, UnusedScopeDoesNotAllocateReadReloadOrClearCaches) {
   const auto frame = thaiFrame();
   const int id = system.resolveFontId(kFamily, 16);
   const auto* font = renderer.getSdCardFonts().at(id);
@@ -209,7 +198,7 @@ TEST_P(CoverDecodeScopeTest, UnusedScopeDoesNotAllocateReadReloadOrClearCaches) 
   expectSelected();
 }
 
-TEST_P(CoverDecodeScopeTest, ReleasesAllFontsIdempotentlyAndRestoresIdentityAndThaiFallbackPixels) {
+TEST_F(CoverDecodeScopeTest, ReleasesAllFontsIdempotentlyAndRestoresIdentityAndThaiFallbackPixels) {
   const auto before = thaiFrame();
   const int id = system.resolveFontId(kFamily, 16);
   const size_t loadedBytes = probe::allocationLive();
@@ -236,12 +225,11 @@ TEST_P(CoverDecodeScopeTest, ReleasesAllFontsIdempotentlyAndRestoresIdentityAndT
   writeFrame("before.pbm", before);
   writeFrame("after.pbm", after);
   if (!smokeOutput.empty()) {
-    std::printf("cover-font mode=%s id_before=%d id_after=%d live_loaded=%zu live_released=%zu live_restored=%zu\n",
-                GetParam() ? "cached" : "resident", id, system.resolveFontId(kFamily, 16), loadedBytes, releasedBytes,
-                probe::allocationLive());
+    std::printf("cover-font id_before=%d id_after=%d live_loaded=%zu live_released=%zu live_restored=%zu\n", id,
+                system.resolveFontId(kFamily, 16), loadedBytes, releasedBytes, probe::allocationLive());
   }
-  // Repeat with no assertions or rendering between the measurements: cached
-  // companions share storage, and no cache/index may leak across unload cycles.
+  // Repeat with no assertions or rendering between the measurements: font
+  // metrics and caches must not leak across unload cycles.
   size_t first = 0, second = 0;
   {
     SdCardFontSystem::CoverDecodeScope scope(system, renderer);
@@ -256,7 +244,7 @@ TEST_P(CoverDecodeScopeTest, ReleasesAllFontsIdempotentlyAndRestoresIdentityAndT
   EXPECT_EQ(second, first);
 }
 
-TEST_P(CoverDecodeScopeTest, RestoreAllocationFailureKeepsSelectionThenNormalLoadRestoresFallbacks) {
+TEST_F(CoverDecodeScopeTest, RestoreAllocationFailureKeepsSelectionThenNormalLoadRestoresFallbacks) {
   const auto before = thaiFrame();
   const int id = system.resolveFontId(kFamily, 16);
   {
@@ -279,7 +267,7 @@ TEST_P(CoverDecodeScopeTest, RestoreAllocationFailureKeepsSelectionThenNormalLoa
   expectSelected();
 }
 
-TEST_P(CoverDecodeScopeTest, MissingFileDuringRestoreKeepsSelectionAndSize) {
+TEST_F(CoverDecodeScopeTest, MissingFileDuringRestoreKeepsSelectionAndSize) {
   {
     SdCardFontSystem::CoverDecodeScope scope(system, renderer);
     scope.releaseFonts();
@@ -292,7 +280,7 @@ TEST_P(CoverDecodeScopeTest, MissingFileDuringRestoreKeepsSelectionAndSize) {
   EXPECT_EQ(renderer.getSdCardFonts().size(), 4u);
 }
 
-TEST_P(CoverDecodeScopeTest, DirtyRegistryMissingFamilyDoesNotClearTemporarySelection) {
+TEST_F(CoverDecodeScopeTest, DirtyRegistryMissingFamilyDoesNotClearTemporarySelection) {
   {
     SdCardFontSystem::CoverDecodeScope scope(system, renderer);
     scope.releaseFonts();
@@ -307,7 +295,7 @@ TEST_P(CoverDecodeScopeTest, DirtyRegistryMissingFamilyDoesNotClearTemporarySele
   EXPECT_GT(probe::settingsWrites, 0u);
 }
 
-TEST_P(CoverDecodeScopeTest, TemporaryRestoreDoesNotSnapRequestedPointSize) {
+TEST_F(CoverDecodeScopeTest, TemporaryRestoreDoesNotSnapRequestedPointSize) {
   SETTINGS.fontPointSize = 15;
   {
     SdCardFontSystem::CoverDecodeScope scope(system, renderer);
@@ -322,7 +310,7 @@ TEST_P(CoverDecodeScopeTest, TemporaryRestoreDoesNotSnapRequestedPointSize) {
   EXPECT_EQ(probe::settingsWrites, 1u);
 }
 
-TEST_P(CoverDecodeScopeTest, NoSelectedFamilyReleasesStaleFontsWithoutReloadOrSnap) {
+TEST_F(CoverDecodeScopeTest, NoSelectedFamilyReleasesStaleFontsWithoutReloadOrSnap) {
   SETTINGS.sdFontFamilyName[0] = '\0';
   SETTINGS.fontPointSize = 15;
   {
@@ -335,7 +323,7 @@ TEST_P(CoverDecodeScopeTest, NoSelectedFamilyReleasesStaleFontsWithoutReloadOrSn
   EXPECT_EQ(probe::settingsWrites, 0u);
 }
 
-TEST_P(CoverDecodeScopeTest, EarlyReturnRestoresFontsAndUiFallbacks) {
+TEST_F(CoverDecodeScopeTest, EarlyReturnRestoresFontsAndUiFallbacks) {
   const auto before = thaiFrame();
   const auto decodeFailure = [&]() {
     SdCardFontSystem::CoverDecodeScope scope(system, renderer);
@@ -348,39 +336,6 @@ TEST_P(CoverDecodeScopeTest, EarlyReturnRestoresFontsAndUiFallbacks) {
   expectSelected();
 }
 
-TEST_P(CoverDecodeScopeTest, DropResidentThaiShapeSwitchesSdBackedWithSameIdentityAndPixels) {
-  const auto before = thaiFrame();
-  const int id = system.resolveFontId(kFamily, 16);
-  const size_t loadedBytes = probe::allocationLive();
-  EXPECT_EQ(renderer.getSdCardFonts().at(id)->hasResidentThaiShape(), !GetParam());
-  const auto reads = probe::readCalls;
-
-  system.dropResidentThaiShape(renderer);
-
-  ASSERT_EQ(renderer.getSdCardFonts().size(), 4u);
-  EXPECT_EQ(system.resolveFontId(kFamily, 16), id);
-  for (const auto& entry : renderer.getSdCardFonts()) EXPECT_FALSE(entry.second->hasResidentThaiShape());
-  if (GetParam()) {
-    // Nothing resident to shed: the loaded fonts are left alone.
-    EXPECT_EQ(probe::readCalls, reads);
-  } else {
-    EXPECT_LT(probe::allocationLive(), loadedBytes);
-  }
-  EXPECT_EQ(thaiFrame(), before);
-  expectSelected();
-
-  // The policy outlives the switch: a later load must not go resident again.
-  {
-    SdCardFontSystem::CoverDecodeScope scope(system, renderer);
-    scope.releaseFonts();
-  }
-  ASSERT_EQ(renderer.getSdCardFonts().size(), 4u);
-  for (const auto& entry : renderer.getSdCardFonts()) EXPECT_FALSE(entry.second->hasResidentThaiShape());
-  EXPECT_EQ(thaiFrame(), before);
-}
-
-INSTANTIATE_TEST_SUITE_P(CompanionStorage, CoverDecodeScopeTest, testing::Bool(),
-                         [](const testing::TestParamInfo<bool>& info) { return info.param ? "Cached" : "Resident"; });
 }  // namespace
 
 int main(int argc, char** argv) {
