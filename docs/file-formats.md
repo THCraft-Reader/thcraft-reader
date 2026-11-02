@@ -90,7 +90,17 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 72
+### Version 74
+
+Combines the Thai branch's version 72 header and TextBlock arena with upstream
+versions 72 and 73: ruby spacing and overhang follow Chromium's default layout,
+and TrueType vector fonts render and advance .notdef for missing characters.
+Retained page lines reload evicted font variants before glyph-clearance checks.
+Completed and partial section caches from either parent rebuild; book metadata
+and saved progress are kept. The derived partial version is
+`0xFE - (74 - 28)` = 208. Version 0 remains the incomplete-write sentinel.
+
+### Thai branch version 72
 
 Combines the Thai branch's version 65 header and TextBlock arena with upstream
 layout changes through version 71. Older completed and partial section caches
@@ -108,6 +118,23 @@ Clipping layout signatures use calculation version 2 and include `thaiLayoutId`.
 
 The histories below distinguish upstream versions from Thai branch versions
 where the same version numbers described incompatible layouts.
+
+### Upstream version 73
+
+Version 73 keeps the binary layout and rebuilds completed and partial sections.
+TrueType vector fonts now render and advance the .notdef glyph for missing
+characters instead of omitting them. Cached line breaks and word positions change
+for text containing glyph fallbacks. Book metadata and saved progress are kept.
+
+### Upstream version 72
+
+Version 72 makes ruby layout closer to how Chromium browser render text with
+ruby characters by default (`ruby-align: space-around; ruby-overhang: auto;`)
+Ruby annotation can overhang neighboring base text by at most the smaller of
+half the ruby edge-character width and 1/4 of the neighboring word width. When
+the ruby annotation is wider than its base text, spacing is inserted between
+every character in the base text as well as at the start and the end of the
+base text so that it becomes the same length as the ruby annotation.
 
 ### Upstream version 71
 

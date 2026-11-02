@@ -1094,6 +1094,36 @@ TEST_F(ChapterTightSpacingTest, BoxFrameStartsBelowPreviousLineGlyphs) {
   EXPECT_EQ(boxes[0]->yPos, lines[0]->yPos + GLYPH_HEIGHT);
 }
 
+TEST_F(ChapterTightSpacingTest, BoxFrameReloadsEvictedFontOfRetainedLine) {
+  constexpr int variantFont = 42;
+  constexpr int headingTop = 10;
+  constexpr int headingHeight = 40;
+  FontVariantProvider provider;
+  provider.ctx = &renderer;
+  provider.load = [](void* ctx, const int fontId) {
+    auto& renderer = *static_cast<GfxRenderer*>(ctx);
+    renderer.fontMap.emplace(fontId, EpdFontFamily(24, nullptr));
+    renderer.fontLineHeights[fontId] = headingHeight;
+    renderer.fontAscenders[fontId] = 32;
+    return true;
+  };
+  renderer.setFontVariantProvider(provider);
+  BlockStyle style;
+  style.fontId = variantFont;
+  auto heading = std::make_unique<TextBlock>(std::vector<std::string>{"Heading"}, std::vector<int16_t>{0},
+                                             std::vector<EpdFontFamily::Style>{EpdFontFamily::REGULAR},
+                                             std::vector<uint8_t>{0}, std::vector<uint16_t>{0}, style);
+  ASSERT_TRUE(heading->valid());
+  parser.currentPage = std::make_unique<Page>();
+  parser.currentPage->elements.push_back(std::make_unique<PageLine>(std::move(heading), 0, headingTop));
+  parser.currentPageNextY = headingTop + 12;
+  // Cache release removes registrations, but the parser retains the laid-out line.
+  renderer.fontLineHeights[variantFont] = 0;
+  renderer.fontAscenders[variantFont] = 0;
+  open("div", "border: 1px solid black");
+  EXPECT_GE(parser.currentPageNextY, headingTop + headingHeight);
+}
+
 TEST_F(ChapterTightSpacingTest, BorderedTableStartsBelowPreviousLineGlyphs) {
   parser.viewportHeight = 400;
   open("p", nullptr);

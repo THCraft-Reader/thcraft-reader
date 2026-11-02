@@ -96,6 +96,9 @@ class CrossPointWebServer {
   String formatFileSize(size_t bytes) const;
   bool isEpubFile(const String& filename) const;
 
+  // Dispatches every route from one table, defined in the .cpp file.
+  class RouteHandler;
+
   // Request handlers
   void handleRoot() const;
   void handleJszip() const;
@@ -178,7 +181,7 @@ class CrossPointWebServer {
 
   // SD-plugin job queue. External systems (a companion app, a script) enqueue
   // {plugin, action, args}; any open page hosting the plugin (File Manager,
-  // Settings, or the headless /plugins-run page) claims and executes it, then
+  // Plugins, or the headless /plugins-run page) claims and executes it, then
   // posts the result. The firmware only stores small JSON blobs — plugin logic
   // never runs on-device. Fixed pool inside this (heap-allocated, web-session
   // lifetime) object: no allocation per job, oldest finished slot recycled.
@@ -203,6 +206,7 @@ class CrossPointWebServer {
   uint32_t nextPluginJobId = 1;
   uint32_t nextPluginJobClaim = 1;
   PluginJob* allocPluginJob();
+  void handlePluginsPage() const;       // GET /plugins     -> plugin settings page
   void handlePluginRunnerPage() const;  // GET /plugins-run -> headless executor page
   void handlePluginJobSubmit();         // POST /api/plugin-jobs          -> {id}
   void handlePluginJobClaim();          // GET  /api/plugin-jobs/claim    -> next pending job for a plugin

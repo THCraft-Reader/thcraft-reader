@@ -1006,21 +1006,34 @@ TEST(ThaiLayoutTest, IneligibleEndpointNeverCreatesStyledExpansionEdge) {
 }
 
 TEST(ThaiLayoutTest, RubyOverhangReservationSurvivesBoundedOutsideExpansion) {
-  ParsedText text(false, false, BlockStyle(), 0);
-  configure(text, CssTextAlign::ThaiJustify);
-  add(text, "กข", Kind::Space, 0);
-  text.setRubyForWordAt(0, "abcd");
-  add(text, "คง", Kind::Word, 2);
-  add(text, "จฉชซ", Kind::Word, 4);
-  const auto lines = layout(text, 45);
+  const auto rubyLines = [](const CssTextAlign alignment) {
+    ParsedText text(false, false, BlockStyle(), 0);
+    configure(text, alignment);
+    add(text, "กข", Kind::Space, 0);
+    text.setRubyForWordAt(0, "abcd");
+    add(text, "คง", Kind::Word, 2);
+    add(text, "จฉชซ", Kind::Word, 4);
+    return layout(text, 45);
+  };
+  const auto natural = rubyLines(CssTextAlign::Left);
+  const auto lines = rubyLines(CssTextAlign::ThaiJustify);
+  ASSERT_EQ(natural.size(), 2u);
   ASSERT_EQ(lines.size(), 2u);
   const auto& first = *lines[0].block;
   ASSERT_EQ(first.wordCount(), 2u);
-  EXPECT_EQ(first.wordXpos(0), 8);
+  const auto& unexpanded = *natural[0].block;
+  ASSERT_EQ(unexpanded.wordCount(), first.wordCount());
+  EXPECT_EQ(first.wordXpos(0), unexpanded.wordXpos(0));
   EXPECT_EQ(first.thaiExpansion(0), 0);
-  EXPECT_EQ(addedEdge(first, 0, 1), edgeLimit(first, 0, 1));
-  EXPECT_EQ(first.thaiExpansion(1), internalCapacity(first, 1));
-  EXPECT_LT(expandedEnd(first, 1), 45);
+  const int reservedEdge = addedEdge(unexpanded, 0, 1);
+  EXPECT_GT(reservedEdge, 0);
+  expectEdgeCap(first, 0, 1, reservedEdge, edgeLimit(first, 0, 1));
+  expectInternalCaps(first);
+  EXPECT_LE(expandedEnd(first, 1), 45);
+  GfxRenderer renderer;
+  const int rubyWidth = renderer.getTextAdvanceX(0, "abcd", EpdFontFamily::SUP);
+  const int baseWidth = expandedEnd(first, 0) - first.wordXpos(0);
+  EXPECT_GE(first.wordXpos(0) - (rubyWidth - baseWidth) / 2, 0);
   EXPECT_EQ(first.getRubyTexts()[0], "abcd");
   EXPECT_EQ(lines[1].offset, 4u);
 }

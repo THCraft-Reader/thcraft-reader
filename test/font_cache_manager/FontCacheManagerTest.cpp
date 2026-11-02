@@ -161,3 +161,15 @@ TEST(FontCacheManagerTest, FaultedOwnerIsNotScannedOrPrewarmed) {
   EXPECT_EQ(0, failed.prewarmCallCount);
   ASSERT_EQ(1, healthy.prewarmCallCount);
 }
+
+TEST(FontCacheManagerTest, ReleaseCallbackFiresOnReleaseSdFontCaches) {
+  const std::map<int, EpdFontFamily> noBuiltinFonts;
+  const std::map<int, SdCardFont*> noSdFonts;
+  FontCacheManager manager(noBuiltinFonts, noSdFonts, kNoTtfFonts);
+
+  int callbackCallCount = 0;
+  manager.setReleaseCallback([](void* ctx) { (*static_cast<int*>(ctx))++; }, &callbackCallCount);
+
+  manager.releaseSdFontCaches();
+  EXPECT_EQ(1, callbackCallCount);
+}

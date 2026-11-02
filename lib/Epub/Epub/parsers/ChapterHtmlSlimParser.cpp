@@ -376,7 +376,7 @@ int ChapterHtmlSlimParser::lastLineGlyphBottom() const {
   const PageElement& last = *currentPage->elements.back();
   if (last.getTag() != TAG_PageLine) return 0;
   const TextBlock& line = *static_cast<const PageLine&>(last).getBlock();
-  const int lineFontId = line.blockFontId(fontId);
+  const int lineFontId = TextBlock::renderFontId(renderer, line.blockFontId(fontId), fontId);
   return last.yPos + renderer.getLineHeight(lineFontId) + line.extraAscent(renderer, fontId) +
          line.getRubyShift(renderer.getFontAscenderSize(lineFontId));
 }
