@@ -74,6 +74,16 @@ Keep the installed tools, packages, and build caches. The setup commands below
 apply only to a new environment or an identified missing or incompatible
 dependency; they are not steps to repeat before each build.
 
+### Incomplete ESP32-C3 toolchain
+
+The C3 build rejects a missing `rv32imc_zicsr_zifencei/ilp32/libstdc++.a`.
+Without this CPU-specific runtime, GCC can silently link the generic C++ runtime,
+whose atomic instructions cause an **Illegal instruction** panic on X3/X4.
+Restore or reinstall the same pinned `toolchain-riscv32-esp` package; do not
+work around the error by copying the generic archive into the missing directory.
+Rebuild before distributing firmware. Its linker map must reference the
+`rv32imc_zicsr_zifencei/ilp32` C++ runtime.
+
 ### Building on Windows
 
 Set UTF-8 output before running `pio`. The translation generator prints native

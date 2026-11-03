@@ -1,10 +1,13 @@
-"""Work around pioarduino's custom-SDK libc linker configuration gap.
+"""Keep ESP32-C3 runtime and ROM libc linking compatible with the selected SDK.
 
 In pioarduino 55.03.311, custom_sdkconfig rebuilds SDK libraries and configuration
 headers, but the Arduino application still uses the packaged libc LINKFLAGS from
 esp32c3/pioarduino-build.py. Selecting ROM libc therefore also requires updating
-those flags. Remove this hook once pioarduino derives the application's libc
-linker flags from the rebuilt SDK configuration.
+those flags. Remove the ROM-libc adjustment once pioarduino derives the
+application's libc linker flags from the rebuilt SDK configuration.
+
+Missing C3 multilib archives make GCC silently use the generic C++ runtime,
+whose atomic instructions are not supported by the C3's RV32IMC CPU.
 """
 from pathlib import Path
 
@@ -15,6 +18,14 @@ def configure_rom_libc(env):
     # The outer core-generation pass has not installed its new sdkconfig yet.
     if env.get("ARDUINO_LIB_COMPILE_FLAG") == "Build":
         return
+    toolchain = Path(env.PioPlatform().get_package_dir("toolchain-riscv32-esp"))
+    runtime = toolchain / "riscv32-esp-elf/lib/rv32imc_zicsr_zifencei/ilp32/libstdc++.a"
+    if not runtime.is_file():
+        raise RuntimeError(
+            f"Missing ESP32-C3 C++ runtime: {runtime}. "
+            "Reinstall the pinned toolchain-riscv32-esp package; the generic runtime can crash the C3."
+        )
+
     requested = env.GetProjectOption("custom_sdkconfig", "")
     libc_setting = None
     for line in requested.splitlines():

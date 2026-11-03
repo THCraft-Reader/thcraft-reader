@@ -82,6 +82,8 @@ The data is stored in `/.crosspoint/reading_stats.json`. It keeps the last 30
 days, today's time per hour, streaks and the number of finished books. A book
 counts as finished when the end-of-book screen appears. Each title and author
 pair is counted once among the last 32 finished books.
+If the saved finished-book cursor is negative, loading resets that cursor to
+the first slot without clearing the stored totals or history.
 
 Statistics are recorded only while the clock is confirmed for the current
 power cycle. A Wi-Fi time sync confirms it. On boards with a battery-backed

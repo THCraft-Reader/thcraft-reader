@@ -90,7 +90,9 @@ bool ReadingStatsStore::fromJson(JsonVariantConst doc) {
     if (index >= ReadingStatsState::FINISHED_COUNT) break;
     s.finished[index++] = ReadingFinishedBook{entry[0] | 0u, entry[1] | uint16_t{0}};
   }
-  s.finishedNext = static_cast<uint8_t>((doc["finishedNext"] | 0) % ReadingStatsState::FINISHED_COUNT);
+  const int finishedNext = doc["finishedNext"] | 0;
+  if (finishedNext < 0) LOG_ERR("RSTAT", "Invalid finished-book cursor, resetting to zero");
+  s.finishedNext = static_cast<uint8_t>(std::max(0, finishedNext) % ReadingStatsState::FINISHED_COUNT);
   return true;
 }
 
