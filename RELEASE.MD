@@ -29,7 +29,8 @@ This workflow does not upload firmware, push Git changes, or publish a GitHub re
 
 ## Prerequisites
 
-- Run from the repository root on macOS, Linux, or Windows Git Bash.
+- Run from the repository root on macOS, Linux, Windows Git Bash, or
+  [Windows PowerShell](#windows-powershell-session).
 - Have PlatformIO (`pio`) on `PATH`, Python 3.11 or newer, the project's build
   dependencies, and the `freeink-sdk` submodule installed. See the development
   setup in `README.md`. On a fresh checkout, initialize submodules with
@@ -40,6 +41,32 @@ This workflow does not upload firmware, push Git changes, or publish a GitHub re
 - Use the repository's **`fontpacks/` library** as the font source. Do not reuse
   a font ZIP from an older release or substitute the three-family packager output.
   Update the library first when changing the release font selection.
+
+### Windows PowerShell session
+
+With a new toolchain, run the first build for each chip family (ESP32-S3 and
+ESP32-C3) from PowerShell. In Git Bash, `idf_tools.py` stops with `MSys/Mingw is
+not supported` and leaves the toolchain packages empty. The build then fails with
+an error such as `'xtensa-esp32s3-elf-g++' is not recognized`. `pio pkg install`
+does not repair this; run `pio run` from PowerShell instead.
+
+Set up the session from the repository root. These settings last only for the
+current session. This example uses the core installed in `.venv`:
+
+```powershell
+$env:Path = "$PWD\.venv\Scripts;$env:Path"
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
+$env:RELEASE_TARGET = 'x4pro-thai'
+# Only if the toolchain is not in ~/.platformio; use your own path:
+$env:PLATFORMIO_CORE_DIR = 'D:/packages/platformio'
+pio --version
+```
+
+The build block below uses Bash syntax. In PowerShell, save only the Python code
+between `python3 - <<'PY'` and the closing `PY` to a file outside the repository.
+Then run `python3 <file>` from the repository root. Set `RELEASE_TARGET` again
+before you build each target.
 
 ## Font archive contract
 
