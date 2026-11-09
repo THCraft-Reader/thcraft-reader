@@ -135,6 +135,8 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
                          StrId::STR_CAT_READER));
   emit(SettingInfo::Toggle(StrId::STR_CLOCK_IN_READER, &CrossPointSettings::statusBarClock, "statusBarClock",
                            StrId::STR_CAT_READER));
+  emit(SettingInfo::Toggle(StrId::STR_SAVE_VOCABULARY_LOOKUPS, &CrossPointSettings::vocabularyHistoryEnabled,
+                           "vocabularyHistoryEnabled", StrId::STR_CAT_READER));
   // --- Controls ---
 #if FREEINK_CAP_HAPTIC
   emit(SettingInfo::Enum(StrId::STR_VIBRATION, &CrossPointSettings::vibration,
@@ -180,6 +182,8 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
   if (!BoardConfig::hasTouch())
     emit(SettingInfo::Toggle(StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION, &CrossPointSettings::frontButtonFollowOrientation,
                              "frontButtonFollowOrientation", StrId::STR_CAT_CONTROLS));
+  emit(SettingInfo::Toggle(StrId::STR_SIDE_BTN_FOLLOW_ORIENTATION, &CrossPointSettings::sideButtonFollowOrientation,
+                           "sideButtonFollowOrientation", StrId::STR_CAT_CONTROLS));
   emit(SettingInfo::Enum(StrId::STR_LONG_PRESS_BEHAVIOR, &CrossPointSettings::longPressButtonBehavior,
                          {StrId::STR_LONG_PRESS_BEHAVIOR_OFF, StrId::STR_LONG_PRESS_BEHAVIOR_SKIP,
                           StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION},
