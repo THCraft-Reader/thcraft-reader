@@ -468,6 +468,22 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // offering a size nothing renders at. Both fields are persisted in one write.
   void clearSdFontFamily();
 
+  // A reader font choice: SD family name ("" = built-in) and point size.
+  struct ReaderFont {
+    char sdFamilyName[32] = "";
+    uint8_t pointSize = DEFAULT_FONT_POINT_SIZE;
+    bool operator==(const ReaderFont& other) const;
+    bool operator!=(const ReaderFont& other) const { return !(*this == other); }
+  };
+  ReaderFont liveReaderFont() const;
+  void setLiveReaderFont(const ReaderFont& font);
+  // While a book uses its own font, sdFontFamilyName/fontPointSize hold that
+  // font and the default is held aside, so settings.json keeps the default. See BookFont.
+  void holdDefaultReaderFont();
+  void releaseDefaultReaderFont();
+  bool isDefaultReaderFontHeld() const { return defaultReaderFontHeld; }
+  ReaderFont defaultReaderFont() const;
+
   // Resolved status-bar composition. Consumers read the spec; only settings
   // editors read the raw fields.
   //
@@ -515,6 +531,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;
+
+ private:
+  bool defaultReaderFontHeld = false;
+  ReaderFont heldDefaultReaderFont;
 };
 
 // Helper macro to access settings

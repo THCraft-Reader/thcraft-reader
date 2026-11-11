@@ -97,10 +97,12 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   // Font family and size — both use dynamic getter/setters in SettingsList (the
   // option lists depend on the SD font registry), so the generic loop skips them.
   doc["fontFamily"] = STORED_NOTOSANS;
-  doc["fontSize"] = fontPointSize;
+  // The default font, not an open book's own font (see holdDefaultReaderFont).
+  doc["fontSize"] = defaultReaderFontHeld ? heldDefaultReaderFont.pointSize : fontPointSize;
   // SD card font family name — not in SettingsList, save manually
-  if (sdFontFamilyName[0] != '\0') {
-    doc["sdFontFamilyName"] = sdFontFamilyName;
+  const char* defaultSdFamily = defaultReaderFontHeld ? heldDefaultReaderFont.sdFamilyName : sdFontFamilyName;
+  if (defaultSdFamily[0] != '\0') {
+    doc["sdFontFamilyName"] = defaultSdFamily;
   }
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, save manually
   if (dictionaryName[0] != '\0') {
@@ -409,6 +411,40 @@ void CrossPointSettings::clearSdFontFamily() {
   fontPointSize =
       snapToNearestPointSize(BUILTIN_READER_POINT_SIZES, std::size(BUILTIN_READER_POINT_SIZES), fontPointSize);
   saveToFile();
+}
+
+static_assert(sizeof(CrossPointSettings::ReaderFont::sdFamilyName) == sizeof(CrossPointSettings::sdFontFamilyName));
+
+bool CrossPointSettings::ReaderFont::operator==(const ReaderFont& other) const {
+  return pointSize == other.pointSize && strcmp(sdFamilyName, other.sdFamilyName) == 0;
+}
+
+CrossPointSettings::ReaderFont CrossPointSettings::liveReaderFont() const {
+  ReaderFont font;
+  copyToField(font.sdFamilyName, sdFontFamilyName, sizeof(font.sdFamilyName));
+  font.pointSize = fontPointSize;
+  return font;
+}
+
+void CrossPointSettings::setLiveReaderFont(const ReaderFont& font) {
+  copyToField(sdFontFamilyName, font.sdFamilyName, sizeof(sdFontFamilyName));
+  fontPointSize = font.pointSize;
+}
+
+void CrossPointSettings::holdDefaultReaderFont() {
+  if (defaultReaderFontHeld) return;
+  heldDefaultReaderFont = liveReaderFont();
+  defaultReaderFontHeld = true;
+}
+
+void CrossPointSettings::releaseDefaultReaderFont() {
+  if (!defaultReaderFontHeld) return;
+  setLiveReaderFont(heldDefaultReaderFont);
+  defaultReaderFontHeld = false;
+}
+
+CrossPointSettings::ReaderFont CrossPointSettings::defaultReaderFont() const {
+  return defaultReaderFontHeld ? heldDefaultReaderFont : liveReaderFont();
 }
 
 int CrossPointSettings::getReaderFontId() const {

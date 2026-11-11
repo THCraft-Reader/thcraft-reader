@@ -111,6 +111,8 @@ class ActivityManager {
   bool preventAutoSleep() const;
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
+  // True while screens are being torn down for the sleep screen; the chip resets on wake.
+  bool isEnteringSleep() const { return pendingAction == PendingAction::ReplaceForSleep; }
   // Bluetooth page turner (lib/BlePageTurner): the book in front, whether it has painted a page, and
   // a page or chapter turn from a remote. False when no book in front took the turn.
   bool isForegroundReader() const;

@@ -37,6 +37,8 @@ class SdCardFontSystem {
   /// Call before entering the reader or after settings change.
   /// Also re-discovers if the registry has been marked dirty (e.g. by web upload).
   void ensureLoaded(GfxRenderer& renderer);
+  /// Like ensureLoaded(), but a failed load or a size snap leaves the saved selection unchanged.
+  void ensureLoadedKeepingSelection(GfxRenderer& renderer) { ensureLoadedInternal(renderer, true); }
 
   /// On-demand cover and page-image decoding may temporarily need the memory owned by SD fonts.
   /// The caller must hold RenderLock throughout the scope and must not render
@@ -83,8 +85,9 @@ class SdCardFontSystem {
   }
 
  private:
-  // Temporary cover restoration must not clear or snap the user's selection,
-  // including when SD reads/allocations fail. Normal loads retain their policy.
+  // Temporary cover restoration and the default-font restore on reader exit must
+  // not clear or snap the user's selection, including when SD reads/allocations
+  // fail. Normal loads retain their policy.
   void ensureLoadedInternal(GfxRenderer& renderer, bool preserveSelection);
   // Load the active SD family at the built-in UI point sizes and register each
   // as a size-matched script fallback for the corresponding UI font, so book

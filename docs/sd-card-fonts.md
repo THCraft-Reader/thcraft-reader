@@ -236,7 +236,8 @@ What this means in practice:
   (see [Installing Fonts](#installing-fonts) and the interval presets for
   `.cpfont` under [Converting Custom Fonts](#converting-custom-fonts)). That
   single selection drives both book content *and* size-matched fallback in
-  the UI.
+  the UI. A book with its own font (chosen in the reader's text settings)
+  uses that font instead, including UI fallback, while it is open.
 - Pure-Latin UI strings keep the crisp built-in font; only strings that
   actually contain a character the built-in font lacks are routed to the SD
   font.

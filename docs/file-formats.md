@@ -733,6 +733,23 @@ if (parsedSize != fileSize) {
 }
 ```
 
+## `font.json`
+
+A book's own reader font. Read and written by `src/BookFont.cpp`. Written when
+the font or size is changed inside the book to something other than the
+default; removed when the book follows the default again. Books without this
+file use the default font from `settings.json`.
+
+```json
+{ "family": "NotoSansThai", "size": 16 }
+```
+
+- `family`: SD-card font family name; an empty string means the built-in font.
+  A family that is no longer installed is ignored and the file is kept.
+- `size`: reader point size; snapped to the family's installed sizes when the
+  book opens, and the snapped size is written back the next time the book's
+  text settings are saved.
+
 ## CLX1 — library index (`.crosspoint/library.idx`)
 
 Written by `lib/LibraryIndex/LibraryBuilder.cpp`, read by `LibraryIndexFile`. One

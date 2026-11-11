@@ -24,6 +24,7 @@ class ReaderActivity : public Activity {
   ReaderSession readerSession;
   std::atomic<bool> pageRendered{false};
   bool bookRemembered = false;
+  bool bookFontOpen = false;  // this reader opened the BookFont scope
   bool finishedNoted = false;
   // Position of the last rendered page, saved to recents on exit and sleep:
   // the reader may already have released its book by then.
@@ -97,11 +98,7 @@ class ReaderActivity : public Activity {
   void flushReaderSession();
 
  public:
-#if THAI_ENGINE_STATS
   ~ReaderActivity() override;
-#else
-  ~ReaderActivity() override = default;
-#endif
 
   static std::unique_ptr<ReaderActivity> create(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                 std::string path, bool allowFastInitialRefresh);

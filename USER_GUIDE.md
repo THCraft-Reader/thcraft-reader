@@ -281,6 +281,8 @@ Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **L
 
 - **Reader Font Size**: Choose a point size. Built-in and direct TTF/OTF/TTC fonts offer 12, 14, 16, and 18 pt. A `.cpfont` family offers the sizes installed for that family.
 
+  These two settings set the default font for all books. While reading, open **Text Settings** from the Reader Menu, or the **Text** panel in the toolbar, and choose a font or size. That choice applies only to this book. Choose **Use Default Font** to make the book follow the default again. Other text settings, such as line spacing, still apply to all books. If the book's font is removed from the SD card, the book uses the default font. **Delete Book Cache** and **Clear Reading Cache** remove a book's font choice.
+
 - **Reader Line Spacing**: Space added between lines, as a percentage of font size: 0%, +10%, +20% (default), +30%, +45%, +60%, or +75%.
 
 - **Reader Screen Margin**: Controls the screen margins in Reading Mode between 5 and 40 pixels in 5-pixel increments.
@@ -364,7 +366,7 @@ Side buttons, and Taps and gestures where supported by the device. See the
 
 - **OPDS Servers**: Manage one or more OPDS [(Open Publication Distribution System)](https://en.wikipedia.org/wiki/Open_Publication_Distribution_System) libraries for browsing and downloading books. See [OPDS Servers (Multiple Libraries)](#365-opds-servers-multiple-libraries) below.
 
-- **Clear Reading Cache** (**Settings → Reader**): Clear the internal SD card cache.
+- **Clear Reading Cache** (**Settings → Reader**): Clear the internal SD card cache. This also resets fonts chosen for individual books.
 
 - **Use book metadata**: Read the title and author stored inside each book when the Library index is rebuilt. When disabled or unavailable, the Library uses the filename.
 
@@ -732,7 +734,7 @@ Available options include:
 - **Show page as QR** – Display a QR code encoding the current reading position.
 - **Go Home** – Close the book and return to the Home screen.
 - **Sync Progress** – Push or pull reading progress with a KOReader sync server (see [KOReader Sync Quick Setup](#367-koreader-sync-quick-setup)). This entry appears when sync credentials are saved or an enabled plugin subscribes to device events. Without sync credentials, it connects to Wi-Fi to send queued plugin events.
-- **Delete Book Cache** – Clear the cached layout data for the current book, forcing a re-index on next open.
+- **Delete Book Cache** – Clear the cached layout data for the current book, forcing a re-index on next open. This also resets the book's own font.
 
 Press **Back** at any time to close the menu and return to your current page.
 

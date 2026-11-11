@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cstdio>
 
+#include "BookFont.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
@@ -80,13 +81,20 @@ void ReaderActivity::logThaiStatsPhase(const char* phase) {
   thaiWindowStartedMs = now;
 }
 
+#endif
+
 ReaderActivity::~ReaderActivity() {
-  // Derived members (including the section/parser) have already been destroyed.
-  // The app intentionally retains globally loaded fonts between reader sessions.
+  // Derived members (the book, section and parser) are already freed and
+  // ActivityManager holds the RenderLock. Reload the default font if the book
+  // had its own; a failed reload keeps the saved default. Sleep resets the chip.
+  if (bookFontOpen && BookFont::close() && !activityManager.isEnteringSleep()) {
+    sdFontSystem.ensureLoadedKeepingSelection(renderer);
+  }
+#if THAI_ENGINE_STATS
   logThaiStatsPhase("reader_exit");
   if (thaiStatsActive) LOG_INF("THAI", "phase=reader_exit scope=after_derived_teardown_global_fonts_retained");
-}
 #endif
+}
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                                std::string bookPath, const bool allowFastInitialRefresh)
@@ -158,6 +166,10 @@ void ReaderActivity::onEnter() {
 
   {
     RenderLock lock(*this);
+    if (!FsHelpers::hasXtcExtension(bookPath)) {
+      BookFont::open(bookPath, sdFontSystem.registry());
+      bookFontOpen = true;
+    }
     if (bookcovers::prepareForReader(renderer, bookPath)) {
       // Preparation already restored the selection; do not retry a failed
       // temporary restore through the normal loader's clearing policy.

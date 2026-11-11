@@ -24,6 +24,7 @@
 #include <limits>
 
 #include "../../util/BookmarkFile.h"
+#include "BookFont.h"
 #include "BookmarkEntry.h"
 #include "ChapterBuildGate.h"
 #include "ClipSelectionActivity.h"
@@ -2692,6 +2693,7 @@ void EpubReaderActivity::showTextRowPopup(const int row) {
       }
       overlayPopup.show(StrId::STR_FONT_SIZE, labels, curIdx, [this, sizes](int idx) {
         if (idx < 0 || idx >= static_cast<int>(sizes.size())) return;
+        BookFont::makeCustom();
         SETTINGS.fontPointSize = sizes[idx];
         applyTextSettingLive();
       });
@@ -3210,6 +3212,7 @@ void EpubReaderActivity::applyReaderTextSettings() {
     resetSectionForRelayout();
   }
   SETTINGS.saveToFile();
+  BookFont::save();  // font family and size belong to this book
   RenderLock lock;
   // (Re)load or unload the selected SD-card font for the current family/size.
   // The reader otherwise only loads SD fonts on book open, so without this an
