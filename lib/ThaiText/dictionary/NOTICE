@@ -1,0 +1,21 @@
+Thai dictionary source: PyThaiNLP words_th.txt
+https://github.com/PyThaiNLP/pythainlp/blob/4be114097e0cb1d9cfe044691f2aa79bc294925e/pythainlp/corpus/words_th.txt
+Pinned revision: 4be114097e0cb1d9cfe044691f2aa79bc294925e
+Source SHA-256: 35f65d43ea83b5b981134d5edc3b9afcb64b4ba96146900fc4d312f2940c3265
+
+PyThaiNLP releases this word list under CC0-1.0. The pinned upstream
+corpus license declaration is preserved verbatim in UPSTREAM-LICENSE.
+License: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+extra_words.txt is the reviewed local lexical supplement, also dedicated
+under CC0-1.0. ประเทศไทย is included because it is absent from the pinned
+list; matching code contains no lexical special cases.
+
+Regenerate offline from the repository root:
+python scripts/generate_thai_dictionary.py --input lib/ThaiText/dictionary/words_th.txt --extra lib/ThaiText/dictionary/extra_words.txt --output lib/ThaiText/generated/ThaiDictionaryData.h --report lib/ThaiText/dictionary/report.json
+
+The generator keeps unique all-Thai U+0E01..U+0E5B entries, without stripping
+suffix marks or normalizing text. The data CRC covers compressed bytes then
+little-endian uint32 block offsets (including the terminal offset). The JSON
+report records exact payload/index flash bytes; compiler/linker placement and
+scalar constants are not a claim about total firmware growth.

@@ -53,6 +53,33 @@ using CP = std::vector<uint32_t>;
 
 }  // namespace
 
+TEST(ThaiBidi, PreservesThaiLettersAndMarksInAnRtlParagraph) {
+  for (const char* text : {"ภาษาไทย", "ประเทศไทย", "กี่น้ำเพื่อญูฐุนํ้า", "๑๒๓๔๕"}) {
+    EXPECT_FALSE(BidiUtils::startsWithRtl(text));
+    EXPECT_EQ(BidiUtils::detectParagraphLevel(text, 1), 0);
+    std::string visual;
+    ASSERT_TRUE(BidiUtils::applyBidiVisual(text, visual, 1));
+    EXPECT_EQ(visual, text);
+  }
+}
+
+TEST(ThaiBidi, KeepsThaiRunIntactBetweenHebrewWords) {
+  std::string visual;
+  ASSERT_TRUE(BidiUtils::applyBidiVisual("אב กี่น้ำเพื่อ גד", visual, 1));
+  EXPECT_EQ(visual, "דג กี่น้ำเพื่อ בא");
+  const std::vector<std::string> words{"אב", "กี่น้ำเพื่อ", "גד"};
+  std::vector<uint16_t> order;
+  ASSERT_TRUE(BidiUtils::computeVisualWordOrder(words, true, order));
+  EXPECT_EQ(order, (std::vector<uint16_t>{2, 1, 0}));
+}
+
+TEST(ThaiBidi, ThaiMarksNeverEnterTheRtlOverlayRenderer) {
+  for (const uint32_t mark : {0x0E31u, 0x0E34u, 0x0E38u, 0x0E48u, 0x0E4Du})
+    EXPECT_FALSE(BidiUtils::isTransparentMark(mark));
+  EXPECT_TRUE(BidiUtils::isTransparentMark(0x05B0));
+  EXPECT_TRUE(BidiUtils::isTransparentMark(0x064E));
+}
+
 /* ── Core Arabic contextual forms ────────────────────────────────────── */
 
 // A single letter renders in its isolated presentation form.

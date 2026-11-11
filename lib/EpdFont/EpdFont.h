@@ -2,15 +2,17 @@
 #include "EpdFontData.h"
 
 class EpdFont {
-  void getTextBounds(const char* string, int startX, int startY, int* minX, int* minY, int* maxX, int* maxY) const;
+  void getTextBounds(const char* string, int startX, int startY, int* minX, int* minY, int* maxX, int* maxY,
+                     bool nativeLigatures) const;
 
  public:
   const EpdFontData* data;
   explicit EpdFont(const EpdFontData* data) : data(data) {}
   ~EpdFont() = default;
-  void getTextDimensions(const char* string, int* w, int* h) const;
+  void getTextDimensions(const char* string, int* w, int* h, bool nativeLigatures = true) const;
 
   const EpdGlyph* getGlyph(uint32_t cp) const;
+  const ThaiShapeView* getThaiShape() const { return data ? data->thaiShape : nullptr; }
 
   /// Like getGlyph(), but supplies metrics for missing solid block symbols.
   /// If the returned pointer is &solidFallback, draw a filled rectangle;

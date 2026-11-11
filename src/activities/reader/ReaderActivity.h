@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ThaiStats.h>
+
 #include <atomic>
 #include <memory>
 #include <string>
@@ -22,8 +24,28 @@ class ReaderActivity : public Activity {
   ReaderSession readerSession;
   std::atomic<bool> pageRendered{false};
   bool bookRemembered = false;
+  bool bookFontOpen = false;  // this reader opened the BookFont scope
+  bool finishedNoted = false;
+  // Position of the last rendered page, saved to recents on exit and sleep:
+  // the reader may already have released its book by then.
+  int lastProgressBp = -1;
+  uint16_t lastChapter = 0;
+  uint16_t lastChapterCount = 0;
   void markPageRendered() { pageRendered.store(true, std::memory_order_release); }
   void rememberBookOnceRendered();
+
+#if THAI_ENGINE_STATS
+  thai::StatsSnapshot thaiStatsPrevious{};
+  uint64_t thaiSdCallsPrevious = 0;
+  uint64_t thaiSdBytesPrevious = 0;
+  uint32_t thaiOpenStartedMs = 0;
+  uint32_t thaiWindowStartedMs = 0;
+  uint32_t thaiMinimumInternal = UINT32_MAX;
+  uint32_t thaiSample = 0;
+  bool thaiStatsActive = false;
+  void beginThaiStatsWindow();
+  void logThaiStatsPhase(const char* phase);
+#endif
 
   explicit ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                           std::string bookPath, bool allowFastInitialRefresh);
@@ -46,6 +68,8 @@ class ReaderActivity : public Activity {
   // EpubReaderActivity overrides getProgressBasisPoints() and falls back to it.
   int getProgressPercent() const { return getScreenshotInfo().progressPercent; }
   virtual int getProgressBasisPoints() const { return getProgressPercent() * 100; }
+  // 1-based chapter of the current page and the chapter count; false when unknown.
+  virtual bool currentChapter(uint16_t& /*index*/, uint16_t& /*count*/) const { return false; }
 
   virtual bool handleFormatInput() { return false; }
   virtual bool pageTurn(bool isForward) = 0;
@@ -69,10 +93,12 @@ class ReaderActivity : public Activity {
   void clearEndOfBookOptionsIfNeeded();
   void disableFastInitialRefresh();
   void notePageTurn(bool forward, bool succeeded);
+  void noteRenderComplete();
+  void persistRecentProgress();
   void flushReaderSession();
 
  public:
-  ~ReaderActivity() override = default;
+  ~ReaderActivity() override;
 
   static std::unique_ptr<ReaderActivity> create(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                 std::string path, bool allowFastInitialRefresh);

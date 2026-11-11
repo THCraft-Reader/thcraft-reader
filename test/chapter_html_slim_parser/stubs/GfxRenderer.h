@@ -2,6 +2,7 @@
 
 #include <EpdFontFamily.h>
 #include <GfxRenderer/FontVariantProvider.h>
+#include <ThaiCluster.h>
 #include <Utf8.h>
 
 #include <deque>
@@ -10,6 +11,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <vector>
 
 namespace BidiUtils {
 enum class BidiBaseDir : signed char { AUTO = -1, LTR = 0, RTL = 1 };
@@ -60,9 +62,11 @@ class GfxRenderer {
   };
   mutable std::vector<TextDraw> textDraws;
   void drawText(int, int x, int, const char* text, bool, EpdFontFamily::Style style,
-                BidiUtils::BidiBaseDir direction = BidiUtils::BidiBaseDir::AUTO, int8_t = 0) const {
+                BidiUtils::BidiBaseDir direction = BidiUtils::BidiBaseDir::AUTO, int8_t = 0, uint16_t = 0) const {
     textDraws.push_back({x, text, style, direction});
   }
+  void drawTextRotated90CW(int, int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR,
+                           uint16_t = 0) const {}
   int getTextWidth(int font, const char* text, EpdFontFamily::Style style,
                    BidiUtils::BidiBaseDir = BidiUtils::BidiBaseDir::AUTO) const {
     return getTextAdvanceX(font, text, style);
@@ -94,14 +98,29 @@ class GfxRenderer {
     const auto found = fontAscenders.find(fontId);
     return found == fontAscenders.end() ? 12 : found->second;
   }
-  int getSpaceWidth(int, EpdFontFamily::Style) const { return 4; }
+  inline static int naturalSpace = 4;
+  int getSpaceWidth(int, EpdFontFamily::Style) const { return naturalSpace; }
+  // Configurable uncompressed metrics let layout fixtures exercise zero/small caps.
+  inline static int thaiAdvanceY = 48;
+  int getThaiJustificationGapLimit(int, const char*, EpdFontFamily::Style style) const {
+    return (style & (EpdFontFamily::SUP | EpdFontFamily::SUB) ? thaiAdvanceY / 2 : thaiAdvanceY) / 24;
+  }
+  size_t countThaiJustificationGaps(int, const char* text, EpdFontFamily::Style,
+                                    BidiUtils::BidiBaseDir = BidiUtils::BidiBaseDir::AUTO) const {
+    thai::JustificationBoundaryCursor cursor(text ? std::string_view(text) : std::string_view{});
+    size_t count = 0;
+    size_t offset;
+    while (cursor.next(offset)) ++count;
+    return count;
+  }
   bool sdFont = false;
   mutable size_t coldMeasurements = 0;
   mutable std::set<std::tuple<int, uint8_t, uint32_t>> preparedAdvances;
   int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style, int8_t tracking = 0,
-                      BidiUtils::BidiBaseDir = BidiUtils::BidiBaseDir::AUTO,
-                      TextMeasureMode = TextMeasureMode::Layout) const {
-    int width = 0;
+                      BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO,
+                      TextMeasureMode = TextMeasureMode::Layout, uint16_t thaiExtraPixels = 0) const {
+    if (!text) return 0;
+    int width = thaiExtraPixels && countThaiJustificationGaps(fontId, text, style, baseDir) ? thaiExtraPixels : 0;
     uint32_t previous = 0;
     while (const uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text))) {
       if (utf8IsCombiningMark(cp)) continue;
@@ -115,7 +134,7 @@ class GfxRenderer {
   int getKerning(int, uint32_t left, uint32_t right, EpdFontFamily::Style, int8_t tracking = 0) const {
     return trackingBetween(left, right, tracking);
   }
-  int getSpaceAdvance(int, uint32_t, uint32_t, EpdFontFamily::Style) const { return 4; }
+  int getSpaceAdvance(int, uint32_t, uint32_t, EpdFontFamily::Style) const { return naturalSpace; }
   bool isSdCardFont(int) const { return sdFont; }
   void ensureSdCardFontReady(int fontId, const char* text, uint8_t mask, bool includeSmallCaps = false) const {
     const auto* cursor = reinterpret_cast<const uint8_t*>(text);
@@ -128,8 +147,9 @@ class GfxRenderer {
       }
     }
   }
-  void ensureSdCardFontReady(int fontId, const char* const* segments, const size_t* lengths, size_t count,
-                             bool includeSpace, bool includeHyphen, uint8_t mask, bool includeSmallCaps = false) const {
+  bool ensureSdCardFontReady(int fontId, const char* const* segments, const size_t* lengths, size_t count,
+                             bool includeSpace, bool includeHyphen, uint8_t mask = 0x0F, bool = false,
+                             bool includeSmallCaps = false) const {
     ++fontPreparations;
     if (onFontPrepare) onFontPrepare();
     for (size_t i = 0; i < count; ++i) {
@@ -141,6 +161,7 @@ class GfxRenderer {
     }
     if (includeSpace) ensureSdCardFontReady(fontId, " ", mask);
     if (includeHyphen) ensureSdCardFontReady(fontId, "-", mask);
+    return true;
   }
 
  private:

@@ -33,6 +33,7 @@ class EpdFontFamily {
   float getSizeInPixels() const { return sizeInPixels; }
   void getTextDimensions(const char* string, int* w, int* h, Style style = REGULAR) const;
   const EpdFontData* getData(Style style = REGULAR) const;
+  const ThaiShapeView* getThaiShape(Style style = REGULAR) const;
   const EpdGlyph* getGlyph(uint32_t cp, Style style = REGULAR) const;
   const EpdGlyph* getGlyphMetrics(uint32_t cp, EpdGlyph& solidFallback, Style style = REGULAR) const {
     return getFont(style)->getGlyphMetrics(cp, solidFallback);

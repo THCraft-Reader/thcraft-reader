@@ -1,6 +1,9 @@
 #pragma once
 
 #include <HalStorage.h>
+#include <ThaiConfig.h>
+#include <ThaiDictionary.h>
+#include <ThaiLineBreaker.h>
 #include <expat.h>
 
 #include <array>
@@ -25,6 +28,9 @@ class Epub;
 #define MAX_WORD_SIZE 200
 
 class ChapterHtmlSlimParser {
+#ifdef CROSSPOINT_PARSER_TEST
+ public:
+#endif
   std::shared_ptr<Epub> epub;
   const std::string& filepath;
   GfxRenderer& renderer;
@@ -40,6 +46,50 @@ class ChapterHtmlSlimParser {
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
+  struct ThaiRunState {
+    struct Record {
+      // Packed so the size slot keeps the record at 8 bytes.
+      uint16_t byteOffset : 12;
+      uint16_t sizeSlot : 4;
+      uint8_t style;
+      uint8_t linkId;
+      uint32_t visibleOffset;
+    };
+    char pending[768];
+    Record records[256];
+    thai::ThaiDictionary dictionary;
+    uint16_t bytes = 0;
+    uint16_t count = 0;
+#if defined(CROSSPOINT_PARSER_TEST) || THAI_ENGINE_STATS
+    uint16_t highWater = 0;
+#endif
+    thai::BreakKind before = thai::BreakKind::Space;
+    bool first = true;
+    bool inBlock = false;
+    bool active = false;
+    bool draining = false;
+    bool malformed = false;
+  };
+  static_assert(sizeof(ThaiRunState) <= 3072, "Thai streaming analysis must remain bounded");
+  static_assert(sizeof(ThaiRunState::pending) <= (1u << 12), "Record::byteOffset must address every pending byte");
+  static_assert(TextBlock::MAX_WORD_FONTS + 1 <= (1u << 4), "Record::sizeSlot must hold every size slot");
+  std::unique_ptr<ThaiRunState> thaiRun;
+  bool thaiUnavailable = false;
+  bool thaiAllocationAttempted = false;
+  bool genericBoundarySet = false;
+  thai::BreakKind genericBoundary = thai::BreakKind::Space;
+  char genericPrefix[8] = {};
+  uint8_t genericPrefixBytes = 0;
+  bool genericUrl = false;
+  uint32_t genericLastScalar = 0;
+  char scalarCarry[4] = {};
+  uint8_t scalarCarryBytes = 0;
+  uint32_t scalarCarryVisibleOffset = 0;
+#ifdef CROSSPOINT_PARSER_TEST
+  bool failThaiAllocation = false;
+  bool failTextBlockAllocation = false;
+  const thai::DictionaryView* thaiDictionaryOverride = nullptr;
+#endif
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   // Ruby text state
   bool inRuby = false;
@@ -223,7 +273,13 @@ class ChapterHtmlSlimParser {
   uint8_t currentFootnoteLinkId = 0;
   FootnoteEntry currentFootnote = {};
   int currentFootnoteLinkTextLen = 0;
-  std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
+  struct PendingFootnote {
+    int wordIndex;
+    FootnoteEntry entry;
+    uint32_t visibleEnd;
+    uint8_t linkId;
+  };
+  std::vector<PendingFootnote> pendingFootnotes;
   int wordsExtractedInBlock = 0;
   // Latched when a ParsedText could not be created (OOM). Together with
   // ParsedText::hadDroppedWords() this turns layout OOM into ParseStatus::Error
@@ -243,6 +299,10 @@ class ChapterHtmlSlimParser {
 
   void updateEffectiveInlineStyle();
   void startNewTextBlock(const BlockStyle& blockStyle, bool paragraphEnd = true);
+  // Contiguous heap required before a ParsedText is constructed.
+  static constexpr size_t TEXT_BLOCK_MIN_CONTIGUOUS = 4 * 1024;
+  // Null on OOM; never aborts.
+  std::unique_ptr<ParsedText> makeTextBlock(const BlockStyle& blockStyle);
   void flushPendingAnchor();
   void completeCurrentPage();
   void emitCurrentPage();
@@ -264,6 +324,21 @@ class ChapterHtmlSlimParser {
   void applyPendingPageBreak();
   void pushBlockStyle(const BlockStyle& accumulated);
   void flushPartWordBuffer();
+  EpdFontFamily::Style currentTextStyle() const;
+  uint8_t currentTextLink();
+  uint8_t currentSizeSlot();
+  // No text yet: nothing in the block, the word buffer, or the pending Thai run.
+  bool blockHasNoText() const {
+    return currentTextBlock && currentTextBlock->isEmpty() && partWordBufferIndex == 0 && !(thaiRun && thaiRun->bytes);
+  }
+  bool appendThaiCodepoint(std::string_view bytes, uint32_t cp, EpdFontFamily::Style style, uint8_t linkId,
+                           uint8_t sizeSlot, uint32_t visibleOffset);
+  void flushThaiPending(bool endOfRun);
+  void endTextRun(bool thaiOnly = false);
+  void appendLegacyBytes(std::string_view bytes, uint32_t visibleOffset);
+  void consumeCodepoint(std::string_view bytes, uint32_t cp, uint32_t visibleOffset);
+  void resolveThaiFootnotes(uint16_t firstRecord, uint16_t endRecord, int tokenEnd);
+  void softFlushTextBlock();
   void breakTextLine(const BlockStyle& style);
   void fallbackTableRowToStacked();
   void closeTableCell();
@@ -324,6 +399,7 @@ class ChapterHtmlSlimParser {
     characterSpacing = character;
     wordSpacingPercent = wordPercent;
   }
+  bool thaiAnalysisUnavailable() const { return thaiUnavailable; }
   void setParagraphIndentSpaces(const uint8_t spaces) { paragraphIndentSpaces = spaces; }
 
   // One-shot parse: builds every page before returning (begin + step* + finish).

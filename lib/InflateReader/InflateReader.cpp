@@ -1,5 +1,6 @@
 #include "InflateReader.h"
 
+#include <bit>
 #include <cstring>
 #include <type_traits>
 
@@ -37,7 +38,7 @@ bool InflateReader::initWithSegments(uint8_t* const (&segments)[RING_SEGMENTS]) 
     if (!segment) return false;
   }
   for (uint8_t* segment : segments) memset(segment, 0, RING_SEGMENT_BYTES);
-  uzlib_uncompress_init_segmented(&decomp, segments, RING_SEGMENTS, __builtin_ctz(RING_SEGMENT_BYTES));
+  uzlib_uncompress_init_segmented(&decomp, segments, RING_SEGMENTS, std::countr_zero(RING_SEGMENT_BYTES));
   streamingMode = true;
   return true;
 }

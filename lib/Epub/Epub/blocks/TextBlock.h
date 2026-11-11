@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,6 +26,7 @@
 //   uint16_t textOff[wordCount]        byte offset of word i's text in text[]
 //   int16_t  xpos[wordCount]
 //   uint16_t focusSplitX[wordCount]   present only when focusPresent
+//   uint16_t thaiExtraPixels[wordCount] present only when thaiExpansionPresent
 //   uint8_t  styles[wordCount]
 //   uint8_t  focusBoundary[wordCount]  present only when focusPresent
 //   char     text[textBytes]           all words back to back, NUL-terminated
@@ -55,6 +57,20 @@ class TextBlock final : public Block {
     int16_t width;
     int16_t topLift;
   };
+#ifdef THAI_RENDER_PROBE
+  struct ThaiDistributionProbe {
+    struct Gap {
+      uint16_t left, right;
+      int natural, extra, limit;
+      bool space;
+      int leftAdvance;
+    };
+    bool handled = false;
+    int naturalWidth = 0, availableWidth = 0;
+    uint32_t thaiCapacity = 0, spaceCapacity = 0, otherCapacity = 0, allocated = 0;
+    std::vector<Gap> gaps;
+  };
+#endif
 
  private:
   BlockStyle blockStyle;
@@ -62,6 +78,7 @@ class TextBlock final : public Block {
   uint16_t paragraphStartWord = UINT16_MAX;  // Visual index of the paragraph's first logical word.
   uint16_t textBytes = 0;                    // total size of the text region, including NULs
   bool focusPresent = false;
+  bool thaiExpansionPresent = false;
   bool isValid = true;
   // The ONLY allocation: makeUniqueNoThrow, so OOM yields an invalid block
   // instead of abort() (bare new is not nothrow with -fno-exceptions).
@@ -72,6 +89,7 @@ class TextBlock final : public Block {
   const uint16_t* textOffArr = nullptr;
   const int16_t* xposArr = nullptr;
   const uint16_t* focusSplitXArr = nullptr;  // null when !focusPresent
+  const uint16_t* thaiExtraPixelsArr = nullptr;
   const uint8_t* stylesArr = nullptr;
   const uint8_t* focusBoundaryArr = nullptr;  // null when !focusPresent
   const char* textArr = nullptr;
@@ -83,9 +101,13 @@ class TextBlock final : public Block {
   // Layout-only metadata. ChapterHtmlSlimParser moves it into Page::links
   // immediately; cached TextBlocks therefore keep the same compact format.
   std::vector<LinkSpan> linkSpans;
+#ifdef THAI_RENDER_PROBE
+  std::vector<uint32_t> probeVisibleOffsets;
+  ThaiDistributionProbe probeDistribution;
+#endif
 
   TextBlock() = default;  // deserialize() fills the fields directly
-  static size_t arenaSize(uint16_t wordCount, bool hasFocus, uint16_t textBytes);
+  static size_t arenaSize(uint16_t wordCount, bool hasFocus, bool hasThaiExpansion, uint16_t textBytes);
   void bindArenaPointers();
 
  public:
@@ -96,7 +118,8 @@ class TextBlock final : public Block {
                      const std::vector<EpdFontFamily::Style>& wordStyles, const std::vector<uint8_t>& focusBoundary,
                      const std::vector<uint16_t>& focusSplitX, const BlockStyle& blockStyle = BlockStyle(),
                      std::vector<std::string> rubyTexts = {}, std::vector<LinkSpan> linkSpans = {},
-                     const std::vector<SourceRange>& ranges = {}, uint16_t paragraphStartWord = UINT16_MAX);
+                     const std::vector<SourceRange>& ranges = {}, uint16_t paragraphStartWord = UINT16_MAX,
+                     std::span<const uint16_t> thaiExtraPixels = {});
   ~TextBlock() override = default;
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
@@ -141,10 +164,17 @@ class TextBlock final : public Block {
   bool wordHasDiscretionaryHyphen(const uint16_t i) const { return (stylesArr[i] & DISCRETIONARY_HYPHEN_FLAG) != 0; }
   uint8_t focusBoundary(const uint16_t i) const { return focusPresent ? focusBoundaryArr[i] : 0; }
   uint16_t focusSplitX(const uint16_t i) const { return focusPresent ? focusSplitXArr[i] : 0; }
+  uint16_t thaiExpansion(const uint16_t i) const { return thaiExpansionPresent ? thaiExtraPixelsArr[i] : 0; }
   bool hasRuby() const;
   int getRubyShift(int ascender) const { return hasRuby() ? (ascender / 2) : 0; }
   const std::vector<std::string>& getRubyTexts() const { return rubyTexts; }
   std::vector<LinkSpan> takeLinkSpans() { return std::move(linkSpans); }
+#ifdef THAI_RENDER_PROBE
+  void setProbeVisibleOffsets(std::vector<uint32_t> offsets) { probeVisibleOffsets = std::move(offsets); }
+  uint32_t probeVisibleOffset(uint16_t i) const { return probeVisibleOffsets.at(i); }
+  void setProbeThaiDistribution(ThaiDistributionProbe value) { probeDistribution = std::move(value); }
+  const ThaiDistributionProbe& probeThaiDistribution() const { return probeDistribution; }
+#endif
 
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;
   BlockType getType() override { return TEXT_BLOCK; }

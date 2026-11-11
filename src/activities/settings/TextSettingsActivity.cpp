@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "BookFont.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReaderFontSizes.h"
@@ -52,8 +53,9 @@ constexpr StrId WORD_SPACING_IDS[] = {StrId::STR_SPACING_50_PERCENT,  StrId::STR
 constexpr StrId CHARACTER_SPACING_IDS[] = {StrId::STR_SPACING_MINUS_2, StrId::STR_SPACING_MINUS_1,
                                            StrId::STR_SPACING_ZERO, StrId::STR_SPACING_PLUS_1,
                                            StrId::STR_SPACING_PLUS_2};
-constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
-                                   StrId::STR_BOOK_S_STYLE};
+constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY,     StrId::STR_ALIGN_LEFT,   StrId::STR_CENTER,
+                                   StrId::STR_ALIGN_RIGHT, StrId::STR_BOOK_S_STYLE, StrId::STR_THAI_JUSTIFY};
+static_assert(std::size(ALIGNMENT_IDS) == CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT, "alignment labels");
 constexpr int MARGIN_MIN = CrossPointSettings::SCREEN_MARGIN_MIN;
 constexpr int MARGIN_MAX = CrossPointSettings::SCREEN_MARGIN_MAX;
 constexpr int MARGIN_STEP = CrossPointSettings::SCREEN_MARGIN_STEP;
@@ -80,18 +82,21 @@ void TextSettingsActivity::onEnter() {
   previewHeight = usableHeight * metrics_.previewHeightPercent / 100;
 
   fonts_.clear();
-  fonts_.reserve(CrossPointSettings::BUILTIN_FONT_COUNT + (registry_ ? registry_->getFamilyCount() : 0));
-  fonts_.push_back({I18N.get(StrId::STR_NOTO_SANS), true, static_cast<uint8_t>(CrossPointSettings::NOTOSANS)});
+  fonts_.reserve(1 + CrossPointSettings::BUILTIN_FONT_COUNT + (registry_ ? registry_->getFamilyCount() : 0));
+  if (BookFont::isOpen()) fonts_.push_back({tr(STR_USE_DEFAULT_FONT), FontEntry::Kind::BookDefault, 0});
+  fonts_.push_back(
+      {I18N.get(StrId::STR_NOTO_SANS), FontEntry::Kind::Builtin, static_cast<uint8_t>(CrossPointSettings::NOTOSANS)});
   if (registry_) {
     const auto& families = registry_->getFamilies();
     for (int i = 0; i < static_cast<int>(families.size()); i++) {
-      fonts_.push_back({families[i].name, false, static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i)});
+      fonts_.push_back(
+          {families[i].name, FontEntry::Kind::Sd, static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i)});
     }
   }
 
   rebuildSizeList();
 
-  currentFamilyIndex_ = findCurrentFontIndex(registry_, SETTINGS.sdFontFamilyName, SETTINGS.fontFamily);
+  currentFamilyIndex_ = selectedFamilyRow();
   // Per-tab ring positions (0 = tab bar, 1..N = row). The base reset each
   // tab's nav with followOnBuild armed, so each tab's first build shows its
   // remembered selection (Family/Size open on the current item).
@@ -132,6 +137,15 @@ void TextSettingsActivity::rebuildRowItems() {
     item.actionValue = static_cast<int16_t>(i);
     rowItems_.push_back(item);
   }
+}
+
+int TextSettingsActivity::liveFamilyRow() const {
+  const int firstFamilyRow = BookFont::isOpen() ? 1 : 0;
+  return firstFamilyRow + findCurrentFontIndex(registry_, SETTINGS.sdFontFamilyName, SETTINGS.fontFamily);
+}
+
+int TextSettingsActivity::selectedFamilyRow() const {
+  return BookFont::isOpen() && !BookFont::isCustom() ? 0 : liveFamilyRow();
 }
 
 // The selectable sizes belong to the active family, so this runs on entry and
@@ -274,9 +288,9 @@ const char* TextSettingsActivity::confirmLabelText() const {
 void TextSettingsActivity::drawChrome() {
   GUI.drawHeader(renderer, UITheme::getInstance().getHeaderRect(renderer, true, false), tr(STR_TEXT_SETTINGS));
 
-  const char* familyName = (currentFamilyIndex_ >= 0 && currentFamilyIndex_ < static_cast<int>(fonts_.size()))
-                               ? fonts_[currentFamilyIndex_].name.c_str()
-                               : "";
+  const int familyRow = liveFamilyRow();
+  const char* familyName =
+      (familyRow >= 0 && familyRow < static_cast<int>(fonts_.size())) ? fonts_[familyRow].name.c_str() : "";
   const char* sizeName = (currentSizeIndex_ >= 0 && currentSizeIndex_ < static_cast<int>(sizes_.size()))
                              ? sizes_[currentSizeIndex_].name.c_str()
                              : "";
@@ -310,46 +324,53 @@ void TextSettingsActivity::render(RenderLock&& lock) {
 // next one, and the render task walks that same object inside the preview's
 // prewarmCache() — so without this lock a font switch can free the mini glyph
 // arrays out from under prewarmStyle() (crash: null s.miniGlyphs mid-read/sort).
-void TextSettingsActivity::applyFamily(int listIndex) {
+bool TextSettingsActivity::applyFamily(int listIndex) {
   RenderLock lock;
   const auto& font = fonts_[listIndex];
-  if (font.isBuiltin) {
-    SETTINGS.fontFamily = font.settingIndex;
-    SETTINGS.sdFontFamilyName[0] = '\0';
-    sdFontSystem.ensureLoaded(renderer);  // unloads the previously resident SD font
-    currentFamilyIndex_ = listIndex;
-  } else if (registry_) {
-    const int sdIdx = font.settingIndex - CrossPointSettings::BUILTIN_FONT_COUNT;
-    const auto& families = registry_->getFamilies();
-    if (sdIdx < static_cast<int>(families.size())) {
-      strncpy(SETTINGS.sdFontFamilyName, families[sdIdx].name.c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
+  switch (font.kind) {
+    case FontEntry::Kind::BookDefault:
+      BookFont::useDefault();
+      break;
+    case FontEntry::Kind::Builtin:
+      BookFont::makeCustom();
+      SETTINGS.fontFamily = font.settingIndex;
+      SETTINGS.sdFontFamilyName[0] = '\0';
+      break;
+    case FontEntry::Kind::Sd: {
+      const int sdIdx = font.settingIndex - CrossPointSettings::BUILTIN_FONT_COUNT;
+      if (!registry_ || sdIdx >= static_cast<int>(registry_->getFamilies().size())) return false;
+      const auto& family = registry_->getFamilies()[sdIdx];
+      BookFont::makeCustom();
+      strncpy(SETTINGS.sdFontFamilyName, family.name.c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
       SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
-      sdFontSystem.ensureLoaded(renderer);
-      currentFamilyIndex_ = listIndex;
+      break;
     }
   }
-
-  if (currentFamilyIndex_ != listIndex) return;  // switch failed — keep the old size list
+  sdFontSystem.ensureLoaded(renderer);  // unloads the previously resident SD font
+  currentFamilyIndex_ = listIndex;
 
   // The new family ships its own set of point sizes, and ensureLoaded() may have
   // snapped the selection into it, so the Size tab's list and its nav position
   // both have to be rebuilt.
   rebuildSizeList();
   tabNavs[static_cast<int>(Tab::Size)].selected = currentSizeIndex_ + 1;
+  return true;
 }
 
 void TextSettingsActivity::activateRow(int row) {
   switch (tab_) {
     case Tab::Family:
       if (row != currentFamilyIndex_) {
-        applyFamily(row);
         // Persist immediately (like SettingsActivity's per-change saves): the
         // parent's result callback only runs on a normal finish(), so relying
         // on it loses the change when this screen is left via the home
         // gesture/key or a sleep. Saved here, not inside applyFamily, so the
-        // SD write happens outside its RenderLock.
-        if (currentFamilyIndex_ == row) {
+        // SD write happens outside its RenderLock. Inside a book the font goes
+        // to the book's font.json; picking the default font makes the book follow it.
+        if (applyFamily(row)) {
           SETTINGS.saveToFile();
+          BookFont::save();
+          currentFamilyIndex_ = selectedFamilyRow();
         }
         requestUpdate();
       }
@@ -358,6 +379,8 @@ void TextSettingsActivity::activateRow(int row) {
       if (row != currentSizeIndex_) {
         applySize(row);
         SETTINGS.saveToFile();
+        BookFont::save();
+        currentFamilyIndex_ = selectedFamilyRow();  // the new size can move the book on or off the default font
         requestUpdate();
       }
       break;
@@ -378,6 +401,7 @@ void TextSettingsActivity::applySize(int listIndex) {
   RenderLock lock;
 
   currentSizeIndex_ = listIndex;
+  BookFont::makeCustom();
   SETTINGS.fontPointSize = sizes_[listIndex].pointSize;
   sdFontSystem.ensureLoaded(renderer);
 }

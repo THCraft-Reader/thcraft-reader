@@ -18,6 +18,7 @@ class MemoryManager {
     return inst;
   }
   bool ensureFree(size_t, MemPool = MemPool::Default) { return true; }
+  size_t clearCaches(size_t = 0) { return 0; }
 
  private:
   MemoryManager() = default;

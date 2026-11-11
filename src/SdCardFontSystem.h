@@ -37,6 +37,29 @@ class SdCardFontSystem {
   /// Call before entering the reader or after settings change.
   /// Also re-discovers if the registry has been marked dirty (e.g. by web upload).
   void ensureLoaded(GfxRenderer& renderer);
+  /// Like ensureLoaded(), but a failed load or a size snap leaves the saved selection unchanged.
+  void ensureLoadedKeepingSelection(GfxRenderer& renderer) { ensureLoadedInternal(renderer, true); }
+
+  /// On-demand cover and page-image decoding may temporarily need the memory owned by SD fonts.
+  /// The caller must hold RenderLock throughout the scope and must not render
+  /// text after releaseFonts() until destruction restores the selected fonts.
+  /// Construct before decoder buffers/FrameBufferLoan so they die before restore.
+  class CoverDecodeScope {
+   public:
+    CoverDecodeScope(SdCardFontSystem& system, GfxRenderer& renderer);
+    ~CoverDecodeScope();
+    CoverDecodeScope(const CoverDecodeScope&) = delete;
+    CoverDecodeScope& operator=(const CoverDecodeScope&) = delete;
+
+    // Lazy and idempotent: an unused scope leaves fonts and caches untouched.
+    void releaseFonts();
+
+   private:
+    SdCardFontSystem& system_;
+    GfxRenderer& renderer_;
+    bool released_ = false;
+    bool restoreSelected_ = false;
+  };
 
   /// Resolve an SD card font ID from family name + reader point size.
   /// Returns 0 if not found. Used by CrossPointSettings::getReaderFontId().
@@ -62,6 +85,10 @@ class SdCardFontSystem {
   }
 
  private:
+  // Temporary cover restoration and the default-font restore on reader exit must
+  // not clear or snap the user's selection, including when SD reads/allocations
+  // fail. Normal loads retain their policy.
+  void ensureLoadedInternal(GfxRenderer& renderer, bool preserveSelection);
   // Load the active SD family at the built-in UI point sizes and register each
   // as a size-matched script fallback for the corresponding UI font, so book
   // titles/list rows in scripts the built-ins lack (CJK, Greek, Cyrillic, ...)
@@ -75,7 +102,8 @@ class SdCardFontSystem {
   // Load/refresh the selected TTF family at the current reader size, register
   // it with the renderer, and track it so ensureSdCardFontReady() rebuilds its
   // glyph set per page. registryWasDirty forces a reload even if unchanged.
-  void loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, bool registryWasDirty);
+  void loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, bool registryWasDirty,
+                     bool preserveSelection = false);
   // Unregister + free the active TTF font (and its UI-size fallbacks), if any.
   void unloadTtf(GfxRenderer& renderer);
   // Register the loaded TTF at each built-in UI size as a script fallback, so UI

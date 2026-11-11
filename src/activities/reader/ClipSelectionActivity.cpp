@@ -182,6 +182,7 @@ bool ClipSelectionActivity::extractWords() {
       const size_t lineStart = wordCount;
       const bool isRtl = block->getBlockStyle().isRtl;
       const int8_t characterSpacing = block->getBlockStyle().characterSpacing;
+      const bool thaiJustified = block->getBlockStyle().alignment == CssTextAlign::ThaiJustify;
       const size_t remaining = capacity - lineStart;
       size_t rtlWordCount = 0;
       const int lineFont = TextBlock::renderFontId(renderer, block->blockFontId(fontId), fontId);
@@ -193,7 +194,11 @@ bool ClipSelectionActivity::extractWords() {
 
         const auto style = static_cast<EpdFontFamily::Style>(block->wordStyle(i) & ~EpdFontFamily::UNDERLINE);
         const int wordFont = TextBlock::renderFontId(renderer, block->wordFontId(i, fontId), fontId);
-        int width = renderer.getTextAdvanceX(wordFont, text, style, characterSpacing);
+        const uint16_t thaiExtraPixels = thaiJustified ? block->thaiExpansion(i) : 0;
+        int width = thaiJustified ? renderer.getTextAdvanceX(wordFont, text, style, characterSpacing,
+                                                             BidiUtils::BidiBaseDir::AUTO,
+                                                             GfxRenderer::TextMeasureMode::Rendered, thaiExtraPixels)
+                                  : renderer.getTextAdvanceX(wordFont, text, style, characterSpacing);
         if (width <= 0) continue;
         if (i + 1 < block->wordCount() && block->wordXpos(i + 1) > block->wordXpos(i)) {
           width = std::min(width, static_cast<int>(block->wordXpos(i + 1) - block->wordXpos(i)));

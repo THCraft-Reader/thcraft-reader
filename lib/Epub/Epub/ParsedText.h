@@ -1,11 +1,13 @@
 #pragma once
 
 #include <EpdFontFamily.h>
+#include <ThaiLineBreaker.h>
 
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -16,6 +18,9 @@
 class GfxRenderer;
 
 class ParsedText {
+#ifdef CROSSPOINT_PARSER_TEST
+ public:
+#endif
   // Word text lives in wordStore (chunked bump arena, NUL-terminated entries);
   // words holds 8-byte handles into it. This replaces the former
   // std::deque<std::string>: per-word string objects, their SSO spills, and
@@ -38,6 +43,12 @@ class ParsedText {
   //   continues=true,  noSpace=true:  breakable zero-width, non-stretching attachment
   std::vector<bool> wordContinues;
   std::vector<bool> wordNoSpaceBefore;
+  // Allocated only after analyzed Thai arrives. Entries rank the boundary before
+  // each token; ordinary non-Thai paragraphs keep the existing flags alone.
+  bool hasThaiTokens = false;
+  std::vector<thai::BreakKind> wordBreakRanks;
+  // Only analyzed, complete-cluster spans may supply styled Thai expansion edges.
+  std::vector<bool> wordThaiAnalyzed;
   // Focus Reading emphasis: bytes [0, wordFocusBoundary) render bold, the rest at wordStyles.
   // 0 = none. An annotation rather than a token split, so the hyphenator and line breaker still
   // see whole words; TextBlock stores emphasis the same way, so extractLine passes it through.
@@ -94,6 +105,9 @@ class ParsedText {
   bool isNaturalAlign;
   bool hasRtlWord;
   bool droppedWords = false;
+  bool thaiJustificationMetrics = false;
+  std::unique_ptr<char[]> thaiPrefixScratch;
+  size_t thaiPrefixCapacity = 0;
   int linesAfterCurrent = -1;
   bool firstLineConsumed = false;
   // Separate from firstLineConsumed: a <br> line suppresses the indent but still starts a
@@ -109,6 +123,14 @@ class ParsedText {
 
   std::string_view wordAt(const size_t i) const { return wordStore.view(words[i]); }
   bool storeWord(std::string_view text, WordStore::StoredWord& out);
+  void ensureTokenCapacity(size_t additionalTokens);
+  void initializeThaiRanks();
+  void setTokenBoundary(size_t index, thai::BreakKind before);
+  void appendToken(std::string_view token, EpdFontFamily::Style style, bool continues, bool noSpaceBefore,
+                   uint8_t focusBoundary, uint32_t visibleOffset, uint8_t linkId, bool padRuby, uint8_t sizeSlot);
+  void addWordImpl(std::string word, EpdFontFamily::Style style, bool underline, bool attachToPrevious,
+                   uint32_t visibleOffset, uint8_t linkId, uint8_t sizeSlot, bool noSpaceBefore,
+                   const thai::BreakKind* before);
   uint32_t visibleOffsetBaseAt(size_t wordIndex) const;
   uint32_t visibleOffsetAt(size_t wordIndex) const;
   uint32_t sourceOffsetAfter(uint32_t start, uint32_t renderedLength) const;
@@ -127,16 +149,27 @@ class ParsedText {
   std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
                                                   std::vector<bool>& noSpaceBeforeVec, size_t maxLines);
+  std::vector<size_t> computeThaiLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
+                                            std::vector<uint16_t>& wordWidths, size_t maxLines);
+  size_t splitThaiGroup(size_t begin, size_t end, int availableWidth, const GfxRenderer& renderer, int fontId,
+                        std::vector<uint16_t>& wordWidths);
+  bool splitThaiToken(size_t index, size_t offset, thai::BreakKind rank, const GfxRenderer& renderer, int fontId,
+                      std::vector<uint16_t>& wordWidths);
+  int tokenGap(size_t index, const GfxRenderer& renderer, int fontId) const;
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks);
   void extractLine(size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
                    const std::vector<bool>& continuesVec, const std::vector<bool>& noSpaceBeforeVec,
                    const std::vector<size_t>& lineBreakIndices,
                    const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
-                   const GfxRenderer& renderer, int fontId);
+                   const GfxRenderer& renderer, int fontId, std::span<uint16_t> thaiGapCounts,
+                   std::span<uint16_t> thaiBudgets);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
 
  public:
+#ifdef THAI_RENDER_PROBE
+  static uint8_t probeThaiSpaceWeight;
+#endif
   explicit ParsedText(const bool hyphenationEnabled = false, const bool focusReadingEnabled = false,
                       const BlockStyle& blockStyle = BlockStyle(), const uint8_t paragraphIndentSpaces = 2)
       : blockStyle(blockStyle),
@@ -149,6 +182,10 @@ class ParsedText {
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint32_t visibleTextOffset = 0, uint8_t linkId = 0, uint8_t sizeSlot = 0, bool noSpaceBefore = false);
+  void addWordWithBoundary(std::string word, EpdFontFamily::Style style, bool underline, thai::BreakKind before,
+                           uint32_t visibleOffset, uint8_t linkId, uint8_t sizeSlot = 0);
+  void addAnalyzedToken(std::string_view token, EpdFontFamily::Style style, thai::BreakKind before,
+                        uint32_t visibleOffset, uint8_t linkId, uint8_t sizeSlot = 0);
   uint8_t addLinkTarget(const char* href);
   bool linkTargetMatches(uint8_t linkId, const char* href) const;
   void setRubyForWordAt(size_t index, const std::string& ruby);

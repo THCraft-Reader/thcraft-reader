@@ -17,6 +17,7 @@
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
+#include "components/themes/thcraft/ThcraftTheme.h"
 
 UITheme UITheme::instance;
 
@@ -34,10 +35,13 @@ bool UITheme::supportsCoverGrid() { return HalMemory::getPsramHeap().totalBytes 
 
 bool UITheme::hasCoverGridHome() { return SETTINGS.uiTheme == CrossPointSettings::COVER_GRID && supportsCoverGrid(); }
 
+bool UITheme::hasThcraftHome() { return SETTINGS.uiTheme == CrossPointSettings::THCRAFT; }
+
 void UITheme::drawCoverGridHome(CoverGridHomeUi& home) { home.renderUi(); }
 
 void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   if (type == CrossPointSettings::COVER_GRID && !supportsCoverGrid()) type = CrossPointSettings::LYRA;
+  if (type >= CrossPointSettings::UI_THEME_COUNT) type = CrossPointSettings::LYRA;
 
   switch (type) {
     case CrossPointSettings::UI_THEME::CLASSIC:
@@ -67,6 +71,13 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       LOG_DBG("UI", "Using Lyra 3 Covers theme");
       currentTheme = std::make_unique<Lyra3CoversTheme>();
       currentMetrics = &Lyra3CoversMetrics::values;
+      break;
+    case CrossPointSettings::UI_THEME::THCRAFT:
+      LOG_DBG("UI", "Using THCraft theme");
+      currentTheme = std::make_unique<ThcraftTheme>();
+      currentMetrics = &ThcraftMetrics::values;
+      break;
+    case CrossPointSettings::UI_THEME::UI_THEME_COUNT:  // mapped to Lyra above
       break;
   }
   metricsValid = false;

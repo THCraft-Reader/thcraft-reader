@@ -1,11 +1,14 @@
 #include "EpdFont.h"
 
+#include <ThaiCluster.h>
+#include <ThaiShape.h>
 #include <Utf8.h>
 
 #include <algorithm>
+#include <cstring>
 
 void EpdFont::getTextBounds(const char* string, const int startX, const int startY, int* minX, int* minY, int* maxX,
-                            int* maxY) const {
+                            int* maxY, const bool nativeLigatures) const {
   *minX = startX;
   *minY = startY;
   *maxX = startX;
@@ -22,10 +25,56 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   uint32_t cp;
   uint32_t prevCp = 0;
-  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&string)))) {
+#if THAI_SHAPING
+  const ThaiShapeView* shape = getThaiShape();
+  const bool shapedText = shape && thai::containsThai(string);
+  const char* end = shapedText ? string + strlen(string) : string;
+  const char* nativeUntil = string;
+#else
+  constexpr bool shapedText = false;
+#endif
+  while (*string) {
+#if THAI_SHAPING
+    if (shapedText && string >= nativeUntil) {
+      ThaiGlyphCursor cursor;
+      if (cursor.begin(std::string_view(string, end - string), *shape, nativeLigatures)) {
+        ThaiGlyphPlacement placement;
+        int32_t pen = 0;
+        uint8_t previousFlags = 0;
+        bool first = true;
+        while (cursor.next(placement)) {
+          if (first) {
+            if (prevCp) lastBaseX += fp4::toPixel(prevAdvanceFP + getKerning(prevCp, placement.codepoint));
+          } else if ((previousFlags & ThaiGlyphPlacement::Native) ||
+                     (placement.flags & (ThaiGlyphPlacement::Native | ThaiGlyphPlacement::RecipeStart))) {
+            pen += getKerning(prevCp, placement.codepoint);
+          }
+          const EpdGlyph* glyph = getGlyph(placement.codepoint);
+          if (glyph) {
+            const int gx = lastBaseX + fp4::toPixel(pen + placement.xOffsetFP) + glyph->left;
+            const int gy = startY - fp4::toPixel(placement.yOffsetFP) - glyph->top;
+            *minX = std::min(*minX, gx);
+            *maxX = std::max(*maxX, gx + glyph->width);
+            *minY = std::min(*minY, gy);
+            *maxY = std::max(*maxY, gy + glyph->height);
+          }
+          pen += (placement.flags & ThaiGlyphPlacement::Native) ? (glyph ? glyph->advanceX : 0) : placement.advanceFP;
+          prevCp = placement.codepoint;
+          previousFlags = placement.flags;
+          first = false;
+        }
+        prevAdvanceFP = fp4::toPixel(pen) * 16;
+        string += cursor.consumedBytes();
+        continue;
+      }
+      nativeUntil = string + cursor.consumedBytes();
+    }
+#endif
+    cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&string));
+    if (!cp) break;
     const bool isCombining = utf8IsCombiningMark(cp);
 
-    if (!isCombining) {
+    if (!isCombining && nativeLigatures) {
       cp = applyLigatures(cp, string);
     }
 
@@ -60,8 +109,9 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
 
     *minX = std::min(*minX, glyphBaseX + glyph->left);
     *maxX = std::max(*maxX, glyphBaseX + glyph->left + glyph->width);
-    *minY = std::min(*minY, glyphBaseY + glyph->top - glyph->height);
-    *maxY = std::max(*maxY, glyphBaseY + glyph->top);
+    const int glyphTop = shapedText ? glyphBaseY - glyph->top : glyphBaseY + glyph->top - glyph->height;
+    *minY = std::min(*minY, glyphTop);
+    *maxY = std::max(*maxY, glyphTop + glyph->height);
 
     if (!isCombining) {
       lastBaseLeft = glyph->left;
@@ -73,10 +123,10 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   }
 }
 
-void EpdFont::getTextDimensions(const char* string, int* w, int* h) const {
+void EpdFont::getTextDimensions(const char* string, int* w, int* h, const bool nativeLigatures) const {
   int minX = 0, minY = 0, maxX = 0, maxY = 0;
 
-  getTextBounds(string, 0, 0, &minX, &minY, &maxX, &maxY);
+  getTextBounds(string, 0, 0, &minX, &minY, &maxX, &maxY, nativeLigatures);
 
   *w = maxX - minX;
   *h = maxY - minY;

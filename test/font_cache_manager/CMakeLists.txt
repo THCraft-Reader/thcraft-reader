@@ -12,6 +12,7 @@ target_include_directories(FontCacheManagerTest PRIVATE
 
 target_link_libraries(FontCacheManagerTest PRIVATE
   crosspoint_test_common
+  crosspoint_shape
   GTest::gtest_main
 )
 

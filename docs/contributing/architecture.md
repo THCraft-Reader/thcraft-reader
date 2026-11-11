@@ -86,6 +86,34 @@ Why caching matters:
 - RAM is limited on ESP32-C3, so expensive parsed/layout data is persisted to SD
 - repeat opens/page navigation can reuse cached data instead of full reparsing
 
+### Cold-page image preparation
+
+Before the EPUB reader scans/prewarms fonts, it checks the current page for images
+without a valid pixel cache. Only such pages wait for pending display completion,
+restore BW/no-strip drawing, and release rebuildable font caches plus the optional
+per-render image RAM slot. `Page::prepareImages` traverses the existing image
+elements without allocating another list.
+
+`ImageBlock::prepare` checks valid `.pxc` headers without drawing or loading their
+optional RAM slot. A missing source is extracted through the EPUB callback while
+a scoped `GfxRenderer::FrameBufferLoan` lends the actual display allocation to the
+inflater. Extraction and its stream finish before the loan ends; JPEG/PNG decode
+runs only after framebuffer ownership returns. Temporary preparation pixels are
+cleared before the normal font scan and complete page draw. The previous panel
+image stays visible until that draw is ready; there is no intermediate
+text/image-placeholder refresh.
+
+Drawing never extracts or borrows the framebuffer. It uses the pixel cache first,
+then direct source decoding if cache writing was unavailable. Failed images use
+placeholders and suppress repeated attempts within one render; the next page
+render retries. One failed preparation does not stop later images on the page.
+Warm-cache and text-only pages bypass reclamation and preparation.
+
+This path is shared across C3 and PSRAM-capable boards; geometry and storage loans
+remain capability-driven. Cold-page font reclamation can add reload work on any
+board, so this is a memory-lifetime fix, not a claimed speed improvement. Image
+encoding, dithering and serialized section/cache versions are unchanged.
+
 ## Reader internals call graph
 
 This diagram zooms into the EPUB path to show the main control and data flow from activity entry to on-screen draw.

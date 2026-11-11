@@ -29,6 +29,7 @@ target_include_directories(EmDashLineBreakingTest PRIVATE
 
 target_link_libraries(EmDashLineBreakingTest PRIVATE
   crosspoint_test_common
+  crosspoint_thai
   GTest::gtest_main
 )
 

@@ -1,9 +1,11 @@
 #include "WifiSelectionActivity.h"
 
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <TrustedTime.h>
 #include <WiFi.h>
 #include <esp_mac.h>
@@ -95,6 +97,8 @@ void WifiSelectionActivity::onEnter() {
   {
     RenderLock lock(*this);
     WIFI_STORE.loadFromFile();
+    // The radio and its buffers need the heap that rebuildable SD-font caches hold.
+    if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
   }
 
   // Reset state
@@ -343,22 +347,39 @@ void WifiSelectionActivity::selectNetwork(const int index) {
   }
 }
 
+std::unique_ptr<KeyboardEntryActivity> WifiSelectionActivity::makeKeyboard(const char* title, const int maxLength) {
+  const auto make = [&] {
+    return makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, title, "", maxLength, InputType::Text);
+  };
+  auto keyboard = make();
+  if (!keyboard) {
+    // Try-lock: the render task may be drawing with the caches being shed.
+    RenderLock lock(RenderLock::Mode::Try);
+    if (auto* fcm = renderer.getFontCacheManager(); fcm && lock.ownsLock()) fcm->releaseSdFontCaches();
+    lock.unlock();
+    keyboard = make();
+  }
+  if (!keyboard) {
+    LOG_ERR("WIFI", "OOM: keyboard (free=%u max_block=%u)", (unsigned)ESP.getFreeHeap(),
+            (unsigned)ESP.getMaxAllocHeap());
+  }
+  return keyboard;
+}
+
 void WifiSelectionActivity::promptPasswordEntry() {
+  auto keyboard = makeKeyboard(tr(STR_ENTER_WIFI_PASSWORD), 64);  // Max password length
+  if (!keyboard) return;
   // Show password entry
   state = WifiSelectionState::PASSWORD_ENTRY;
   // Don't allow screen updates while changing activity
-  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ENTER_WIFI_PASSWORD),
-                                                                 "",  // No initial text
-                                                                 64,  // Max password length
-                                                                 InputType::Text),
-                         [this](const ActivityResult& result) {
-                           if (result.isCancelled) {
-                             state = WifiSelectionState::NETWORK_LIST;
-                           } else {
-                             enteredPassword = std::get<KeyboardResult>(result.data).text;
-                             // state will be updated in next loop iteration
-                           }
-                         });
+  startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
+    if (result.isCancelled) {
+      state = WifiSelectionState::NETWORK_LIST;
+    } else {
+      enteredPassword = std::get<KeyboardResult>(result.data).text;
+      // state will be updated in next loop iteration
+    }
+  });
 }
 
 void WifiSelectionActivity::promptHiddenSsid() {
@@ -368,23 +389,21 @@ void WifiSelectionActivity::promptHiddenSsid() {
   enteredPassword.clear();
   autoConnecting = false;
 
+  auto keyboard = makeKeyboard(tr(STR_ENTER_WIFI_SSID), 32);  // Max SSID length (IEEE 802.11: 32 bytes)
+  if (!keyboard) return;
   // Suppress rendering during the activity transition (see render()).
   state = WifiSelectionState::HIDDEN_SSID_ENTRY;
-  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ENTER_WIFI_SSID),
-                                                                 "",  // No initial text
-                                                                 32,  // Max SSID length (IEEE 802.11: 32 bytes)
-                                                                 InputType::Text),
-                         [this](const ActivityResult& result) {
-                           if (result.isCancelled) {
-                             state = WifiSelectionState::NETWORK_LIST;
-                             return;
-                           }
-                           selectedSSID = std::get<KeyboardResult>(result.data).text;
-                           if (selectedSSID.empty()) {
-                             state = WifiSelectionState::NETWORK_LIST;
-                           }
-                           // Otherwise stay in HIDDEN_SSID_ENTRY; loop() continues the flow.
-                         });
+  startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
+    if (result.isCancelled) {
+      state = WifiSelectionState::NETWORK_LIST;
+      return;
+    }
+    selectedSSID = std::get<KeyboardResult>(result.data).text;
+    if (selectedSSID.empty()) {
+      state = WifiSelectionState::NETWORK_LIST;
+    }
+    // Otherwise stay in HIDDEN_SSID_ENTRY; loop() continues the flow.
+  });
 }
 
 bool WifiSelectionActivity::hasAttemptedAutoSsid(const std::string& ssid) const {

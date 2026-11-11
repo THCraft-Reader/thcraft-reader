@@ -3,6 +3,12 @@
 #include <algorithm>
 #include <cstdint>
 
+#ifdef _MSC_VER
+#define GLYPH_ALWAYS_INLINE __forceinline
+#else
+#define GLYPH_ALWAYS_INLINE __attribute__((always_inline)) inline
+#endif
+
 // Glyph rasterizer that resolves orientation, clipping and framebuffer
 // addressing once per glyph instead of once per pixel. It has no dependency
 // on GfxRenderer so it can be unit-tested on the host.
@@ -58,8 +64,7 @@ inline void clipAxis(int base, int step, int lower, int upper, int& start, int& 
 // Which glyph axis runs along that space's x depends on the rotation:
 // dxX != 0 means glyph x does. Runs twice per glyph, so it stays inline
 // under -Os.
-__attribute__((always_inline)) inline void clipToRect(const Frame& frame, int left, int top, int right, int bottom,
-                                                      Clip& clip) {
+GLYPH_ALWAYS_INLINE void clipToRect(const Frame& frame, int left, int top, int right, int bottom, Clip& clip) {
   if (frame.dxX != 0) {
     clipAxis(frame.x, frame.dxX, left, right, clip.left, clip.right);
     clipAxis(frame.y, frame.dyY, top, bottom, clip.top, clip.bottom);
@@ -70,8 +75,7 @@ __attribute__((always_inline)) inline void clipToRect(const Frame& frame, int le
 }
 
 // Keep pixel writes inline when decoding a group of four pixels.
-__attribute__((always_inline)) inline void paint(uint8_t* buffer, int destination, uint8_t ink, uint8_t levels,
-                                                 bool clearBits) {
+GLYPH_ALWAYS_INLINE void paint(uint8_t* buffer, int destination, uint8_t ink, uint8_t levels, bool clearBits) {
   if ((levels & (1u << ink)) == 0) return;
   const uint8_t mask = 0x80u >> (destination & 7);
   if (clearBits)
@@ -153,3 +157,5 @@ inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Plan
 }
 
 }  // namespace glyphBitmap
+
+#undef GLYPH_ALWAYS_INLINE

@@ -9,6 +9,10 @@
 #include <cstdlib>
 #include <ctime>
 
+#ifndef RTC_NOINIT_ATTR
+#define RTC_NOINIT_ATTR
+#endif
+
 namespace trustedtime {
 
 namespace {
@@ -27,6 +31,11 @@ constexpr int64_t MAX_VALID_EPOCH = 4102444800LL;
 constexpr int64_t MAX_RTC_LEAD_SECS = 31536000LL;
 // NVS wear guard: only rewrite the floor when it moved by at least this much.
 constexpr int64_t MIN_ADVANCE_SECS = 60;
+
+// RTC_NOINIT keeps its value through deep sleep and soft restarts; the magic
+// tells a confirmed clock from power-on garbage.
+RTC_NOINIT_ATTR uint32_t wallClockMagic;
+constexpr uint32_t WALL_CLOCK_MAGIC = 0x7C10C0DE;
 
 constexpr const char* PREFS_NAMESPACE = "cptime";
 constexpr const char* PREFS_KEY = "floor";
@@ -63,7 +72,7 @@ void writeFloor(const int64_t value) {
 }
 
 // SNTP sync callback (lwIP task context; Preferences/NVS is mutex-guarded).
-void onTimeSynced(struct timeval*) { note(); }
+void onTimeSynced(struct timeval*) { confirmWallClock(); }
 
 void configureSntp() {
   // SNTP uses UTC epochs regardless of the display timezone. Copy TZ before
@@ -86,7 +95,8 @@ void init() {
     // forward across power cycles instead of restarting at epoch 0.
     timeval tv = {static_cast<time_t>(floor), 0};
     settimeofday(&tv, nullptr);
-    LOG_DBG("TIME", "Clock restored to persisted floor");
+    wallClockMagic = 0;
+    LOG_DBG("TIME", "Clock restored to persisted floor; wall clock unconfirmed until a sync");
   }
 }
 
@@ -97,25 +107,26 @@ void note() {
   if (now - readFloor() >= MIN_ADVANCE_SECS) writeFloor(now);
 }
 
-void adopt(const int64_t epoch) {
+bool adopt(const int64_t epoch) {
   // Out of range: leave the clock and the floor exactly as they are.
-  if (epoch < MIN_VALID_EPOCH || epoch > MAX_VALID_EPOCH) return;
+  if (epoch < MIN_VALID_EPOCH || epoch > MAX_VALID_EPOCH) return false;
   // Compared against the persisted floor, not the in-RAM one: boot calls this
   // before init(), so the in-RAM floor is still empty and the persisted value is
   // the only record of a time this device has already lived through.
   const int64_t stored = readFloor();
-  if (stored >= MIN_VALID_EPOCH && epoch - stored > MAX_RTC_LEAD_SECS) return;
+  if (stored >= MIN_VALID_EPOCH && epoch - stored > MAX_RTC_LEAD_SECS) return false;
   // Deep sleep keeps the system clock, so a wake arrives with a live clock and
   // an empty floor while the RTC may be the older reading: whichever is newer
   // wins, and only inside the supported window.
   const int64_t now = static_cast<int64_t>(time(nullptr));
   const bool nowPlausible = now >= MIN_VALID_EPOCH && now <= MAX_VALID_EPOCH;
   const int64_t candidate = nowPlausible && now > epoch ? now : epoch;
-  if (candidate < raiseFloor(0)) return;  // never rewind below a time we already trust
+  if (candidate < raiseFloor(0)) return false;  // never rewind below a time we already trust
   raiseFloor(candidate);
   timeval tv = {static_cast<time_t>(candidate), 0};
   settimeofday(&tv, nullptr);
   if (candidate - readFloor() >= MIN_ADVANCE_SECS) writeFloor(candidate);
+  return true;
 }
 
 void startSync() {
@@ -127,12 +138,20 @@ bool syncNow(const uint32_t timeoutMs) {
   // configureSntp() (configTzTime) restarts SNTP if already running.
   configureSntp();
   const unsigned long deadline = millis() + timeoutMs;
-  while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && static_cast<long>(deadline - millis()) > 0) {
+  // ESP-IDF reports COMPLETED once and then resets the status, so keep the first answer.
+  bool synced = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
+  while (!synced && static_cast<long>(deadline - millis()) > 0) {
     delay(100);
+    synced = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
   }
-  const bool synced = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
-  if (synced) note();
+  if (synced) confirmWallClock();
   return synced;
+}
+
+void confirmWallClock() {
+  if (wallClockMagic != WALL_CLOCK_MAGIC) LOG_DBG("TIME", "Wall clock confirmed");
+  wallClockMagic = WALL_CLOCK_MAGIC;
+  note();
 }
 
 int64_t trustedNow() {
@@ -141,5 +160,7 @@ int64_t trustedNow() {
   const int64_t floor = raiseFloor(now >= MIN_VALID_EPOCH ? now : 0);
   return floor >= MIN_VALID_EPOCH ? floor : 0;
 }
+
+bool wallClockConfirmed() { return wallClockMagic == WALL_CLOCK_MAGIC && trustedNow() > 0; }
 
 }  // namespace trustedtime

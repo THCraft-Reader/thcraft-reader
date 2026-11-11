@@ -13,6 +13,23 @@ Check [our Devices page](https://crosspointreader.com/devices) for the full list
 
 ![CrossPoint Reader running on Xteink device](./docs/images/cover.jpg)
 
+### THCraft mascot
+
+The THCraft build uses the supplied Thai-flag mascot on the boot and default
+light/dark sleep screens. Custom sleep images and book covers are unchanged.
+The white-background color master is [`src/images/Mascot.png`](src/images/Mascot.png).
+Regenerate the firmware bitmaps with `python scripts/generate_mascot.py` (Pillow required).
+Conversion preserves aspect ratio, downsamples with Lanczos, sharpens outlines,
+and uses Floyd–Steinberg dithering to retain shading on monochrome e-ink.
+Dark mode preserves the mascot's normal face/clothing shading on black, with a
+one-pixel white outline. The generator removes border-connected white background
+and bakes the silhouette into a counter-inverted bitmap; no mask processing runs
+on the device. Light-mode artwork is unchanged.
+The two 224×336 bitmaps occupy 18,816 bytes of flash and render without an image
+heap buffer; logical-coordinate plotting keeps them upright in all four orientations.
+The boot splash follows **Night Mode**; the default sleep mascot follows the
+separate **Sleep Screen** light/dark selection.
+
 > If you're planning to buy an Xteink device, consider purchasing an **X3/X4 Developer Edition** through https://crosspointreader.com. CrossPoint receives a small share of each sale, helping fund development costs.
 
 ## What can CrossPoint do?
@@ -49,7 +66,7 @@ Check [our Devices page](https://crosspointreader.com/devices) for the full list
   - OPDS browser with saved servers (up to 8), search, pagination, and direct download; hold Back for one second and release in a catalog to return to the main menu
   - OTA update checks and installs from GitHub releases
 
-- **Customization**: night mode, multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes including transparent overlays, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more.
+- **Customization**: night mode, multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff, THCraft), sleep screen modes including transparent overlays, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more.
 
 - **Localization**: 34 UI languages and counting, including CJK font fallback and RTL support.
 

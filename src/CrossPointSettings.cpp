@@ -4,6 +4,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <ObfuscationUtils.h>
+#include <ThaiLayoutId.h>
 
 #include <algorithm>
 #include <cstring>
@@ -96,15 +97,21 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   // Font family and size — both use dynamic getter/setters in SettingsList (the
   // option lists depend on the SD font registry), so the generic loop skips them.
   doc["fontFamily"] = STORED_NOTOSANS;
-  doc["fontSize"] = fontPointSize;
+  // The default font, not an open book's own font (see holdDefaultReaderFont).
+  doc["fontSize"] = defaultReaderFontHeld ? heldDefaultReaderFont.pointSize : fontPointSize;
   // SD card font family name — not in SettingsList, save manually
-  if (sdFontFamilyName[0] != '\0') {
-    doc["sdFontFamilyName"] = sdFontFamilyName;
+  const char* defaultSdFamily = defaultReaderFontHeld ? heldDefaultReaderFont.sdFamilyName : sdFontFamilyName;
+  if (defaultSdFamily[0] != '\0') {
+    doc["sdFontFamilyName"] = defaultSdFamily;
   }
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, save manually
   if (dictionaryName[0] != '\0') {
     doc["dictionaryName"] = dictionaryName;
   }
+  // The theme list hides Cover Grid without PSRAM, so it maps display index to value.
+  doc["uiTheme"] = uiTheme;
+  if (homeWidgetLeftImage[0] != '\0') doc["homeWidgetLeftImage"] = homeWidgetLeftImage;
+  if (homeWidgetRightImage[0] != '\0') doc["homeWidgetRightImage"] = homeWidgetRightImage;
   // The displayed option list varies by board, so this setting uses a dynamic
   // display-index mapping and is skipped by the generic persistence loop.
   doc["longPressMenuFunction"] = longPressMenuFunction;
@@ -191,6 +198,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     }
   };
   forEachBaseSetting(visit);
+
+  // The former Left clock position (2) is now the enabled toggle (1).
+  if (doc["statusBarClock"].is<uint8_t>() && doc["statusBarClock"].as<uint8_t>() == 2) {
+    statusBarClock = 1;
+    needsResave = true;
+  }
 
   // Keep landscape swapping opt-in when loading older settings.
   if (doc["sideButtonFollowOrientation"].isNull()) {
@@ -298,6 +311,9 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   if (storedFontFamily != STORED_NOTOSANS) needsResave = true;
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, load manually
   copyToField(dictionaryName, doc["dictionaryName"] | "", sizeof(dictionaryName));
+  uiTheme = clamp(doc["uiTheme"] | static_cast<uint8_t>(LYRA), UI_THEME_COUNT, LYRA);
+  copyToField(homeWidgetLeftImage, doc["homeWidgetLeftImage"] | "", sizeof(homeWidgetLeftImage));
+  copyToField(homeWidgetRightImage, doc["homeWidgetRightImage"] | "", sizeof(homeWidgetRightImage));
   // Language -- stored as code string for stability across enum reorders.
   if (doc["language"].is<const char*>()) {
     language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
@@ -329,7 +345,7 @@ CrossPointSettings::StatusBarSpec CrossPointSettings::statusBarSpec() const {
   spec.titleMode = statusBarTitle;
   spec.showBattery = statusBarBattery != 0;
   spec.showBatteryPercent = hideBatteryPercentage == HIDE_NEVER;
-  spec.clockMode = statusBarClock;
+  spec.showClock = statusBarClock != 0;
   spec.clock12h = clockFormat == 1;
   spec.progressBarMode = statusBarProgressBar;
   spec.progressBarHeightPx =
@@ -345,6 +361,7 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.lineCompression = getReaderLineCompression();
   spec.characterSpacing = getCharacterSpacing();
   spec.wordSpacingPercent = wordSpacing;
+  spec.thaiLayoutId = thai::layoutId();
   spec.extraParagraphSpacing = extraParagraphSpacing != 0;
   spec.paragraphIndentSpaces = paragraphIndentSpaces;
   spec.paragraphAlignment = paragraphAlignment;
@@ -394,6 +411,40 @@ void CrossPointSettings::clearSdFontFamily() {
   fontPointSize =
       snapToNearestPointSize(BUILTIN_READER_POINT_SIZES, std::size(BUILTIN_READER_POINT_SIZES), fontPointSize);
   saveToFile();
+}
+
+static_assert(sizeof(CrossPointSettings::ReaderFont::sdFamilyName) == sizeof(CrossPointSettings::sdFontFamilyName));
+
+bool CrossPointSettings::ReaderFont::operator==(const ReaderFont& other) const {
+  return pointSize == other.pointSize && strcmp(sdFamilyName, other.sdFamilyName) == 0;
+}
+
+CrossPointSettings::ReaderFont CrossPointSettings::liveReaderFont() const {
+  ReaderFont font;
+  copyToField(font.sdFamilyName, sdFontFamilyName, sizeof(font.sdFamilyName));
+  font.pointSize = fontPointSize;
+  return font;
+}
+
+void CrossPointSettings::setLiveReaderFont(const ReaderFont& font) {
+  copyToField(sdFontFamilyName, font.sdFamilyName, sizeof(sdFontFamilyName));
+  fontPointSize = font.pointSize;
+}
+
+void CrossPointSettings::holdDefaultReaderFont() {
+  if (defaultReaderFontHeld) return;
+  heldDefaultReaderFont = liveReaderFont();
+  defaultReaderFontHeld = true;
+}
+
+void CrossPointSettings::releaseDefaultReaderFont() {
+  if (!defaultReaderFontHeld) return;
+  setLiveReaderFont(heldDefaultReaderFont);
+  defaultReaderFontHeld = false;
+}
+
+CrossPointSettings::ReaderFont CrossPointSettings::defaultReaderFont() const {
+  return defaultReaderFontHeld ? heldDefaultReaderFont : liveReaderFont();
 }
 
 int CrossPointSettings::getReaderFontId() const {

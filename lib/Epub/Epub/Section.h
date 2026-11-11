@@ -1,4 +1,6 @@
 #pragma once
+#include <HalStorage.h>
+
 #include <deque>
 #include <functional>
 #include <memory>
@@ -15,6 +17,9 @@ class ChapterHtmlSlimParser;
 class CssParser;
 
 class Section {
+#ifdef CROSSPOINT_PARSER_TEST
+  friend class SectionThaiCacheTestPeer;
+#endif
   std::shared_ptr<Epub> epub;
   const int spineIndex;
   GfxRenderer& renderer;
@@ -50,6 +55,8 @@ class Section {
     // HTML byte progress, for estimating the section's total page count while it's still building.
     uint32_t bytesConsumed = 0;
     uint32_t totalBytes = 0;
+    // Preserve the supplied identity without reading back from the build's write handle.
+    uint32_t thaiLayoutId = 0;
     // Exponentially-smoothed page-count estimate (0 = not yet seeded) and the bytesConsumed at its
     // last update. The raw byte-ratio estimate jitters as the build crosses dense/sparse regions;
     // the EMA is stepped once per build advance (not per redraw) to damp that wobble.
@@ -103,8 +110,9 @@ class Section {
   // false on error (the build is abandoned). Sets isBuildComplete() when finished.
   // yieldNow, when given, is asked after every parse step (1 KB of HTML, whose callbacks may
   // lay out and write several pages); true ends the call early so the caller can serve input.
-  // The next call resumes where this one left off.
-  bool buildSomeMore(int maxPages, bool (*yieldNow)() = nullptr);
+  // A non-zero budgetMs also returns after the parse step that crosses it, however few pages
+  // that laid out. The next call resumes where this one left off.
+  bool buildSomeMore(int maxPages, bool (*yieldNow)() = nullptr, uint32_t budgetMs = 0);
   bool isBuilding() const { return static_cast<bool>(build_); }
   bool isBuildComplete() const { return buildComplete_; }
   // Best-known total page count: the exact pageCount once finalized, or a smoothed byte-based

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include "components/UITheme.h"
 #include "util/DictionaryRegistry.h"
 #include "util/SlideSwitch.h"
+#include "util/WidgetImages.h"
 
 // Build the font family setting dynamically. When registry is non-null, SD card fonts
 // are appended after the built-in fonts. Otherwise only built-in fonts are listed.
@@ -275,11 +277,82 @@ inline SettingInfo buildDoublePowerButtonSetting() {
       "doublePwrBtn", StrId::STR_CAT_CONTROLS);
 }
 
-inline std::vector<StrId> homeThemeValues() {
-  static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                     StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_COVER_GRID};
-  const size_t count = UITheme::supportsCoverGrid() ? std::size(VALUES) : std::size(VALUES) - 1;
-  return {VALUES, VALUES + count};
+struct ThemeOption {
+  StrId label;
+  uint8_t value;
+};
+
+// Menu order; Cover Grid (needs PSRAM) is skipped when unsupported, so the
+// displayed index differs from the persisted value.
+inline constexpr ThemeOption THEME_OPTIONS[] = {{StrId::STR_THEME_CLASSIC, CrossPointSettings::CLASSIC},
+                                                {StrId::STR_THEME_LYRA, CrossPointSettings::LYRA},
+                                                {StrId::STR_THEME_LYRA_EXTENDED, CrossPointSettings::LYRA_3_COVERS},
+                                                {StrId::STR_THEME_ROUNDEDRAFF, CrossPointSettings::ROUNDEDRAFF},
+                                                {StrId::STR_THEME_COVER_GRID, CrossPointSettings::COVER_GRID},
+                                                {StrId::STR_THEME_THCRAFT, CrossPointSettings::THCRAFT}};
+
+inline bool themeOptionShown(const ThemeOption& option) {
+  return option.value != CrossPointSettings::COVER_GRID || UITheme::supportsCoverGrid();
+}
+
+inline SettingInfo buildUiThemeSetting() {
+  std::vector<StrId> labels;
+  labels.reserve(std::size(THEME_OPTIONS));
+  for (const auto& option : THEME_OPTIONS) {
+    if (themeOptionShown(option)) labels.push_back(option.label);
+  }
+  return SettingInfo::DynamicEnum(
+      StrId::STR_UI_THEME, std::move(labels),
+      [] {
+        uint8_t index = 0;
+        for (const auto& option : THEME_OPTIONS) {
+          if (!themeOptionShown(option)) continue;
+          if (option.value == SETTINGS.uiTheme) return index;
+          index++;
+        }
+        return static_cast<uint8_t>(CrossPointSettings::LYRA);  // Lyra's index; hidden Cover Grid falls back to it
+      },
+      [](const uint8_t displayIndex) {
+        uint8_t index = 0;
+        SETTINGS.uiTheme = CrossPointSettings::LYRA;
+        for (const auto& option : THEME_OPTIONS) {
+          if (!themeOptionShown(option)) continue;
+          if (index++ == displayIndex) {
+            SETTINGS.uiTheme = option.value;
+            return;
+          }
+        }
+      },
+      "uiTheme", StrId::STR_CAT_DISPLAY);
+}
+
+// "None" plus each image under /widgets; persisted by file name like the
+// dictionary. Both slots share one file list.
+inline SettingInfo buildHomeWidgetImageSetting(const StrId nameId, char* field, const size_t fieldSize, const char* key,
+                                               const std::shared_ptr<const std::vector<std::string>>& files) {
+  SettingInfo s;
+  s.nameId = nameId;
+  s.key = key;
+  s.type = SettingType::ENUM;
+  s.enumStringValues.reserve(files->size() + 1);
+  s.enumStringValues.push_back(I18N.get(StrId::STR_NONE_OPT));
+  s.enumStringValues.insert(s.enumStringValues.end(), files->begin(), files->end());
+  s.category = StrId::STR_CAT_DISPLAY;
+  s.valueGetter = [files, field, fieldSize]() -> uint8_t {
+    for (size_t i = 0; i < files->size(); i++) {
+      if (strncmp((*files)[i].c_str(), field, fieldSize - 1) == 0) return static_cast<uint8_t>(i + 1);
+    }
+    return 0;
+  };
+  s.valueSetter = [files, field, fieldSize](const uint8_t v) {
+    if (v == 0 || v > files->size()) {
+      field[0] = '\0';
+      return;
+    }
+    strncpy(field, (*files)[v - 1].c_str(), fieldSize - 1);
+    field[fieldSize - 1] = '\0';
+  };
+  return s;
 }
 
 using SettingVisitor = void (*)(void* context, SettingInfo& info);
@@ -301,6 +374,10 @@ size_t countBaseSettings();
 // run at load time, so the base list keeps these keys persisted.
 inline bool isHiddenOnDevice(const SettingInfo& s) {
   switch (s.nameId) {
+    case StrId::STR_HOME_WIDGET_LEFT:
+    case StrId::STR_HOME_WIDGET_RIGHT:
+    case StrId::STR_DAILY_GOAL:
+      return SETTINGS.uiTheme != CrossPointSettings::THCRAFT;
     // Frontlit and lightless variants of a board share one binary (EEGO A4);
     // presence is the I2C probe result from Frontlight.begin(). The slide
     // switch's position owns its bound function (the light at boot too).
@@ -352,6 +429,13 @@ template <typename Wants, typename Visit>
 void forEachSetting(const SdCardFontRegistry* registry, const std::vector<DictionaryEntry>* dictionaries, Wants wants,
                     Visit visit) {
   bool dictionaryPending = dictionaries && !dictionaries->empty();
+  std::shared_ptr<const std::vector<std::string>> widgetFiles;
+  const auto visitWidgetImage = [&](const StrId nameId, char* field, const size_t fieldSize, const char* key) {
+    if (!wants(key)) return;
+    if (!widgetFiles) widgetFiles = std::make_shared<const std::vector<std::string>>(widget_images::list());
+    SettingInfo s = buildHomeWidgetImageSetting(nameId, field, fieldSize, key, widgetFiles);
+    visit(s);
+  };
   const auto visitDictionary = [&] {
     dictionaryPending = false;
     if (!wants(DICTIONARY_SETTING_KEY)) return;
@@ -365,9 +449,18 @@ void forEachSetting(const SdCardFontRegistry* registry, const std::vector<Dictio
       visitDictionary();
     }
     if (dictionaryPending && s.category == StrId::STR_CAT_CONTROLS) visitDictionary();
-    if (!wants(s.key)) return;
-    buildFontOptions(s, registry);
-    visit(s);
+    if (wants(s.key)) {
+      buildFontOptions(s, registry);
+      visit(s);
+    }
+    if (s.nameId == StrId::STR_HOME_WIDGET_LEFT && SETTINGS.homeWidgetLeft == CrossPointSettings::HOME_WIDGET_IMAGE) {
+      visitWidgetImage(StrId::STR_HOME_WIDGET_LEFT_IMAGE, SETTINGS.homeWidgetLeftImage,
+                       sizeof(SETTINGS.homeWidgetLeftImage), "homeWidgetLeftImage");
+    } else if (s.nameId == StrId::STR_HOME_WIDGET_RIGHT &&
+               SETTINGS.homeWidgetRight == CrossPointSettings::HOME_WIDGET_IMAGE) {
+      visitWidgetImage(StrId::STR_HOME_WIDGET_RIGHT_IMAGE, SETTINGS.homeWidgetRightImage,
+                       sizeof(SETTINGS.homeWidgetRightImage), "homeWidgetRightImage");
+    }
   };
   forEachBaseSetting(each);
   if (dictionaryPending) visitDictionary();
@@ -377,8 +470,8 @@ void forEachSetting(const SdCardFontRegistry* registry, const std::vector<Dictio
 inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
                                                 const std::vector<DictionaryEntry>* dictionaries = nullptr) {
   std::vector<SettingInfo> v;
-  // Room for every base entry and the dictionary, so the list never reallocates.
-  v.reserve(countBaseSettings() + (dictionaries && !dictionaries->empty() ? 1 : 0));
+  // Include both optional widget image pickers and the dictionary.
+  v.reserve(countBaseSettings() + 2 + (dictionaries && !dictionaries->empty() ? 1 : 0));
   forEachSetting(
       registry, dictionaries, [](const char*) { return true; }, [&v](SettingInfo& s) { v.push_back(std::move(s)); });
   return v;

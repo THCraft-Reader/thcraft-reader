@@ -2,7 +2,6 @@
 
 #include <BitmapHelpers.h>
 #include <BmpToBmpConverter.h>
-#include <Epub.h>
 #include <Epub/converters/PngToFramebufferConverter.h>
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
@@ -13,7 +12,6 @@
 #include <I18n.h>
 #include <Memory.h>
 #include <PNGdec.h>
-#include <Xtc.h>
 
 #include <algorithm>
 #include <cmath>
@@ -28,8 +26,8 @@
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "images/Logo120.h"
 #include "images/MoonIcon.h"
+#include "util/BookCoverPreparation.h"
 
 namespace {
 // Metalio: B/W sleep images use the full 0xF7 waveform instead of HALF (two
@@ -820,16 +818,11 @@ void SleepActivity::renderCustomSleepScreen() const {
 // sequence, used once for the sleep image. It never runs the multi-flash GC
 // waveform (0xF7) that FULL_REFRESH selects (#2471's blinking complaint).
 void SleepActivity::renderDefaultSleepScreen() const {
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
-
+  const bool dark = SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT;
   renderer.clearScreen();
-  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_SLEEPING));
+  GUI.drawMascotScreen(renderer, tr(STR_SLEEPING), dark);
 
-  // Make sleep screen dark unless light is selected in settings
-  if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT) {
+  if (dark) {
     renderer.invertScreen();
   }
 
@@ -1027,6 +1020,7 @@ void SleepActivity::renderTransparentCustomSleepScreen() const {
 }
 
 void SleepActivity::renderCoverSleepScreen() const {
+  RenderLock lock;
   void (SleepActivity::*renderNoCoverSleepScreen)() const;
   bool withOverlay = false;
   switch (SETTINGS.sleepScreen) {
@@ -1046,41 +1040,8 @@ void SleepActivity::renderCoverSleepScreen() const {
     return (this->*renderNoCoverSleepScreen)();
   }
 
-  const bool originalThresholds = useOriginalCoverThresholds(renderer);
   std::string coverBmpPath;
-  bool cropped = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
-
-  // Check if the current book is XTC, TXT, or EPUB
-  if (FsHelpers::hasXtcExtension(APP_STATE.openEpubPath)) {
-    // Handle XTC file
-    Xtc lastXtc(APP_STATE.openEpubPath, "/.crosspoint");
-    if (!lastXtc.load()) {
-      LOG_ERR("SLP", "Failed to load last XTC");
-      return (this->*renderNoCoverSleepScreen)();
-    }
-
-    if (!lastXtc.generateCoverBmp()) {
-      LOG_ERR("SLP", "Failed to generate XTC cover bmp");
-      return (this->*renderNoCoverSleepScreen)();
-    }
-
-    coverBmpPath = lastXtc.getCoverBmpPath();
-  } else if (FsHelpers::hasReflowableBookExtension(APP_STATE.openEpubPath)) {
-    // Handle EPUB, TXT, or Markdown file
-    Epub lastEpub(APP_STATE.openEpubPath, "/.crosspoint");
-    // Skip loading css since we only need metadata here
-    if (!lastEpub.load(true, true)) {
-      LOG_ERR("SLP", "Failed to load last book");
-      return (this->*renderNoCoverSleepScreen)();
-    }
-
-    if (!lastEpub.generateCoverBmp(cropped, originalThresholds)) {
-      LOG_ERR("SLP", "Failed to generate cover bmp");
-      return (this->*renderNoCoverSleepScreen)();
-    }
-
-    coverBmpPath = lastEpub.getCoverBmpPath(cropped, originalThresholds);
-  } else {
+  if (!bookcovers::prepareForSleep(renderer, APP_STATE.openEpubPath, coverBmpPath)) {
     return (this->*renderNoCoverSleepScreen)();
   }
 

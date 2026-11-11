@@ -26,6 +26,7 @@ bool ImageDecoderFactory::isFormatSupported(const std::string& path) {
 ImageToFramebufferDecoder* ImageDecoderFactory::getDecoder(const std::string&) { return nullptr; }
 
 void ImageBlock::render(GfxRenderer&, int, int) {}
+bool ImageBlock::prepare(GfxRenderer&, int, int) const { return false; }
 void ImageBlock::renderPlaceholder(GfxRenderer&, int, int) const {}
 bool ImageBlock::needsDecode() const { return false; }
 bool ImageBlock::serialize(HalFile&) { return false; }

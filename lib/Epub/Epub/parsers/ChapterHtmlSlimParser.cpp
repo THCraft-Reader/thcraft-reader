@@ -6,6 +6,9 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <MemoryManager.h>
+#include <ThaiCluster.h>
+#include <ThaiSegmenter.h>
+#include <ThaiStats.h>
 #include <Utf8.h>
 #include <XmlParserUtils.h>
 #include <expat.h>
@@ -373,7 +376,7 @@ int ChapterHtmlSlimParser::lastLineGlyphBottom() const {
   const PageElement& last = *currentPage->elements.back();
   if (last.getTag() != TAG_PageLine) return 0;
   const TextBlock& line = *static_cast<const PageLine&>(last).getBlock();
-  const int lineFontId = line.blockFontId(fontId);
+  const int lineFontId = TextBlock::renderFontId(renderer, line.blockFontId(fontId), fontId);
   return last.yPos + renderer.getLineHeight(lineFontId) + line.extraAscent(renderer, fontId) +
          line.getRubyShift(renderer.getFontAscenderSize(lineFontId));
 }
@@ -684,6 +687,42 @@ void ChapterHtmlSlimParser::setCurrentPageVisibleOffset(const uint32_t offset) {
   currentPageVisibleOffsetSet = true;
 }
 
+EpdFontFamily::Style ChapterHtmlSlimParser::currentTextStyle() const {
+  EpdFontFamily::Style style = EpdFontFamily::REGULAR;
+  if (boldUntilDepth < depth || effectiveBold) style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::BOLD);
+  if (italicUntilDepth < depth || effectiveItalic)
+    style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::ITALIC);
+  style = static_cast<EpdFontFamily::Style>(style | fontStyleForTextDecoration(effectiveTextDecoration));
+  if (effectiveSmallCaps) style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::SMALL_CAPS);
+  if (effectiveSup)
+    style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::SUP);
+  else if (effectiveSub)
+    style = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::SUB);
+  return style;
+}
+
+uint8_t ChapterHtmlSlimParser::currentSizeSlot() {
+  if (!currentTextBlock) return 0;
+  // Inline font-size spans size their words apart from the block.
+  float inlineScale = 0.0f;
+  for (const auto& entry : inlineStyleStack) {
+    if (!entry.hasFontScale) continue;
+    const float base = inlineScale > 0.0f ? inlineScale : currentTextBlock->getBlockStyle().fontScale;
+    inlineScale = entry.fontScaleRem ? entry.fontScale : base * entry.fontScale;
+  }
+  return inlineScale > 0.0f && (inlineSize.valid || inlineScale != currentTextBlock->getBlockStyle().fontScale)
+             ? currentTextBlock->sizeSlotFor(std::clamp(inlineScale, 0.5f, 3.0f))
+             : 0;
+}
+
+uint8_t ChapterHtmlSlimParser::currentTextLink() {
+  if (!insideFootnoteLink || !currentTextBlock) return 0;
+  if (!currentTextBlock->linkTargetMatches(currentFootnoteLinkId, currentFootnote.href)) {
+    currentFootnoteLinkId = currentTextBlock->addLinkTarget(currentFootnote.href);
+  }
+  return currentFootnoteLinkId;
+}
+
 // flush the contents of partWordBuffer to currentTextBlock
 void ChapterHtmlSlimParser::flushPartWordBuffer() {
   // Block creation failed (OOM): drop the buffered text; parseStep() is about
@@ -697,30 +736,12 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
   if (effectivePreserveWhitespace) {
     currentTextBlock->suppressFirstLineIndent();
     auto& style = currentTextBlock->getBlockStyle();
-    if (style.alignment == CssTextAlign::Justify) style.alignment = CssTextAlign::Left;
+    if (style.alignment == CssTextAlign::Justify || style.alignment == CssTextAlign::ThaiJustify) {
+      style.alignment = CssTextAlign::Left;
+    }
   }
 
-  // Determine font style from depth-based tracking and CSS effective style
-  const bool isBold = boldUntilDepth < depth || effectiveBold;
-  const bool isItalic = italicUntilDepth < depth || effectiveItalic;
-
-  // Combine style flags using bitwise OR
-  EpdFontFamily::Style fontStyle = EpdFontFamily::REGULAR;
-  if (isBold) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::BOLD);
-  }
-  if (isItalic) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::ITALIC);
-  }
-  fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | fontStyleForTextDecoration(effectiveTextDecoration));
-  if (effectiveSmallCaps) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SMALL_CAPS);
-  }
-  if (effectiveSup) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUP);
-  } else if (effectiveSub) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUB);
-  }
+  const auto fontStyle = currentTextStyle();
 
   // flush the buffer
   partWordBuffer[partWordBufferIndex] = '\0';
@@ -729,26 +750,16 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
     fallbackTableRowToStacked();
   }
 
-  uint8_t linkId = 0;
-  if (insideFootnoteLink) {
-    if (!currentTextBlock->linkTargetMatches(currentFootnoteLinkId, currentFootnote.href)) {
-      currentFootnoteLinkId = currentTextBlock->addLinkTarget(currentFootnote.href);
-    }
-    linkId = currentFootnoteLinkId;
+  const uint8_t linkId = currentTextLink();
+  const uint8_t sizeSlot = currentSizeSlot();
+  if (genericBoundarySet) {
+    currentTextBlock->addWordWithBoundary(partWordBuffer, fontStyle, false, genericBoundary, partWordVisibleOffset,
+                                          linkId, sizeSlot);
+    genericBoundarySet = false;
+  } else {
+    currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, partWordVisibleOffset, linkId,
+                              sizeSlot, effectivePreserveWhitespace);
   }
-  // Inline font-size spans size their words apart from the block.
-  float inlineScale = 0.0f;
-  for (const auto& entry : inlineStyleStack) {
-    if (!entry.hasFontScale) continue;
-    const float base = inlineScale > 0.0f ? inlineScale : currentTextBlock->getBlockStyle().fontScale;
-    inlineScale = entry.fontScaleRem ? entry.fontScale : base * entry.fontScale;
-  }
-  const uint8_t sizeSlot =
-      inlineScale > 0.0f && (inlineSize.valid || inlineScale != currentTextBlock->getBlockStyle().fontScale)
-          ? currentTextBlock->sizeSlotFor(std::clamp(inlineScale, 0.5f, 3.0f))
-          : 0;
-  currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, partWordVisibleOffset, linkId,
-                            sizeSlot, effectivePreserveWhitespace);
   if (insideTableCell && !tableRowStacked) {
     tableRowTextBytes += wordBytes;
     size_t rowWords = currentTextBlock->size();
@@ -762,7 +773,387 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
   listItemBulletOnly = false;
 }
 
+void ChapterHtmlSlimParser::resolveThaiFootnotes(uint16_t firstRecord, uint16_t endRecord, int tokenEnd) {
+  for (auto& pending : pendingFootnotes) {
+    if (pending.wordIndex >= 0) continue;
+    bool covered = false;
+    bool retained = false;
+    for (uint16_t i = firstRecord; i < thaiRun->count; ++i) {
+      const auto& record = thaiRun->records[i];
+      if (record.linkId != pending.linkId || record.visibleOffset >= pending.visibleEnd) continue;
+      if (i < endRecord)
+        covered = true;
+      else
+        retained = true;
+    }
+    if (covered && !retained) pending.wordIndex = tokenEnd;
+  }
+}
+
+bool ChapterHtmlSlimParser::appendThaiCodepoint(std::string_view bytes, uint32_t cp, EpdFontFamily::Style style,
+                                                uint8_t linkId, uint8_t sizeSlot, uint32_t visibleOffset) {
+#if THAI_WORD_BREAKING
+  if (!thaiRun) {
+    if (thaiAllocationAttempted) return false;
+    thaiAllocationAttempted = true;
+#ifdef CROSSPOINT_PARSER_TEST
+    if (!failThaiAllocation)
+#endif
+      thaiRun = makeUniqueNoThrow<ThaiRunState>();
+    if (!thaiRun) {
+      thaiUnavailable = true;
+      LOG_ERR("THAI", "Analysis unavailable: OOM");
+      return false;
+    }
+#ifdef CROSSPOINT_PARSER_TEST
+    if (thaiDictionaryOverride) thaiRun->dictionary = thai::ThaiDictionary(*thaiDictionaryOverride);
+#endif
+    if (!thaiRun->dictionary.valid()) thaiUnavailable = true;
+  }
+  auto& run = *thaiRun;
+  if (run.malformed) {
+    if (thai::isDependentSign(cp)) return false;
+    if (partWordBufferIndex) flushPartWordBuffer();
+    run.malformed = false;
+    run.active = false;
+  }
+  if (!run.active) {
+    // A zero-width opportunity preceding the first Thai scalar stayed on the
+    // generic path until the run could be identified as Thai-bearing.
+    const bool zeroWidthBefore = genericLastScalar == 0x200B && partWordBufferIndex >= 3 &&
+                                 memcmp(partWordBuffer + partWordBufferIndex - 3, "\xE2\x80\x8B", 3) == 0;
+    if (zeroWidthBefore) partWordBufferIndex -= 3;
+    const bool followsGeneric = genericPrefixBytes != 0;
+    const bool glued = nextWordContinues;
+    if (partWordBufferIndex) flushPartWordBuffer();
+    run.before = followsGeneric ? (thai::isOpeningPunctuation(genericLastScalar) ? thai::BreakKind::Prohibited
+                                                                                 : thai::BreakKind::Word)
+                                : (glued ? thai::BreakKind::Prohibited : thai::BreakKind::Space);
+    if (genericBoundarySet) {
+      run.before = genericBoundary;
+      genericBoundarySet = false;
+    }
+    run.first = true;
+    run.active = true;
+    run.inBlock = true;
+    genericPrefixBytes = 0;
+    genericUrl = false;
+    if (zeroWidthBefore) run.before = thai::BreakKind::Word;
+    // Preserved spaces are already tokens of their own; the run adds no gap after one.
+    if (effectivePreserveWhitespace && run.before == thai::BreakKind::Space) run.before = thai::BreakKind::Word;
+  }
+  if (run.bytes + bytes.size() > sizeof(run.pending) || run.count == std::size(run.records)) {
+    flushThaiPending(false);
+  }
+  // Both finite lookaheads fit inside the window. Rejected clusters drain to
+  // legacy rendering instead of increasing either cap.
+  if (run.bytes + bytes.size() > sizeof(run.pending) || run.count == std::size(run.records)) {
+    run.malformed = true;
+    flushThaiPending(true);
+    return false;
+  }
+  run.records[run.count++] = {run.bytes, sizeSlot, static_cast<uint8_t>(style), linkId, visibleOffset};
+  memcpy(run.pending + run.bytes, bytes.data(), bytes.size());
+  run.bytes += static_cast<uint16_t>(bytes.size());
+#if defined(CROSSPOINT_PARSER_TEST) || THAI_ENGINE_STATS
+  run.highWater = std::max(run.highWater, run.bytes);
+#endif
+#if THAI_ENGINE_STATS
+  thai::recordInputBytes(static_cast<uint32_t>(bytes.size()), run.bytes);
+#endif
+  flushThaiPending(false);
+  softFlushTextBlock();
+  return true;
+#else
+  return false;
+#endif
+}
+
+void ChapterHtmlSlimParser::flushThaiPending(bool endOfRun) {
+  if (!thaiRun || !thaiRun->bytes || thaiRun->draining) return;
+  auto& run = *thaiRun;
+  run.draining = true;
+  const std::string_view text(run.pending, run.bytes);
+  size_t offset = 0;
+  uint16_t record = 0;
+  thai::Segment segment{};
+  while (true) {
+#if THAI_ENGINE_STATS
+    const uint32_t segmentStart = static_cast<uint32_t>(micros());
+#endif
+    const bool available = thai::nextSegment(text, offset, segment, endOfRun, run.dictionary);
+#if THAI_ENGINE_STATS
+    thai::recordSegmentMicros(static_cast<uint32_t>(micros()) - segmentStart);
+#endif
+    if (!available) break;
+    if (!run.dictionary.valid()) thaiUnavailable = true;
+    if (!segment.valid || run.malformed) {
+      // Malformed source is not unavailable analysis. Preserve every rejected
+      // byte, then resume analysis at the next non-dependent scalar.
+      run.malformed = true;
+      while (record < run.count) {
+        const uint16_t first = record;
+        const auto metadata = run.records[first];
+        ++record;
+        while (record < run.count && run.records[record].style == metadata.style &&
+               run.records[record].linkId == metadata.linkId && run.records[record].sizeSlot == metadata.sizeSlot &&
+               run.records[record].byteOffset - metadata.byteOffset < MAX_WORD_SIZE)
+          ++record;
+        const size_t end = record == run.count ? run.bytes : run.records[record].byteOffset;
+        if (currentTextBlock) {
+          currentTextBlock->addWordWithBoundary(
+              std::string(text.substr(metadata.byteOffset, end - metadata.byteOffset)),
+              static_cast<EpdFontFamily::Style>(metadata.style), false, run.before, metadata.visibleOffset,
+              metadata.linkId, metadata.sizeSlot);
+          resolveThaiFootnotes(first, record, wordsExtractedInBlock + static_cast<int>(currentTextBlock->size()));
+        }
+        run.before = thai::BreakKind::Prohibited;
+      }
+      offset = run.bytes;
+      nextWordContinues = true;
+      break;
+    }
+    thai::BreakKind before = run.before;
+    if (!run.first) {
+      before = before == thai::BreakKind::Prohibited || segment.before == thai::BreakKind::Prohibited
+                   ? thai::BreakKind::Prohibited
+                   : static_cast<thai::BreakKind>(
+                         std::min(static_cast<uint8_t>(before), static_cast<uint8_t>(segment.before)));
+    } else if (before != thai::BreakKind::Space && segment.before == thai::BreakKind::Prohibited) {
+      before = thai::BreakKind::Prohibited;
+    }
+    size_t clusterOffset = segment.begin;
+    size_t pieceBegin = segment.begin;
+    uint16_t pieceRecord = record;
+    uint8_t pieceStyle = 0;
+    uint8_t pieceLink = 0;
+    uint8_t pieceSizeSlot = 0;
+    bool havePiece = false;
+#if THAI_ENGINE_STATS
+    uint32_t clusterCount = 0;
+#endif
+    const auto emitPiece = [&](size_t end, uint16_t endRecord) {
+      if (!currentTextBlock) return;
+      const size_t pieceBytes = end - pieceBegin;
+      if (insideTableCell && !tableRowStacked && tableRowTextBytes + pieceBytes > MAX_GRID_TABLE_ROW_BYTES) {
+        fallbackTableRowToStacked();
+      }
+      currentTextBlock->addAnalyzedToken(text.substr(pieceBegin, pieceBytes),
+                                         static_cast<EpdFontFamily::Style>(pieceStyle), before,
+                                         run.records[pieceRecord].visibleOffset, pieceLink, pieceSizeSlot);
+#if THAI_CLUSTER_DEBUG
+      // Bound each record without cutting a UTF-8 scalar. Attachments do not
+      // masquerade as legal breaks in the diagnostic boundary stream.
+      size_t shown = std::min<size_t>(pieceBytes, 96);
+      while (shown < pieceBytes && (static_cast<uint8_t>(text[pieceBegin + shown]) & 0xC0) == 0x80) --shown;
+      LOG_DBG("THAI", "source_offset=%lu rank=%u %s%.*s%s",
+              static_cast<unsigned long>(run.records[pieceRecord].visibleOffset), static_cast<unsigned>(before),
+              before == thai::BreakKind::Prohibited ? "~" : "|", static_cast<int>(shown), text.data() + pieceBegin,
+              shown < pieceBytes ? "..." : "");
+#endif
+      resolveThaiFootnotes(pieceRecord, endRecord, wordsExtractedInBlock + static_cast<int>(currentTextBlock->size()));
+      if (insideTableCell && !tableRowStacked) {
+        tableRowTextBytes += pieceBytes;
+        size_t rowWords = currentTextBlock->size();
+        for (const auto& cell : tableRowCells) rowWords += cell->size();
+        if (rowWords > MAX_GRID_TABLE_ROW_WORDS) fallbackTableRowToStacked();
+      }
+      listItemBulletOnly = false;
+      before = thai::BreakKind::Prohibited;
+    };
+    while (clusterOffset < segment.end) {
+      thai::Cluster cluster{};
+      thai::nextCluster(text.substr(0, segment.end), clusterOffset, cluster, true);
+#if THAI_ENGINE_STATS
+      ++clusterCount;
+#endif
+      const uint16_t first = record;
+      uint16_t base = first;
+      bool foundBase = false;
+      while (record < run.count && run.records[record].byteOffset < cluster.end) {
+        const auto scalar = thai::detail::decode(text, run.records[record].byteOffset, true);
+        if (!foundBase && thai::isBase(scalar.value)) {
+          base = record;
+          foundBase = true;
+        }
+        ++record;
+      }
+      const auto& metadata = run.records[base];
+      const bool sourceGap = first > pieceRecord && run.records[first].visibleOffset !=
+                                                        run.records[pieceRecord].visibleOffset + (first - pieceRecord);
+      if (havePiece && (pieceStyle != metadata.style || pieceLink != metadata.linkId ||
+                        pieceSizeSlot != metadata.sizeSlot || sourceGap)) {
+        emitPiece(cluster.begin, first);
+        pieceBegin = cluster.begin;
+        pieceRecord = first;
+      }
+      pieceStyle = metadata.style;
+      pieceLink = metadata.linkId;
+      pieceSizeSlot = metadata.sizeSlot;
+      havePiece = true;
+    }
+    if (havePiece) emitPiece(segment.end, record);
+#if THAI_ENGINE_STATS
+    thai::recordSegments(clusterCount, segment.known ? 1 : 0,
+                         segment.before == thai::BreakKind::Emergency ? clusterCount : 0);
+#endif
+    run.before = segment.after;
+    run.first = false;
+  }
+  if (!run.dictionary.valid()) thaiUnavailable = true;
+  if (offset) {
+    run.bytes -= static_cast<uint16_t>(offset);
+    memmove(run.pending, run.pending + offset, run.bytes);
+    run.count -= record;
+    for (uint16_t i = 0; i < run.count; ++i) {
+      run.records[i] = run.records[i + record];
+      run.records[i].byteOffset -= static_cast<uint16_t>(offset);
+    }
+  }
+  run.draining = false;
+}
+
+void ChapterHtmlSlimParser::endTextRun(bool thaiOnly) {
+  flushThaiPending(true);
+  // New transition hooks must not change legacy generic flush/style timing.
+  // Existing generic flush sites still run when no Thai-bearing block exists.
+  if (partWordBufferIndex && (!thaiOnly || (thaiRun && thaiRun->inBlock))) flushPartWordBuffer();
+  if (thaiRun && !thaiRun->draining) {
+    thaiRun->active = false;
+    thaiRun->malformed = false;
+  }
+  genericPrefixBytes = 0;
+  genericUrl = false;
+  genericBoundarySet = false;
+}
+
+void ChapterHtmlSlimParser::appendLegacyBytes(std::string_view bytes, uint32_t visibleOffset) {
+  // Retain legacy 200-byte chunking, including its UTF-8-safe spill.
+  for (char byte : bytes) {
+    if (partWordBufferIndex >= MAX_WORD_SIZE) {
+      const int safeLen = utf8SafeTruncateBuffer(partWordBuffer, partWordBufferIndex);
+      const int overflow = partWordBufferIndex - safeLen;
+      char saved[4];
+      memcpy(saved, partWordBuffer + safeLen, overflow);
+      partWordBufferIndex = safeLen;
+      flushPartWordBuffer();
+      nextWordContinues = true;
+      memcpy(partWordBuffer, saved, overflow);
+      partWordBufferIndex = overflow;
+      partWordVisibleOffset = visibleOffset;
+    }
+    if (!partWordBufferIndex) partWordVisibleOffset = visibleOffset;
+    partWordBuffer[partWordBufferIndex++] = byte;
+  }
+}
+
+void ChapterHtmlSlimParser::consumeCodepoint(std::string_view bytes, uint32_t cp, uint32_t visibleOffset) {
+  if (!currentTextBlock) return;  // block allocation failed; the build is failing
+  const bool whitespace = cp < 128 && isWhitespace(static_cast<char>(cp));
+
+  // Initial-letter capture: a drop-cap span takes all of its text; ::first-letter takes
+  // leading punctuation plus the block's first letter.
+  const bool capturingSpan = dropCap.spanDepth >= 0;
+  if (capturingSpan || (dropCap.firstLetterPending && !whitespace && !insideFootnoteLink && blockHasNoText())) {
+    if (thai::isThai(cp)) {
+      // Drop caps draw unshaped codepoints, so Thai stays in the text. Captured leading
+      // punctuation re-enters as ordinary text so it keeps its attachment to the Thai run.
+      const DropCapState captured = dropCap;
+      dropCap = DropCapState{};
+      std::string_view rest(captured.text, captured.length);
+      uint32_t offset = visibleOffset >= captured.codepoints ? visibleOffset - captured.codepoints : visibleOffset;
+      while (!rest.empty()) {
+        const auto scalar = thai::detail::decode(rest, 0, true);
+        if (!scalar.bytes) break;
+        consumeCodepoint(rest.substr(0, scalar.bytes), scalar.value, offset++);
+        rest.remove_prefix(scalar.bytes);
+      }
+      if (!currentTextBlock) return;
+    } else if (whitespace) {
+      // Several words: not an initial letter after all.
+      if (dropCap.length > 0) cancelDropCapToWord();
+    } else if (captureDropCapCodepoint(bytes.data(), static_cast<int>(bytes.size()))) {
+      return;
+    }
+  }
+
+  if (effectivePreserveWhitespace && whitespace) {
+    endTextRun();
+    currentTextBlock->suppressFirstLineIndent();
+    if (cp == '\n') {
+      const BlockStyle style = currentTextBlock->getBlockStyle().withoutTop().withoutBottom();
+      breakTextLine(style);
+    } else if (cp != '\r') {
+      // XML normalizes line endings; tabs use a bounded four-space expansion.
+      const int count = cp == '\t' ? 4 : 1;
+      for (int space = 0; space < count; ++space) {
+        partWordBuffer[0] = ' ';
+        partWordBufferIndex = 1;
+        partWordVisibleOffset = visibleOffset;
+        flushPartWordBuffer();
+      }
+    }
+    return;
+  }
+
+  if (whitespace) {
+    endTextRun();
+    nextWordContinues = false;
+    return;
+  }
+  if (cp == 0xA0 || cp == 0x202F) {
+    endTextRun();
+    partWordBuffer[0] = ' ';
+    partWordBufferIndex = 1;
+    partWordVisibleOffset = visibleOffset;
+    nextWordContinues = true;
+    flushPartWordBuffer();
+    nextWordContinues = true;
+    return;
+  }
+  if (cp == 0xFEFF) return;
+#if THAI_WORD_BREAKING
+  if (cp == 0x200B && thaiRun && thaiRun->inBlock && !genericUrl) {
+    endTextRun();
+    genericBoundary = thai::BreakKind::Word;
+    genericBoundarySet = true;
+    nextWordContinues = false;
+    return;
+  }
+  const bool analyzedScalar =
+      (thai::isThai(cp) && !thai::isDigit(cp)) ||
+      (thaiRun && thaiRun->active && (thai::isOpeningPunctuation(cp) || thai::isClosingPunctuation(cp)));
+  if (analyzedScalar && !genericUrl &&
+      appendThaiCodepoint(bytes, cp, currentTextStyle(), currentTextLink(), currentSizeSlot(), visibleOffset))
+    return;
+  if (thaiRun && thaiRun->active && !thaiRun->malformed) {
+    flushThaiPending(true);
+    genericBoundary =
+        thaiRun->before == thai::BreakKind::Prohibited ? thai::BreakKind::Prohibited : thai::BreakKind::Word;
+    genericBoundarySet = true;
+    thaiRun->active = false;
+  }
+  if (thaiRun && thaiRun->malformed && !thai::isDependentSign(cp)) {
+    if (partWordBufferIndex) flushPartWordBuffer();
+    thaiRun->malformed = false;
+    thaiRun->active = false;
+  }
+#endif
+  if (genericPrefixBytes < sizeof(genericPrefix)) {
+    for (char byte : bytes) {
+      if (genericPrefixBytes == sizeof(genericPrefix)) break;
+      genericPrefix[genericPrefixBytes++] = byte;
+    }
+    const std::string_view prefix(genericPrefix, genericPrefixBytes);
+    genericUrl = prefix == "http://" || prefix == "https://" || prefix == "www." || genericUrl;
+  }
+  genericLastScalar = cp;
+  appendLegacyBytes(bytes, visibleOffset);
+}
+
 void ChapterHtmlSlimParser::breakTextLine(const BlockStyle& style) {
+  // Pending Thai text belongs to the line being broken.
+  endTextRun(true);
   const bool hasText = currentTextBlock && !currentTextBlock->isEmpty();
   if (!hasText && currentPage && !currentPage->elements.empty()) {
     const int lineHeight = renderer.getLineHeight(fontId, lineCompression);
@@ -775,6 +1166,8 @@ void ChapterHtmlSlimParser::breakTextLine(const BlockStyle& style) {
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, const bool paragraphEnd) {
   if (stopRequested) return;
+  endTextRun(true);
+  if (thaiRun) thaiRun->inBlock = false;
   nextWordContinues = false;  // New block = new paragraph, no continuation
   if (currentTextBlock) {
     // already have a text block running and it is empty - just reuse it
@@ -813,20 +1206,29 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, cons
   if (stopRequested) return;
   dropCap.firstLetterPending = false;
   inlineSize = InlineSizeState{};
-  currentTextBlock =
-      makeUniqueNoThrow<ParsedText>(hyphenationEnabled, focusReadingEnabled, blockStyle, paragraphIndentSpaces);
-  if (!currentTextBlock) {
-    // Evict rebuildable caches and retry once before failing the build.
-    freeink::MemoryManager::instance().ensureFree(4 * 1024);
-    currentTextBlock =
-        makeUniqueNoThrow<ParsedText>(hyphenationEnabled, focusReadingEnabled, blockStyle, paragraphIndentSpaces);
-  }
+  currentTextBlock = makeTextBlock(blockStyle);
   if (!currentTextBlock) {
     LOG_ERR("EHP", "OOM: ParsedText");
     layoutOom = true;  // parseStep() turns this into ParseStatus::Error
   }
   wordsExtractedInBlock = 0;
   listItemBulletOnly = false;
+}
+
+std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeTextBlock(const BlockStyle& blockStyle) {
+#ifdef CROSSPOINT_PARSER_TEST
+  if (failTextBlockAllocation) return nullptr;
+#endif
+  // ParsedText's deque members allocate inside its constructor through throwing
+  // new, which aborts under -fno-exceptions, so admit on a contiguous probe.
+  const auto contiguous = [] { return makeUniqueNoThrow<uint8_t[]>(TEXT_BLOCK_MIN_CONTIGUOUS) != nullptr; };
+  if (!contiguous()) {
+    // Evict rebuildable caches and retry once. ensureFree() compares total free
+    // bytes and cannot see a fragmented heap.
+    freeink::MemoryManager::instance().clearCaches();
+    if (!contiguous()) return nullptr;
+  }
+  return makeUniqueNoThrow<ParsedText>(hyphenationEnabled, focusReadingEnabled, blockStyle, paragraphIndentSpaces);
 }
 
 void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
@@ -904,6 +1306,10 @@ void ChapterHtmlSlimParser::fallbackTableRowToStacked() {
     return;
   }
 
+  // Pending analysis belongs to the active cell, not to the saved cells being
+  // laid out during this transfer (including when a link forces stacked flow).
+  const bool wasDraining = thaiRun && thaiRun->draining;
+  if (thaiRun) thaiRun->draining = true;
   auto activeCell = std::move(currentTextBlock);
   tableRowStacked = true;
 
@@ -916,6 +1322,7 @@ void ChapterHtmlSlimParser::fallbackTableRowToStacked() {
   }
   tableRowCells.clear();
   currentTextBlock = std::move(activeCell);
+  if (thaiRun) thaiRun->draining = wasDraining;
   wordsExtractedInBlock = 0;
 }
 
@@ -923,6 +1330,8 @@ void ChapterHtmlSlimParser::closeTableCell() {
   if (!insideTableCell) {
     return;
   }
+  endTextRun(true);
+  if (thaiRun) thaiRun->inBlock = false;
   insideTableCell = false;
   const int bottomPadding = blockStyleStack.back().paddingBottom;
   blockStyleStack.pop_back();
@@ -978,7 +1387,8 @@ void ChapterHtmlSlimParser::addTableRowSeparator() {
 
 // Streams a table's raw markup from its opening tag and measures each column's
 // longest word and longest unwrapped line, so every row can share one set of
-// widths. Returns false when the table is too long or too wide to plan.
+// widths. Returns false when the table cannot be planned: too long, too wide, or
+// holding unspaced Thai text.
 bool ChapterHtmlSlimParser::measureTableColumns(HalFile& file, TableColumnMeasure& out) const {
   out = TableColumnMeasure{};
   constexpr size_t MAX_SCAN_BYTES = 32 * 1024;
@@ -1000,6 +1410,7 @@ bool ChapterHtmlSlimParser::measureTableColumns(HalFile& file, TableColumnMeasur
   bool skipCell = false;
   int lineWidth = 0;
   EpdFontFamily::Style style = EpdFontFamily::REGULAR;
+  char previous = 0;
 
   const auto flushChunk = [&] {
     if (wordLength == 0) return;
@@ -1088,6 +1499,12 @@ bool ChapterHtmlSlimParser::measureTableColumns(HalFile& file, TableColumnMeasur
         continue;
       }
       if (!inCell || skipCell || tableNesting != 1) continue;
+      // Thai (U+0E00-U+0E7F, E0 B8/B9 xx) has no spaces between words, so a sentence would
+      // measure as one word; such tables keep equal columns.
+      const bool thaiLead = static_cast<uint8_t>(previous) == 0xE0 &&
+                            (static_cast<uint8_t>(c) == 0xB8 || static_cast<uint8_t>(c) == 0xB9);
+      previous = c;
+      if (thaiLead) return false;
       if (inEntity) {
         inEntity = c != ';';
         continue;
@@ -1489,6 +1906,15 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     return;
   }
 
+  // Structural transitions are true run ends; inline style/link changes are
+  // not. Drain before testing block emptiness, moving cells, or inserting images.
+  if (isHeaderOrBlock(name) || isTableStructuralTag(name) || matches(name, IMAGE_TAGS, std::size(IMAGE_TAGS)) ||
+      strcmp(name, "hr") == 0) {
+    self->endTextRun(true);
+  } else {
+    self->flushThaiPending(false);
+  }
+
   // Buffer one simple row; oversized rows fall back to full-width flow.
   if (strcmp(name, "table") == 0) {
     // Flatten nested content without allocating a recursive row buffer.
@@ -1610,8 +2036,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       tableCellBlockStyle.isRtl = cssStyle.direction == CssTextDirection::Rtl;
     }
 
-    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
-                                                           tableCellBlockStyle, self->paragraphIndentSpaces);
+    self->currentTextBlock = self->makeTextBlock(tableCellBlockStyle);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: table cell");
       self->skipUntilDepth = self->depth;
@@ -1966,12 +2391,11 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
   // Ruby tag handling
   if (strcmp(name, "ruby") == 0) {
+    const bool hadText = self->partWordBufferIndex > 0 || (self->thaiRun && self->thaiRun->active);
+    self->endTextRun();
+    if (hadText) self->nextWordContinues = true;
     // <ruby> is an inline element: a base that follows text with no whitespace between them
     // continues the same visual word, exactly like <b>/<i> handling in endElement().
-    if (self->partWordBufferIndex > 0) {
-      self->flushPartWordBuffer();
-      self->nextWordContinues = true;
-    }
     self->inRuby = true;
     self->rubyStartWordIndex = self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0;
     if (self->currentTextBlock) {
@@ -1982,6 +2406,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     return;
   }
   if (strcmp(name, "rt") == 0) {
+    self->endTextRun();
     if (self->partWordBufferIndex > 0) {
       self->flushPartWordBuffer();
     }
@@ -2238,8 +2663,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
-    if (cssStyle.hasFontSize() && self->tableDepth == 0 && self->partWordBufferIndex == 0 && self->currentTextBlock &&
-        self->currentTextBlock->isEmpty() && (!self->inlineSize.valid || self->inlineSize.open)) {
+    if (cssStyle.hasFontSize() && self->tableDepth == 0 && self->blockHasNoText() &&
+        (!self->inlineSize.valid || self->inlineSize.open)) {
       const float base =
           self->inlineSize.valid ? self->inlineSize.scale : self->currentTextBlock->getBlockStyle().fontScale;
       self->inlineSize.scale =
@@ -2250,8 +2675,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       self->inlineSize.open = true;
     }
     // A floated or oversized span opening a paragraph is a hand-made drop cap.
-    if (self->tableDepth == 0 && self->dropCap.length == 0 && self->dropCap.spanDepth < 0 &&
-        self->partWordBufferIndex == 0 && self->currentTextBlock && self->currentTextBlock->isEmpty()) {
+    if (self->tableDepth == 0 && self->dropCap.length == 0 && self->dropCap.spanDepth < 0 && self->blockHasNoText()) {
       const uint8_t lines = dropCapLines(cssStyle);
       if (lines > 0) {
         self->dropCap.spanDepth = self->depth;
@@ -2313,11 +2737,10 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   const bool countVisibleOffsets = self->insideBody && self->nonVisibleTextDepth == 0 && !self->syntheticCharacterData;
   const uint32_t callbackVisibleOffset = self->visibleTextOffset;
   if (countVisibleOffsets) {
-    const unsigned char* ptr = reinterpret_cast<const unsigned char*>(s);
-    const unsigned char* end = ptr + len;
-    while (ptr < end) {
-      utf8NextCodepoint(&ptr);
-      self->visibleTextOffset++;
+    // Count leading bytes without decoding beyond the callback. Expat normally
+    // supplies complete scalars; direct callback users may split one arbitrarily.
+    for (int i = 0; i < len; ++i) {
+      if ((static_cast<uint8_t>(s[i]) & 0xC0) != 0x80) self->visibleTextOffset++;
     }
   }
 
@@ -2354,8 +2777,7 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   if (!self->currentTextBlock) {
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
-    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
-                                                           flowStyle, self->paragraphIndentSpaces);
+    self->currentTextBlock = self->makeTextBlock(flowStyle);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block for character data");
       return;
@@ -2397,188 +2819,30 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   }
 
   uint32_t nextCodepointOffset = callbackVisibleOffset;
-  for (int i = 0; i < len; i++) {
-    const uint32_t codepointOffset = nextCodepointOffset;
-    if (countVisibleOffsets && (static_cast<uint8_t>(s[i]) & 0xC0) != 0x80) {
-      nextCodepointOffset++;
+  for (int i = 0; i < len; ++i) {
+    if (!self->scalarCarryBytes) self->scalarCarryVisibleOffset = nextCodepointOffset;
+    if (countVisibleOffsets && (static_cast<uint8_t>(s[i]) & 0xC0) != 0x80) ++nextCodepointOffset;
+    self->scalarCarry[self->scalarCarryBytes++] = s[i];
+    while (self->scalarCarryBytes) {
+      const std::string_view pending(self->scalarCarry, self->scalarCarryBytes);
+      const auto scalar = thai::detail::decode(pending, 0, false);
+      if (!scalar.bytes) break;
+      self->consumeCodepoint(pending.substr(0, scalar.bytes), scalar.value, self->scalarCarryVisibleOffset);
+      self->scalarCarryBytes -= scalar.bytes;
+      memmove(self->scalarCarry, self->scalarCarry + scalar.bytes, self->scalarCarryBytes);
+      if (self->scalarCarryBytes) ++self->scalarCarryVisibleOffset;
     }
-
-    // Initial-letter capture: a drop-cap span takes all of its text; ::first-letter takes
-    // leading punctuation plus the block's first letter.
-    const bool capturingSpan = self->dropCap.spanDepth >= 0;
-    if (capturingSpan || (self->dropCap.firstLetterPending && !isWhitespace(s[i]) && self->partWordBufferIndex == 0 &&
-                          !self->insideFootnoteLink && self->currentTextBlock->isEmpty())) {
-      if (isWhitespace(s[i])) {
-        // Several words: not an initial letter after all.
-        if (self->dropCap.length > 0) self->cancelDropCapToWord();
-      } else {
-        const auto lead = static_cast<uint8_t>(s[i]);
-        const int codepointLength = std::min(len - i, lead < 0x80 ? 1 : (lead < 0xE0 ? 2 : (lead < 0xF0 ? 3 : 4)));
-        if (self->captureDropCapCodepoint(s + i, codepointLength)) {
-          i += codepointLength - 1;
-          continue;
-        }
-      }
-    }
-
-    if (self->effectivePreserveWhitespace && isWhitespace(s[i])) {
-      self->flushPartWordBuffer();
-      self->currentTextBlock->suppressFirstLineIndent();
-      if (s[i] == '\n') {
-        const BlockStyle style = self->currentTextBlock->getBlockStyle().withoutTop().withoutBottom();
-        self->breakTextLine(style);
-        if (!self->currentTextBlock) return;
-      } else if (s[i] != '\r') {
-        // XML normalizes line endings; tabs use a bounded four-space expansion.
-        const int count = s[i] == '\t' ? 4 : 1;
-        for (int space = 0; space < count; ++space) {
-          self->partWordBuffer[0] = ' ';
-          self->partWordBufferIndex = 1;
-          self->partWordVisibleOffset = codepointOffset;
-          self->flushPartWordBuffer();
-        }
-      }
-      continue;
-    }
-
-    if (isWhitespace(s[i])) {
-      // Currently looking at whitespace, if there's anything in the partWordBuffer, flush it
-      if (self->partWordBufferIndex > 0) {
-        self->flushPartWordBuffer();
-      }
-      // Whitespace is a real word boundary — reset continuation state
-      self->nextWordContinues = false;
-      // Skip the whitespace char
-      continue;
-    }
-
-    // Detect U+00A0 (non-breaking space, UTF-8: 0xC2 0xA0) or
-    //        U+202F (narrow no-break space, UTF-8: 0xE2 0x80 0xAF).
-    //
-    // Both are rendered as a visible space but must never allow a line break around them.
-    // We split the no-break space into its own word token and link the surrounding words
-    // with continuation flags so the layout engine treats them as an indivisible group.
-    //
-    // Example: "200&#xA0;Quadratkilometer" or "200&#x202F;Quadratkilometer"
-    //   Input bytes:  "200\xC2\xA0Quadratkilometer"  (or 0xE2 0x80 0xAF for U+202F)
-    //   Tokens produced:
-    //     [0] "200"               continues=false
-    //     [1] " "                 continues=true   (attaches to "200", no gap)
-    //     [2] "Quadratkilometer"  continues=true   (attaches to " ", no gap)
-    //
-    //   The continuation flags prevent the line-breaker from inserting a line break
-    //   between "200" and "Quadratkilometer". However, "Quadratkilometer" is now a
-    //   standalone word for hyphenation purposes, so Liang patterns can produce
-    //   "200 Quadrat-" / "kilometer" instead of the unusable "200" / "Quadratkilometer".
-    if (static_cast<uint8_t>(s[i]) == 0xC2 && i + 1 < len && static_cast<uint8_t>(s[i + 1]) == 0xA0) {
-      if (self->partWordBufferIndex > 0) {
-        self->flushPartWordBuffer();
-      }
-
-      self->partWordBuffer[0] = ' ';
-      self->partWordBuffer[1] = '\0';
-      self->partWordBufferIndex = 1;
-      self->partWordVisibleOffset = codepointOffset;
-      self->nextWordContinues = true;  // Attach space to previous word (no break).
-      self->flushPartWordBuffer();
-
-      self->nextWordContinues = true;  // Next real word attaches to this space (no break).
-
-      i++;  // Skip the second byte (0xA0)
-      continue;
-    }
-
-    // U+202F (narrow no-break space) — identical logic to U+00A0 above.
-    if (static_cast<uint8_t>(s[i]) == 0xE2 && i + 2 < len && static_cast<uint8_t>(s[i + 1]) == 0x80 &&
-        static_cast<uint8_t>(s[i + 2]) == 0xAF) {
-      if (self->partWordBufferIndex > 0) {
-        self->flushPartWordBuffer();
-      }
-
-      self->partWordBuffer[0] = ' ';
-      self->partWordBuffer[1] = '\0';
-      self->partWordBufferIndex = 1;
-      self->partWordVisibleOffset = codepointOffset;
-      self->nextWordContinues = true;
-      self->flushPartWordBuffer();
-
-      self->nextWordContinues = true;
-
-      i += 2;  // Skip the remaining two bytes (0x80 0xAF)
-      continue;
-    }
-
-    // Skip Zero Width No-Break Space / BOM (U+FEFF) = 0xEF 0xBB 0xBF
-    const XML_Char FEFF_BYTE_1 = static_cast<XML_Char>(0xEF);
-    const XML_Char FEFF_BYTE_2 = static_cast<XML_Char>(0xBB);
-    const XML_Char FEFF_BYTE_3 = static_cast<XML_Char>(0xBF);
-
-    if (s[i] == FEFF_BYTE_1) {
-      // Check if the next two bytes complete the 3-byte sequence
-      if ((i + 2 < len) && (s[i + 1] == FEFF_BYTE_2) && (s[i + 2] == FEFF_BYTE_3)) {
-        // Sequence 0xEF 0xBB 0xBF found!
-        i += 2;    // Skip the next two bytes
-        continue;  // Move to the next iteration
-      }
-    }
-
-    // If we're about to run out of space, then cut the word off and start a new one.
-    // For CJK text (no spaces), this is the primary word-breaking mechanism.
-    // We must avoid splitting multi-byte UTF-8 sequences across word boundaries,
-    // otherwise the trailing bytes become orphaned continuation bytes that the
-    // decoder can't interpret.
-    if (self->partWordBufferIndex >= MAX_WORD_SIZE) {
-      int safeLen = utf8SafeTruncateBuffer(self->partWordBuffer, self->partWordBufferIndex);
-
-      if (safeLen < self->partWordBufferIndex && safeLen > 0) {
-        // Incomplete UTF-8 sequence at the end — save it before flushing
-        int overflow = self->partWordBufferIndex - safeLen;
-        uint32_t overflowVisibleOffset = self->partWordVisibleOffset;
-        const unsigned char* offsetPtr = reinterpret_cast<const unsigned char*>(self->partWordBuffer);
-        const unsigned char* const safeEnd = offsetPtr + safeLen;
-        while (offsetPtr < safeEnd) {
-          utf8NextCodepoint(&offsetPtr);
-          overflowVisibleOffset++;
-        }
-        char saved[4];
-        for (int j = 0; j < overflow; j++) {
-          saved[j] = self->partWordBuffer[safeLen + j];
-        }
-        self->partWordBufferIndex = safeLen;
-        self->flushPartWordBuffer();
-        self->nextWordContinues = true;
-        for (int j = 0; j < overflow; j++) {
-          self->partWordBuffer[j] = saved[j];
-        }
-        self->partWordBufferIndex = overflow;
-        self->partWordVisibleOffset = overflowVisibleOffset;
-      } else {
-        self->flushPartWordBuffer();
-        self->nextWordContinues = true;
-      }
-    }
-
-    if (self->partWordBufferIndex == 0) {
-      self->partWordVisibleOffset = codepointOffset;
-    }
-    self->partWordBuffer[self->partWordBufferIndex++] = s[i];
   }
+  self->flushThaiPending(false);
 
-  // Block creation failed (OOM): nothing to soft-flush.
-  if (!self->currentTextBlock) {
-    return;
-  }
+  self->softFlushTextBlock();
+}
 
-  // Keep token growth bounded: CSS-heavy spans can fragment text into many tiny
-  // words, so flush earlier when embedded CSS is active. We still keep the
-  // "exclude last line" behavior to preserve paragraph flow across chunks.
-  const size_t blockWordCount = self->currentTextBlock->size();
-  const size_t softFlushThreshold =
-      self->embeddedStyle ? TEXT_BLOCK_SOFT_FLUSH_WORDS_WITH_CSS : TEXT_BLOCK_SOFT_FLUSH_WORDS;
-  if (blockWordCount > softFlushThreshold && !self->inRuby) {
-    LOG_DBG("EHP", "Text block soft flush (%u words)", static_cast<unsigned>(blockWordCount));
-    self->makePages(/*includeLastLine=*/false);
-  }
+void ChapterHtmlSlimParser::softFlushTextBlock() {
+  if (!currentTextBlock) return;
+  const size_t threshold = embeddedStyle ? TEXT_BLOCK_SOFT_FLUSH_WORDS_WITH_CSS : TEXT_BLOCK_SOFT_FLUSH_WORDS;
+  if (currentTextBlock->size() <= threshold || inRuby || (insideTableCell && !tableRowStacked)) return;
+  makePages(/*includeLastLine=*/false);
 }
 
 void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const XML_Char* s, const int len) {
@@ -2638,6 +2902,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
     return;
   }
   if (strcmp(name, "ruby") == 0 && self->inRuby) {
+    self->endTextRun(true);
     self->inRuby = false;
     self->rubyStartWordIndex = -1;
     self->rubyTextBuffer.clear();
@@ -2660,6 +2925,12 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   const bool headerOrBlockTag = isHeaderOrBlock(name);
   const bool tableStructuralTag = isTableStructuralTag(name);
   const bool insideSkippedSubtree = self->depth - 1 >= self->skipUntilDepth;
+  if (!insideSkippedSubtree && (headerOrBlockTag || tableStructuralTag ||
+                                matches(name, IMAGE_TAGS, std::size(IMAGE_TAGS)) || self->depth == 1)) {
+    self->endTextRun(true);
+  } else if (!insideSkippedSubtree) {
+    self->flushThaiPending(false);
+  }
 
   if (!insideSkippedSubtree && self->tableDepth > 1 && strcmp(name, "table") == 0) {
     if (self->partWordBufferIndex > 0) {
@@ -2719,7 +2990,15 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
       entry.href[sizeof(entry.href) - 1] = '\0';
       int wordIndex =
           self->wordsExtractedInBlock + (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0);
-      self->pendingFootnotes.push_back({wordIndex, entry});
+      if (self->thaiRun) {
+        for (uint16_t i = 0; i < self->thaiRun->count; ++i) {
+          if (self->thaiRun->records[i].linkId == self->currentFootnoteLinkId) {
+            wordIndex = -1;
+            break;
+          }
+        }
+      }
+      self->pendingFootnotes.push_back({wordIndex, entry, self->visibleTextOffset, self->currentFootnoteLinkId});
     }
     self->insideFootnoteLink = false;
     self->currentFootnoteLinkId = 0;
@@ -2756,8 +3035,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
-    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
-                                                           flowStyle, self->paragraphIndentSpaces);
+    self->currentTextBlock = self->makeTextBlock(flowStyle);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block after table");
     }
@@ -2924,7 +3202,8 @@ ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
 
   const int done = parseFile_.available() == 0;
 
-  if (XML_ParseBuffer(xmlParser_, static_cast<int>(len), done) == XML_STATUS_ERROR) {
+  const auto parseStatus = XML_ParseBuffer(xmlParser_, static_cast<int>(len), done);
+  if (parseStatus == XML_STATUS_ERROR) {
     if (stopRequested) return ParseStatus::Error;
     if (htmlEnded_) {
       LOG_DBG("EHP", "Ignoring trailing data after </html>: %s", XML_ErrorString(XML_GetErrorCode(xmlParser_)));
@@ -2957,6 +3236,12 @@ void ChapterHtmlSlimParser::requestStop() {
 
 bool ChapterHtmlSlimParser::finishParse() {
   if (stopRequested) return false;
+  if (scalarCarryBytes) {
+    flushThaiPending(true);
+    appendLegacyBytes(std::string_view(scalarCarry, scalarCarryBytes), scalarCarryVisibleOffset);
+    scalarCarryBytes = 0;
+  }
+  endTextRun();
   // Same check as parseStep(): drops in the final buffer would otherwise slip
   // through because Done is returned before the next step's check runs.
   if (layoutOom || (currentTextBlock && currentTextBlock->hadDroppedWords())) {
@@ -3178,11 +3463,14 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
   // Track cumulative words to assign footnotes to the page containing their anchor
   wordsExtractedInBlock += line->wordCount();
   auto footnoteIt = pendingFootnotes.begin();
-  while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
-    currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href);
-    ++footnoteIt;
+  while (footnoteIt != pendingFootnotes.end()) {
+    if (footnoteIt->wordIndex >= 0 && footnoteIt->wordIndex <= wordsExtractedInBlock) {
+      currentPage->addFootnote(footnoteIt->entry.number, footnoteIt->entry.href);
+      footnoteIt = pendingFootnotes.erase(footnoteIt);
+    } else {
+      ++footnoteIt;
+    }
   }
-  pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);
 
   // Apply horizontal left inset (margin + padding) as x position offset
   const int16_t xOffset = line->getBlockStyle().leftInset();
@@ -3211,6 +3499,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
 
 void ChapterHtmlSlimParser::makePages(const bool includeLastLine, const bool paragraphEnd) {
   if (stopRequested) return;
+  if (includeLastLine) flushThaiPending(true);
   if (!currentTextBlock) {
     LOG_ERR("EHP", "!! No text block to make pages for !!");
     return;
@@ -3254,16 +3543,19 @@ void ChapterHtmlSlimParser::makePages(const bool includeLastLine, const bool par
     layoutOom = true;
   }
 
-  // Trailing spacing and footnotes only apply when the block is finalized
+  // Trailing spacing and footnotes only apply when the block is finalized.
   if (includeLastLine) {
-    // Fallback: transfer any remaining pending footnotes to current page.
-    // Normally addLineToPage handles this via word-index tracking, but this catches
-    // edge cases where a footnote's word index equals the exact block size.
+    // Thai footnotes without a resolved token index remain pending.
     if (!pendingFootnotes.empty() && currentPage) {
-      for (const auto& [idx, fn] : pendingFootnotes) {
-        currentPage->addFootnote(fn.number, fn.href);
+      auto pending = pendingFootnotes.begin();
+      while (pending != pendingFootnotes.end()) {
+        if (pending->wordIndex >= 0) {
+          currentPage->addFootnote(pending->entry.number, pending->entry.href);
+          pending = pendingFootnotes.erase(pending);
+        } else {
+          ++pending;
+        }
       }
-      pendingFootnotes.clear();
     }
 
     if (!paragraphEnd) return;

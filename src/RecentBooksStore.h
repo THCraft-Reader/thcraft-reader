@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <PersistableStore.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,13 @@ struct RecentBook {
   std::string title;
   std::string author;
   std::string coverBmpPath;
+  // Last saved reading position, written when the reader exits or sleeps.
+  uint16_t progressBp = PROGRESS_UNKNOWN;  // 0..10000
+  uint16_t chapterIndex = 0;               // 1-based; 0 with chapterCount 0 = unknown
+  uint16_t chapterCount = 0;
+
+  static constexpr uint16_t PROGRESS_UNKNOWN = 0xFFFF;
+  bool hasProgress() const { return progressBp <= 10000; }
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
@@ -37,6 +45,10 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
 
   void updateBook(const std::string& path, const std::string& title, const std::string& author,
                   const std::string& coverBmpPath);
+
+  // Store the last reading position of a listed book; saves only when it changed.
+  // Returns false when the path is not listed.
+  bool updateProgress(const std::string& path, uint16_t progressBp, uint16_t chapterIndex, uint16_t chapterCount);
 
   // Remove the entry whose path matches (used when a book is removed from recents or finished/read).
   // Returns true if an entry was found and removed (no-op + false otherwise).

@@ -206,7 +206,7 @@ Books cannot be removed from your device through Calibre. Use the web interface 
 
 ### 3.6 Settings
 
-Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **Library**, and **Connectivity**. System contains language, keyboard layouts, hidden-file visibility, Clock (where available), firmware updates, and About. Library contains Use Book Metadata, Clear Read Books from Recent List, and Move Finished Books to Read Folder. Time to Sleep is under Display; Clear Reading Cache is under Reader. Connectivity contains Wi-Fi, Bluetooth Page Turner, CrossPoint Sync, OPDS, and the Plugins toggle. The options below describe these settings.
+Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **Library**, and **Connectivity**. System contains language, keyboard layouts, hidden-file visibility, Clock, firmware updates, and About. Library contains Use Book Metadata, Clear Read Books from Recent List, and Move Finished Books to Read Folder. Time to Sleep is under Display; Clear Reading Cache is under Reader. Connectivity contains Wi-Fi, Bluetooth Page Turner, CrossPoint Sync, OPDS, and the Plugins toggle. The options below describe these settings.
 
 #### 3.6.1 Display
 
@@ -257,6 +257,7 @@ Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **L
   - "Lyra" - The new theme for Crosspoint featuring rounded elements and menu icons
   - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
   - "RoundedRaff" - A rounded theme with additional visual styling
+  - "THCraft" - A home screen with the current book's progress, three recent books, two widgets and an icon bar, plus reading statistics. It adds the **Home Widget (Left/Right)**, **Daily Reading Goal (min)** and **Left/Right Widget Image** settings. See [THCraft home screen](docs/thcraft-home.md).
 
 - **Sunlight Fading Fix**: Configure whether to enable a software-fix for the issue where white X4 models may fade when used in direct sunlight:
   
@@ -265,12 +266,22 @@ Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **L
 
 #### 3.6.2 Reader
 
+- **Show Clock in Reader**: Off by default. Enable to show the time beside the battery percentage. This toggle is also available in **Customise Status Bar**, immediately after **Battery**. If the battery is hidden, the clock occupies the left side of the status bar.
+
+  - Shows hours and minutes only, using the format and time zone selected in **Settings → System → Clock**.
+  - Updates on page turns and other normal reading-screen redraws. It does not wake the display or schedule periodic refreshes while a page is idle.
+  - On X3/X4 and other devices without a hardware RTC, uses the system clock synchronized over Wi-Fi. Set the time zone and use **Sync Clock Now** before first use. No clock is drawn until time is available.
+  - Devices without a battery-backed RTC cannot track time while powered off. A restored time may lag; synchronize again after power-off for accurate time.
+  - XTC books still require their status bar to be enabled in **Customise Status Bar → XTC Status Bar**.
+
 - **Reader Font Family**: Choose the font used for reading:
   
   - "Noto Sans" (default) - Google's sans-serif font
   - Installed SD card families
 
 - **Reader Font Size**: Choose a point size. Built-in and direct TTF/OTF/TTC fonts offer 12, 14, 16, and 18 pt. A `.cpfont` family offers the sizes installed for that family.
+
+  These two settings set the default font for all books. While reading, open **Text Settings** from the Reader Menu, or the **Text** panel in the toolbar, and choose a font or size. That choice applies only to this book. Choose **Use Default Font** to make the book follow the default again. Other text settings, such as line spacing, still apply to all books. If the book's font is removed from the SD card, the book uses the default font. **Delete Book Cache** and **Clear Reading Cache** remove a book's font choice.
 
 - **Reader Line Spacing**: Space added between lines, as a percentage of font size: 0%, +10%, +20% (default), +30%, +45%, +60%, or +75%.
 
@@ -355,7 +366,7 @@ Side buttons, and Taps and gestures where supported by the device. See the
 
 - **OPDS Servers**: Manage one or more OPDS [(Open Publication Distribution System)](https://en.wikipedia.org/wiki/Open_Publication_Distribution_System) libraries for browsing and downloading books. See [OPDS Servers (Multiple Libraries)](#365-opds-servers-multiple-libraries) below.
 
-- **Clear Reading Cache** (**Settings → Reader**): Clear the internal SD card cache.
+- **Clear Reading Cache** (**Settings → Reader**): Clear the internal SD card cache. This also resets fonts chosen for individual books.
 
 - **Use book metadata**: Read the title and author stored inside each book when the Library index is rebuilt. When disabled or unavailable, the Library uses the filename.
 
@@ -723,7 +734,7 @@ Available options include:
 - **Show page as QR** – Display a QR code encoding the current reading position.
 - **Go Home** – Close the book and return to the Home screen.
 - **Sync Progress** – Push or pull reading progress with a KOReader sync server (see [KOReader Sync Quick Setup](#367-koreader-sync-quick-setup)). This entry appears when sync credentials are saved or an enabled plugin subscribes to device events. Without sync credentials, it connects to Wi-Fi to send queued plugin events.
-- **Delete Book Cache** – Clear the cached layout data for the current book, forcing a re-index on next open.
+- **Delete Book Cache** – Clear the cached layout data for the current book, forcing a re-index on next open. This also resets the book's own font.
 
 Press **Back** at any time to close the menu and return to your current page.
 

@@ -29,8 +29,9 @@ void init();
 // older RTC reading; ignored when the epoch falls outside the plausible
 // 2025-2100 window, runs more than a year ahead of the persisted floor (a chip
 // reading that far ahead is faulty, and the floor never lowers again), or
-// predates the trusted floor.
-void adopt(int64_t epoch);
+// predates the trusted floor. Returns true when the clock was set. The caller
+// confirms the wall clock only when the epoch came from a real RTC chip.
+bool adopt(int64_t epoch);
 
 // Persist the floor when the clock advanced past it. Cheap (one NVS read,
 // a write only when it moved). Call at sleep entry and after a time sync.
@@ -44,10 +45,21 @@ void startSync();
 // right now (e.g. progress-sync timestamps). Returns true when synced.
 bool syncNow(uint32_t timeoutMs);
 
+// The system clock was just set from a real clock: an SNTP exchange run outside
+// syncNow() (HalClock's RTC sync), or an RTC reading adopt() accepted. Confirms
+// the wall clock and persists the floor.
+void confirmWallClock();
+
 // Epoch seconds when the clock is trustworthy (a plausible present-day
 // value, restored or synced), else 0. Never earlier than a time already seen
 // this boot or restored from the floor, so a backward clock step cannot undo
 // an expiry. Callers enforcing a date fail closed on 0.
 int64_t trustedNow();
+
+// True once this power cycle has a real wall clock: an SNTP sync or an accepted
+// RTC reading. A clock resumed from the persisted floor is trusted for
+// enforcement but may lag, so date-keyed records (reading statistics) wait for
+// this. Survives deep sleep and soft restarts; cleared by power loss.
+bool wallClockConfirmed();
 
 }  // namespace trustedtime

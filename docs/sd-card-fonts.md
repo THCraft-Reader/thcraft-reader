@@ -61,6 +61,104 @@ the manual SD card copy method below.
 
 3. Insert the SD card and power on your CrossPoint reader
 
+### Thai font pack (offline build)
+
+Prepare the hash-verified desktop sources once (downloads the pinned Thai and
+symbol fonts), then package them offline:
+
+```sh
+python scripts/prepare_thai_test_assets.py
+python scripts/package_thai_fonts.py
+```
+
+Preparation requires `freetype-py`, `fonttools`, `uharfbuzz` and `Pillow`.
+Optional packager arguments are `--assets DIR` (default `build/thai/assets`), `--output DIR` (default
+`build/thai/font-pack`) and `--zip PATH` (default
+`build/thai/THCraft-Thai-Fonts.zip`). Missing assets, manifest/hash mismatches or
+invalid CPFont output stop packaging; no system font is substituted.
+
+The archive contains regular-face **THCraft-NotoSansThai**,
+**THCraft-NotoSerifThai** and **THCraft-Sarabun**, each at **8, 10, 12, 14, 16,
+18, 20, 22, 24 and 26 pt**, converted at 150 DPI. Firmware derives Thai positioning
+from native glyph metrics; only `.cpfont` files are installed. Coverage includes Latin, Greek letters used in phonetic
+transcription, IPA Extensions and Spacing Modifier Letters (U+0250–U+02FF),
+combining diacritics, arrows, mathematical/decorative symbols, and Arabic.
+Arabic includes contextual presentation forms and Lam-Alef ligatures for the
+firmware's existing RTL shaper, not just isolated base letters.
+
+Fallback priority is the selected Thai face, then the verified **Noto Sans**,
+**Noto Sans Symbols**, **Noto Sans Symbols 2**, **Noto Sans Math**, and
+**Noto Sans Arabic** faces. Only glyphs present in these sources are included;
+this is not a complete Unicode or emoji font. Existing Thai/Latin bitmaps and
+line metrics are retained. Each family includes its source `OFL.txt` and a named
+OFL copyright/license notice for every fallback. Source TTFs remain desktop
+inputs, not firmware or installation assets. `build-report.json` records ordered
+source hashes, output sizes and converter identity.
+
+The release workflow in [RELEASE.MD](../RELEASE.MD) packages the authoritative
+`fontpacks/` library, independently of the three-family packager above. Its
+current eight families include **BaiJamjuree, ChakraPetch, Mali, Garuda and
+JS-Jindara** alongside the three THCraft families, for 80 fonts at those ten sizes.
+Release packaging preserves the library's converted font bytes and includes only
+`.cpfont` files; it does not add notices or reconvert fonts. Coverage comes from
+the files in the library, not older release reports. Hardware testing and
+public-distribution licensing clearance remain separate requirements.
+
+To install:
+
+1. Extract the archive's **`fonts` folder to the SD card root**, merging with any
+   existing folder. Keep your original fonts and books.
+2. Install **all ten sizes** for each family you use, for example
+   `fonts/THCraft-NotoSansThai/THCraft-NotoSansThai_8.cpfont`.
+   The 8/10/12 pt files support missing Thai glyphs in the UI, including small
+   reader status titles and file-browser names; 20/22/24/26 pt add larger reading
+   sizes alongside 12/14/16/18 pt. A reader-size file alone does not supply the small UI sizes.
+3. Reinsert the card, **restart**, then choose **Settings > Reader > Font Family >
+   THCraft-NotoSansThai**. **16 pt** is the recommended starting reading size.
+   The other two families can be selected the same way.
+4. **Do not delete reading progress or book caches.** If the same THCraft family
+   already exists under `/.fonts/`, update that copy too: the hidden-root copy
+   takes priority over `/fonts/` when family names collide.
+5. Open a book containing IPA (for example `/ˈθɪŋk/`), arrows (`← → ⇒`),
+   symbols (`∞ ≠ ✓ ★`), and Arabic (`مرحبا بالعالم`). Check the selected family
+   and size for missing boxes and Arabic joining. Updating the font pack does
+   not require another firmware update once firmware positioning is installed.
+
+This is the **CPFont bitmap path**, not the direct TTF/OTF/TTC path described
+below. Copying only a TTF does not install a CPFont. Existing paired CPFonts
+remain readable, but this firmware ignores their `.cpshape` companions.
+The pack includes only a regular face; existing reader style fallback applies.
+Packaging success does not establish device rendering or performance acceptance.
+
+### Book covers with SD fonts
+
+Missing home thumbnails and book-cover sleep images are prepared without keeping
+the selected SD fonts, UI fallback fonts, or Thai metric snapshots in memory. The firmware
+shows the loading popup, releases those fonts, generates the required BMP files
+one at a time, then reloads the selection before drawing text again. Decompression
+can borrow the existing framebuffer while the popup remains on the panel; there
+is no second framebuffer allocation.
+
+This applies to every home theme, including Lyra Extended and Cover Grid on
+supported devices. Opening a book prepares the current home thumbnail and the
+selected book-cover sleep variant when missing. Grid thumbnails wait until the
+home layout knows their actual slot size. Cached images skip font unloading and
+conversion. Theme/cover-setting changes are handled when their new cache is
+needed; the firmware does not generate every possible variant at startup.
+
+A failed home conversion keeps the book's cover identity and retries on the next
+home visit, not every redraw. Older empty cover paths are reconstructed
+automatically. Temporary font-restoration failures do not erase the selected
+family or point size. This lifecycle does not change inline EPUB image handling,
+supported image formats, or source-image size limits.
+
+On X3/X4, verify with an installed Thai font pair: open a book with uncached
+covers, return home, and sleep with **Book Cover** selected. Check that the cover
+appears and Thai titles still render, then repeat with another book and a changed
+cover mode without rebooting. Debug logs distinguish JPEG heap rejection,
+`Inflate ... OOM`, unsupported images, and SD failures. Do not delete reading
+progress to retry cover generation.
+
 ### Direct TTF/OTF/TTC fonts
 
 If CrossPoint enables external RAM on your device, copy a `.ttf`, `.otf`, or
@@ -138,7 +236,8 @@ What this means in practice:
   (see [Installing Fonts](#installing-fonts) and the interval presets for
   `.cpfont` under [Converting Custom Fonts](#converting-custom-fonts)). That
   single selection drives both book content *and* size-matched fallback in
-  the UI.
+  the UI. A book with its own font (chosen in the reader's text settings)
+  uses that font instead, including UI fallback, while it is open.
 - Pure-Latin UI strings keep the crisp built-in font; only strings that
   actually contain a character the built-in font lacks are routed to the SD
   font.
@@ -191,6 +290,59 @@ To make `.cpfont` files for any device, convert your TrueType/OpenType fonts:
 > [Non-Latin Scripts Fallback in the User Interface](#non-latin-scripts-fallback-in-the-user-interface)),
 > add the UI sizes: `--sizes 8,10,12,14,16,18`.
 
+Missing glyphs can come from explicit per-style fallback files. Repeat
+`--fallback-regular FILE` (or `--fallback-bold`, `--fallback-italic`,
+`--fallback-bolditalic`) in priority order. The primary face always wins;
+otherwise the first fallback containing that codepoint is used. The requested
+`--intervals` must include the character as well. Record source and fallback
+hashes separately when preserving conversion provenance.
+
+### Thai bitmap positioning
+
+For the end-to-end conversion, visual checks and packaging workflow, follow
+[Create a new Thai font](../CREATE_NEW_FONT.md).
+
+Thai wrapping and firmware positioning are automatic for CPFont v4 fonts with
+native Unicode Thai coverage. Convert an ordinary font:
+
+    python3 lib/EpdFont/scripts/fontconvert_sdcard.py \
+      --regular MyThaiFont-Regular.ttf \
+      --intervals ascii,punctuation,thai \
+      --size 16 \
+      --output MyThaiFont_16.cpfont
+
+Copy `MyThaiFont_16.cpfont` into its font folder on SD, then restart or reload
+the font. No positioning companion or special converter option is needed.
+Old paired CPFonts remain usable; companions are ignored and recipe-only PUA
+alternates are not selected by firmware positioning.
+
+The firmware keeps at most 504 bytes of native glyph geometry per Thai-covered
+style, plus view/ownership metadata and allocator overhead. Shaping itself
+performs no allocations or SD reads; no whole-companion buffer, shared recipe
+cache, dense index or retained companion handle exists. If snapshot allocation
+or metric validation fails at load, that style stays native.
+
+Placement uses bitmap geometry, not OpenType anchors or alternate glyphs.
+Rendering can differ from desktop HarfBuzz, especially for decorative fonts,
+tall consonants and descenders. Check stacked marks, Sara Am and below vowels
+at every installed size. See [firmware positioning](thai-reading-engine.md#firmware-positioning).
+
+Resident page glyphs retain their Latin kerning and ligatures across UI prewarms.
+When Thai layout preparation replaces the kerning subset, the next page prewarm
+restores kerning for all resident glyphs without reloading their bitmaps.
+
+Metric preparation sizes its temporary codepoint array from the request's raw
+and shaped emissions, including a conservative bound for native ligature closure.
+The sizing pass remembers up to 32 identities; further repeated emissions may
+overestimate capacity but never count as exact-mode overflow. The array uses
+`(capacity + 2) * sizeof(uint32_t)` heap bytes, up to 16,392 bytes, rather than
+allocating that maximum for every request. Large requests cannot fit the small
+task-stack budget, so the workspace remains one checked, short-lived heap allocation.
+The 4,096 main-codepoint cap, two reserved space/hyphen slots, 768-entry persistent
+advance cache and 512-glyph render prewarm limit remain separate and unchanged.
+Sizing and filling share the same emission visitor; shaping, native fallback,
+ligature closure and whole-request kerning retain their existing semantics.
+
 ### Available Unicode interval presets
 
 | Preset | Coverage |
@@ -210,6 +362,7 @@ To make `.cpfont` files for any device, convert your TrueType/OpenType fonts:
 | `punctuation` | General punctuation (U+2000–U+206F) |
 | `cjk` | CJK Unified Ideographs + Hiragana + Katakana + Fullwidth |
 | `hangul` | Korean Hangul syllables + Jamo + Compatibility Jamo |
+| `thai` | Thai block U+0E00–U+0E7F |
 | `cherokee` | Cherokee (historic + supplement block) |
 | `tifinagh` | Tifinagh |
 | `symbols` | Math, currency, arrows, box-drawing, misc symbols, dingbats |

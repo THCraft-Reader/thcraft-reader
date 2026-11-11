@@ -22,14 +22,16 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
     values[CrossPointSettings::COVER_TRANSPARENT] = StrId::STR_COVER_TRANSPARENT;
     return values;
   }();
-  static constexpr auto STATUS_BAR_CLOCK_VALUES = [] {
-    std::array<StrId, CrossPointSettings::STATUS_BAR_CLOCK_MODE_COUNT> values{};
-    values[CrossPointSettings::STATUS_BAR_CLOCK_HIDE] = StrId::STR_HIDE;
-    values[CrossPointSettings::STATUS_BAR_CLOCK_RIGHT] = StrId::STR_DIR_RIGHT;
-    values[CrossPointSettings::STATUS_BAR_CLOCK_LEFT] = StrId::STR_DIR_LEFT;
+  static constexpr auto HOME_WIDGET_VALUES = [] {
+    std::array<StrId, CrossPointSettings::HOME_WIDGET_COUNT> values{};
+    values[CrossPointSettings::HOME_WIDGET_OFF] = StrId::STR_STATE_OFF;
+    values[CrossPointSettings::HOME_WIDGET_IMAGE] = StrId::STR_WIDGET_IMAGE;
+    values[CrossPointSettings::HOME_WIDGET_TODAY] = StrId::STR_WIDGET_TODAY;
+    values[CrossPointSettings::HOME_WIDGET_WEEK] = StrId::STR_WIDGET_WEEK;
+    values[CrossPointSettings::HOME_WIDGET_GOAL] = StrId::STR_WIDGET_GOAL;
+    values[CrossPointSettings::HOME_WIDGET_CLOCK] = StrId::STR_WIDGET_CLOCK;
     return values;
   }();
-
   const auto emit = [visit, context](auto&& info) { visit(context, info); };
   // --- Display ---
   emit(SettingInfo::StaticEnum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen, SLEEP_SCREEN_VALUES,
@@ -49,8 +51,13 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
                          {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
                           StrId::STR_PAGES_30, StrId::STR_NEVER},
                          "refreshFrequency", StrId::STR_CAT_DISPLAY));
-  emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, homeThemeValues(), "uiTheme",
-                         StrId::STR_CAT_DISPLAY));
+  emit(buildUiThemeSetting());
+  emit(SettingInfo::StaticEnum(StrId::STR_HOME_WIDGET_LEFT, &CrossPointSettings::homeWidgetLeft, HOME_WIDGET_VALUES,
+                               "homeWidgetLeft", StrId::STR_CAT_DISPLAY));
+  emit(SettingInfo::StaticEnum(StrId::STR_HOME_WIDGET_RIGHT, &CrossPointSettings::homeWidgetRight, HOME_WIDGET_VALUES,
+                               "homeWidgetRight", StrId::STR_CAT_DISPLAY));
+  emit(SettingInfo::Value(StrId::STR_DAILY_GOAL, &CrossPointSettings::readingGoalMinutes, {10, 120, 10},
+                          "readingGoalMinutes", StrId::STR_CAT_DISPLAY));
   if (!BoardConfig::hasTouch())
     emit(SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                              StrId::STR_CAT_DISPLAY));
@@ -94,7 +101,7 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
            .withTextSettings());
   emit(SettingInfo::Enum(StrId::STR_PARA_ALIGNMENT, &CrossPointSettings::paragraphAlignment,
                          {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
-                          StrId::STR_BOOK_S_STYLE},
+                          StrId::STR_BOOK_S_STYLE, StrId::STR_THAI_JUSTIFY},
                          "paragraphAlignment", StrId::STR_CAT_READER)
            .withTextSettings());
   emit(SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
@@ -126,6 +133,8 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
   emit(SettingInfo::Enum(StrId::STR_READER_MENU_STYLE, &CrossPointSettings::readerMenuStyle,
                          {StrId::STR_MENU_STYLE_LIST, StrId::STR_MENU_STYLE_TOOLBAR}, "readerMenuStyle",
                          StrId::STR_CAT_READER));
+  emit(SettingInfo::Toggle(StrId::STR_CLOCK_IN_READER, &CrossPointSettings::statusBarClock, "statusBarClock",
+                           StrId::STR_CAT_READER));
   emit(SettingInfo::Toggle(StrId::STR_SAVE_VOCABULARY_LOOKUPS, &CrossPointSettings::vocabularyHistoryEnabled,
                            "vocabularyHistoryEnabled", StrId::STR_CAT_READER));
   // --- Controls ---
@@ -346,8 +355,6 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
                          StrId::STR_CUSTOMISE_STATUS_BAR));
   // Clock entries (persistence + web settings; the device UI is
   // ClockSettingsActivity under System settings).
-  emit(SettingInfo::StaticEnum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock, STATUS_BAR_CLOCK_VALUES,
-                               "statusBarClock", StrId::STR_CUSTOMISE_STATUS_BAR));
   // LEGACY: retired quarter-hour UTC offset (biased by 48). Persisted so
   // timezones::activeIndex() can migrate it into clockTimezone.
   emit(SettingInfo::Value(StrId::STR_CLOCK, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1}, "clockUtcOffsetQ",

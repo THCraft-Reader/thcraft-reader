@@ -7,6 +7,7 @@
 #include <array>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <set>
@@ -125,6 +126,23 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
     return selected;
   }
 };
+
+TEST_F(ChapterHtmlSlimParserTest, TextBlockAllocationFailureFailsBuild) {
+  const auto path = std::filesystem::temp_directory_path() / "crosspoint_text_block_oom.xhtml";
+  filepath = path.string();
+  {
+    std::ofstream output(path);
+    output << "<html><body><p>one</p><p>two</p></body></html>";
+  }
+  parser.completePageFn = [](std::unique_ptr<Page>, auto, auto, auto) {};
+  ASSERT_TRUE(parser.beginParse());
+  parser.failTextBlockAllocation = true;
+  EXPECT_NE(parser.parseStep(), ChapterHtmlSlimParser::ParseStatus::More);
+  EXPECT_TRUE(parser.layoutOom);
+  EXPECT_FALSE(parser.finishParse());
+  parser.abortParse();
+  std::filesystem::remove(path);
+}
 
 TEST(ImageDimsProbe, ReadsBothGifSignaturesInFragmentedStreams) {
   for (const uint8_t version : {'7', '9'}) {
@@ -285,6 +303,40 @@ TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
   EXPECT_EQ(lines, 2u);
 }
 
+TEST_F(ChapterHtmlSlimParserTest, SoftFlushPreservesParagraphIndentationAndSpacing) {
+  parser.viewportWidth = 40;
+  parser.viewportHeight = 10000;
+  parser.extraParagraphSpacing = true;
+  auto& style = parser.currentTextBlock->getBlockStyle();
+  style.alignment = CssTextAlign::Left;
+  style.marginTop = 6;
+  style.paddingTop = 3;
+  style.marginBottom = 7;
+  style.paddingBottom = 5;
+  for (int i = 0; i < 800; ++i) parser.currentTextBlock->addWord("a", EpdFontFamily::REGULAR);
+
+  parser.softFlushTextBlock();
+  ASSERT_NE(parser.currentPage, nullptr);
+  const size_t partialLines = parser.currentPage->elements.size();
+  ASSERT_GT(partialLines, 0u);
+  EXPECT_EQ(parser.currentPageNextY, 9 + 16 * partialLines);
+  EXPECT_FALSE(parser.currentTextBlock->isEmpty());
+
+  parser.makePages();
+  const auto& lines = parser.currentPage->elements;
+  EXPECT_GT(lines.size(), partialLines);
+  size_t words = 0;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    ASSERT_EQ(lines[i]->getTag(), TAG_PageLine);
+    const auto& line = static_cast<const PageLine&>(*lines[i]);
+    EXPECT_EQ(line.yPos, 9 + 16 * i);
+    EXPECT_EQ(line.getBlock()->wordXpos(0), i == 0 ? 8 : 0);
+    words += line.getBlock()->wordCount();
+  }
+  EXPECT_EQ(words, 800u);
+  EXPECT_EQ(parser.currentPageNextY, 9 + 16 * lines.size() + 12 + 8);
+}
+
 TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
   parser.viewportWidth = 240;
   parser.viewportHeight = 32;
@@ -420,12 +472,12 @@ TEST_F(ChapterHtmlSlimParserTest, PageImageDeserializeRejectsMissingImageBlock) 
   const auto path = std::filesystem::temp_directory_path() / "crosspoint-missing-image-cache.bin";
   {
     HalFile output;
-    ASSERT_TRUE(output.open(path.c_str(), "wb"));
+    ASSERT_TRUE(output.open(path.string().c_str(), "wb"));
     const int16_t coordinates[] = {0, 0};
     output.write(coordinates, sizeof(coordinates));
   }
   HalFile input;
-  ASSERT_TRUE(input.open(path.c_str(), "rb"));
+  ASSERT_TRUE(input.open(path.string().c_str(), "rb"));
   EXPECT_EQ(PageImage::deserialize(input), nullptr);
 }
 
@@ -447,7 +499,7 @@ TEST_P(ChapterHtmlSlimParserTest, KeepsCssVerticalAlignAndInternalLinkMetadata) 
   EXPECT_NE(static_cast<uint8_t>(style) & static_cast<uint8_t>(expectedStyle), 0u);
 
   ASSERT_EQ(parser.pendingFootnotes.size(), 1u);
-  const FootnoteEntry& footnote = parser.pendingFootnotes.front().second;
+  const FootnoteEntry& footnote = parser.pendingFootnotes.front().entry;
   EXPECT_STREQ(footnote.href, expectedHref);
   ASSERT_EQ(parser.currentTextBlock->wordLinkIds.size(), 1u);
   EXPECT_EQ(parser.currentTextBlock->wordLinkIds.front(), linkId);
@@ -869,7 +921,7 @@ TEST_F(ChapterBlockDecorationTest, FontInheritanceUsesWinningCssRuleBeforeInline
   const auto path = std::filesystem::temp_directory_path() / "crosspoint-font-inheritance.css";
   {
     HalFile output;
-    ASSERT_TRUE(output.open(path.c_str(), "wb"));
+    ASSERT_TRUE(output.open(path.string().c_str(), "wb"));
     const std::string css =
         "p{font-weight:bold;font-style:italic}"
         ".inherited{font-weight:normal;font-style:normal}"
@@ -878,7 +930,7 @@ TEST_F(ChapterBlockDecorationTest, FontInheritanceUsesWinningCssRuleBeforeInline
   }
   {
     HalFile input;
-    ASSERT_TRUE(input.open(path.c_str(), "rb"));
+    ASSERT_TRUE(input.open(path.string().c_str(), "rb"));
     ASSERT_EQ(cssParser.loadFromStream(input), CssParser::ParseResult::Complete);
   }
   std::filesystem::remove(path);
@@ -1011,6 +1063,36 @@ TEST_F(ChapterTightSpacingTest, BoxFrameStartsBelowPreviousLineGlyphs) {
   EXPECT_EQ(boxes[0]->yPos, lines[0]->yPos + GLYPH_HEIGHT);
 }
 
+TEST_F(ChapterTightSpacingTest, BoxFrameReloadsEvictedFontOfRetainedLine) {
+  constexpr int variantFont = 42;
+  constexpr int headingTop = 10;
+  constexpr int headingHeight = 40;
+  FontVariantProvider provider;
+  provider.ctx = &renderer;
+  provider.load = [](void* ctx, const int fontId) {
+    auto& renderer = *static_cast<GfxRenderer*>(ctx);
+    renderer.fontMap.emplace(fontId, EpdFontFamily(24, nullptr));
+    renderer.fontLineHeights[fontId] = headingHeight;
+    renderer.fontAscenders[fontId] = 32;
+    return true;
+  };
+  renderer.setFontVariantProvider(provider);
+  BlockStyle style;
+  style.fontId = variantFont;
+  auto heading = std::make_unique<TextBlock>(std::vector<std::string>{"Heading"}, std::vector<int16_t>{0},
+                                             std::vector<EpdFontFamily::Style>{EpdFontFamily::REGULAR},
+                                             std::vector<uint8_t>{0}, std::vector<uint16_t>{0}, style);
+  ASSERT_TRUE(heading->valid());
+  parser.currentPage = std::make_unique<Page>();
+  parser.currentPage->elements.push_back(std::make_unique<PageLine>(std::move(heading), 0, headingTop));
+  parser.currentPageNextY = headingTop + 12;
+  // Cache release removes registrations, but the parser retains the laid-out line.
+  renderer.fontLineHeights[variantFont] = 0;
+  renderer.fontAscenders[variantFont] = 0;
+  open("div", "border: 1px solid black");
+  EXPECT_GE(parser.currentPageNextY, headingTop + headingHeight);
+}
+
 TEST_F(ChapterTightSpacingTest, BorderedTableStartsBelowPreviousLineGlyphs) {
   parser.viewportHeight = 400;
   open("p", nullptr);
@@ -1112,13 +1194,14 @@ TEST_F(ChapterBlockDecorationTest, FirstLetterRuleCapturesQuoteAndLetter) {
   const auto cssPath = std::filesystem::temp_directory_path() / "crosspoint-first-letter.css";
   {
     HalFile output;
-    ASSERT_TRUE(output.open(cssPath.c_str(), "wb"));
+    ASSERT_TRUE(output.open(cssPath.string().c_str(), "wb"));
     const std::string css = "p.opening::first-letter { initial-letter: 2; }";
     output.write(css.data(), css.size());
   }
   HalFile input;
-  ASSERT_TRUE(input.open(cssPath.c_str(), "rb"));
+  ASSERT_TRUE(input.open(cssPath.string().c_str(), "rb"));
   ASSERT_EQ(cssParser.loadFromStream(input), CssParser::ParseResult::Complete);
+  input.close();
 
   const XML_Char* attributes[] = {"class", "opening", nullptr};
   ChapterHtmlSlimParser::startElement(&parser, "p", attributes);
@@ -1417,12 +1500,13 @@ TEST_F(ChapterInlineSizeTest, MixedSizesWithinALineSurviveTheCache) {
   const auto path = std::filesystem::temp_directory_path() / "crosspoint-word-fonts.bin";
   {
     HalFile output;
-    ASSERT_TRUE(output.open(path.c_str(), "wb"));
+    ASSERT_TRUE(output.open(path.string().c_str(), "wb"));
     ASSERT_TRUE(block.serialize(output));
   }
   HalFile input;
-  ASSERT_TRUE(input.open(path.c_str(), "rb"));
+  ASSERT_TRUE(input.open(path.string().c_str(), "rb"));
   const auto cached = TextBlock::deserialize(input);
+  input.close();
   ASSERT_NE(cached, nullptr);
   for (uint16_t i = 0; i < block.wordCount(); ++i) {
     EXPECT_EQ(cached->wordFontId(i, NOTOSANS_14_FONT_ID), block.wordFontId(i, NOTOSANS_14_FONT_ID));
@@ -1472,7 +1556,7 @@ TEST_F(ChapterTableBorderTest, ScansColumnWidthsFromMarkup) {
   const auto path = std::filesystem::temp_directory_path() / "crosspoint-table-scan.xhtml";
   {
     HalFile output;
-    ASSERT_TRUE(output.open(path.c_str(), "wb"));
+    ASSERT_TRUE(output.open(path.string().c_str(), "wb"));
     const std::string html =
         "<table class=\"t\"><tr><th>ID</th><td>A much longer description of the item</td></tr>"
         "<tr><td colspan=\"2\">Spanning note that must not widen anything at all</td></tr>"
@@ -1480,9 +1564,10 @@ TEST_F(ChapterTableBorderTest, ScansColumnWidthsFromMarkup) {
     output.write(html.data(), html.size());
   }
   HalFile input;
-  ASSERT_TRUE(input.open(path.c_str(), "rb"));
+  ASSERT_TRUE(input.open(path.string().c_str(), "rb"));
   ChapterHtmlSlimParser::TableColumnMeasure measure;
   ASSERT_TRUE(parser.measureTableColumns(input, measure));
+  input.close();
   EXPECT_EQ(renderer.coldMeasurements, 0u);
   EXPECT_EQ(measure.columns, 2);
   EXPECT_EQ(measure.minWidth[0], 16);  // "ID"
@@ -1921,18 +2006,13 @@ TEST_F(ChapterBlockDecorationTest, AncestorShadePaintsBeforeNestedBorders) {
   close("p");
   close("div");
   ASSERT_NE(parser.currentPage, nullptr);
-  for (const bool placeholders : {false, true}) {
-    renderer.boxPaints.clear();
-    if (placeholders)
-      parser.currentPage->renderWithImagePlaceholders(renderer, 0, 0, 0);
-    else
-      parser.currentPage->render(renderer, 0, 0, 0);
-    ASSERT_FALSE(renderer.boxPaints.empty());
-    EXPECT_EQ(renderer.boxPaints.front(), 's');
-    EXPECT_NE(std::find(renderer.boxPaints.begin(), renderer.boxPaints.end(), 'b'), renderer.boxPaints.end());
-    const auto firstBorder = std::find(renderer.boxPaints.begin(), renderer.boxPaints.end(), 'b');
-    EXPECT_EQ(std::find(firstBorder, renderer.boxPaints.end(), 's'), renderer.boxPaints.end());
-  }
+  renderer.boxPaints.clear();
+  parser.currentPage->render(renderer, 0, 0, 0);
+  ASSERT_FALSE(renderer.boxPaints.empty());
+  EXPECT_EQ(renderer.boxPaints.front(), 's');
+  EXPECT_NE(std::find(renderer.boxPaints.begin(), renderer.boxPaints.end(), 'b'), renderer.boxPaints.end());
+  const auto firstBorder = std::find(renderer.boxPaints.begin(), renderer.boxPaints.end(), 'b');
+  EXPECT_EQ(std::find(firstBorder, renderer.boxPaints.end(), 's'), renderer.boxPaints.end());
 }
 
 }  // namespace

@@ -8,6 +8,9 @@
 
 #include "EpdFont.h"
 #include "EpdFontData.h"
+#include "ThaiShape.h"
+
+class HalFile;
 
 // On-disk binary format version for .cpfont files. Defined as a preprocessor
 // macro (rather than a constexpr) so it can be stringified into the SD-fonts
@@ -28,7 +31,7 @@ class SdCardFont {
   static constexpr int PREWARM_ARENA_TOO_LARGE = -2;
   static constexpr uint8_t MAX_STYLES = 4;
 
-  SdCardFont() = default;
+  SdCardFont();
   ~SdCardFont();
   // Owns raw buffers freed in dtor — no shallow-copy semantics. Make any
   // accidental pass-by-value or move a compile-time error.
@@ -40,6 +43,7 @@ class SdCardFont {
   // Load .cpfont file: reads header + intervals into RAM, records file layout offsets.
   // Supports v4 (multi-style) format.
   // Returns true on success.
+  // Thai shaping uses a bounded native-metrics snapshot; no companion is needed.
   bool load(const char* path);
 
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
@@ -51,8 +55,9 @@ class SdCardFont {
   // Complete render scans pass accumulate=false: rebuild for this page only,
   // while retaining buffers and allowing a resident subset hit.
   // Returns number of glyphs that couldn't be loaded (0 on full success).
+  // shapeText=false is reserved for already-expanded, deduplicated glyph sets.
   int prewarm(const char* utf8Text, uint8_t styleMask = 0x0F, bool metadataOnly = false, bool loadKernLig = true,
-              bool accumulate = true);
+              bool accumulate = true, bool shapeText = true);
 
   // Multi-string variant: extracts codepoints from `textCount` strings fetched
   // one at a time through `getter` (C-style callback: no std::function bloat,
@@ -64,25 +69,30 @@ class SdCardFont {
   // class-table and matrix work is wasted there. Reader-quality paths keep the default.
   using TextGetter = const char* (*)(const void* ctx, uint32_t index);
   int prewarm(TextGetter getter, const void* ctx, uint32_t textCount, uint8_t styleMask = 0x0F,
-              bool metadataOnly = false, bool loadKernLig = true, bool accumulate = true);
+              bool metadataOnly = false, bool loadKernLig = true, bool accumulate = true, bool shapeText = true);
 
   // Build a compact advance-only table for layout measurement.
-  // Extracts ALL unique codepoints from words (no MAX_PAGE_GLYPHS cap),
-  // batch-reads advanceX from SD, stores in a sorted per-style table.
+  // Extracts codepoints from words, batch-reads advanceX from SD, and stores
+  // a sorted, bounded per-style table.
   // extraText: optional additional codepoints to warm in the same SD pass
   // (e.g. shaped Arabic presentation forms the measurement path will look up).
   // Returns number of codepoints not found in font coverage.
   int buildAdvanceTable(const char* utf8Text, uint8_t styleMask = 0x0F, const char* extraText = nullptr);
   // Packed variant: each segment holds consecutive NUL-terminated words
   // (paragraph word-arena chunks), scanned without per-word string objects.
-  // includeSmallCaps also prepares uppercase codepoints for small caps, retaining the originals.
+  // loadKernLig prepares exact rendered metrics, including native ligature outputs.
+  // Exact shaping/kern scratch is sized from emitted codepoints and possible
+  // ligature closure, capped at 4096 plus optional separator slots. Ordinary
+  // layout uses at most ADVANCE_CACHE_LIMIT entries per style (small runs inline).
+  // includeSmallCaps prepares uppercase codepoints while retaining the originals.
+  // Returns -1 on allocation, shaping, exact kern/ligature, or exact-cap failure.
   int buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
                               bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
-                              const char* extraText = nullptr, bool includeSmallCaps = false);
+                              const char* extraText = nullptr, bool loadKernLig = false, bool includeSmallCaps = false);
 
   // Look up advanceX for a codepoint from the advance table.
-  // Returns the 12.4 fixed-point advance, or 0 if not found.
-  uint16_t getAdvance(uint32_t codepoint, uint8_t style) const;
+  // Returns false if absent; a cached zero-advance mark is a successful lookup.
+  bool getAdvance(uint32_t codepoint, uint8_t style, uint16_t& outAdvance) const;
 
   // Returns true if advance table is populated for at least one style.
   bool hasAdvanceTable() const;
@@ -100,9 +110,10 @@ class SdCardFont {
   // mini glyph/kern arenas, ligature tables, the overflow ring, and
   // the persistent advance tables. Coverage intervals stay so hasCodepoint()
   // and reloads keep working; glyphs fault back in on demand and the next
-  // prewarm rebuilds the arenas. For heap-critical transitions (e.g. starting
-  // WiFi + the web server), where retained font data is the difference between
-  // a clean start and an OOM abort.
+  // prewarm rebuilds the arenas. Native Thai metrics remain resident for the
+  // lifetime of the loaded font, independently of these rebuildable caches.
+  // For heap-critical transitions (e.g. starting WiFi + the web server), where
+  // retained font data is the difference between a clean start and an OOM abort.
   void releaseResidentCaches();
 
   // Returns pointer to the managed EpdFont for a given style.
@@ -146,7 +157,7 @@ class SdCardFont {
   void resetStats();
   const Stats& getStats() const { return stats_; }
 
-  // Content hash of the file header + style TOC entries (computed during load).
+  // Header/TOC identity plus shaping algorithm revision, flag and native metrics.
   // Used to generate deterministic font IDs for section cache invalidation.
   uint32_t contentHash() const { return contentHash_; }
 
@@ -169,6 +180,9 @@ class SdCardFont {
   // All per-style data: file offsets, intervals, kern/lig, prewarm cache, EpdFont
   struct PerStyle {
     CpFontHeader header{};
+    ThaiShapeView thaiShape;
+    // At most 504 bytes per Thai-covered style, owned until font unload.
+    ThaiGlyphMetrics* thaiMetrics = nullptr;
 
     // File layout offsets for this style's data sections
     uint32_t intervalsFileOffset = 0;
@@ -280,6 +294,15 @@ class SdCardFont {
   PerStyle& styleData(uint8_t style) { return styles_[styleSlots_[style] - 1]; }
   const PerStyle& styleData(uint8_t style) const { return styles_[styleSlots_[style] - 1]; }
   uint8_t styleCount_ = 0;
+  void loadThaiMetrics(HalFile& file);
+  using CodepointVisitor = bool (*)(void* context, uint32_t codepoint);
+  bool visitTextCodepoints(const char* text, uint8_t styleMask, bool shapeText, bool nativeLigatures,
+                           CodepointVisitor visitor, void* context) const;
+  uint32_t metricCodepointCapacity(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
+                                   uint8_t styleMask, const char* extraText, bool loadKernLig) const;
+  bool collectTextCodepoints(const char* text, uint32_t* codepoints, uint32_t& count, uint32_t limit, uint8_t styleMask,
+                             bool shapeText, bool nativeLigatures = false) const;
+  bool completeLigatureCoverage(uint32_t* codepoints, uint32_t& count, uint32_t limit, uint8_t styleMask) const;
 
   char filePath_[128] = {};
 

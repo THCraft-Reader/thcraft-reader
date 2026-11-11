@@ -1,6 +1,7 @@
 #include "HalClock.h"
 
 #include <Logging.h>
+#include <TrustedTime.h>
 #include <WiFi.h>
 #include <esp_sntp.h>
 #include <time.h>
@@ -35,7 +36,10 @@ void HalClock::setTimezone(const char* posixTz) {
 }
 
 bool HalClock::localTime(struct tm& out) const {
-  if (!_available) return false;
+  if (!_available) {
+    const time_t now = time(nullptr);
+    return now >= MIN_VALID_EPOCH && localtime_r(&now, &out) != nullptr;
+  }
 
   const unsigned long now = millis();
   if (_lastPollMs == 0 || (now - _lastPollMs) >= CLOCK_POLL_MS) {
@@ -77,11 +81,15 @@ bool HalClock::formatTime(char* buf, size_t bufSize, bool use12Hour) const {
 }
 
 bool HalClock::syncFromNTP() {
-  if (!_available) return false;
-
   if (WiFi.status() != WL_CONNECTED) {
     LOG_ERR("CLK", "WiFi not connected, cannot sync NTP");
     return false;
+  }
+
+  if (!_available) {
+    const bool ok = trustedtime::syncNow(5000);
+    if (!ok) LOG_ERR("CLK", "NTP sync timed out");
+    return ok;
   }
 
   LOG_INF("CLK", "Starting NTP sync...");
@@ -96,6 +104,7 @@ bool HalClock::syncFromNTP() {
   constexpr int maxAttempts = 50;
   for (int i = 0; i < maxAttempts; i++) {
     if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+      trustedtime::confirmWallClock();
       time_t now = time(nullptr);
       struct tm timeinfo;
       gmtime_r(&now, &timeinfo);

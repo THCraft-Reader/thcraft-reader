@@ -55,7 +55,8 @@ class TextSettingsActivity final : public UiTabListActivity {
   bool handleButtons() override;
   bool handleCustomInput() override;
 
-  void applyFamily(int listIndex);
+  // Returns false when the row's family is no longer in the registry.
+  bool applyFamily(int listIndex);
   void applySize(int listIndex);
   // Repopulates sizes_ (and currentSizeIndex_) from the active family's
   // installed point sizes. Call after any family change.
@@ -82,10 +83,16 @@ class TextSettingsActivity final : public UiTabListActivity {
   void rebuildRowItems();
 
   struct FontEntry {
+    // BookDefault is the "Use Default Font" row, listed only while a book is open.
+    enum class Kind : uint8_t { BookDefault, Builtin, Sd };
     std::string name;
-    bool isBuiltin;
+    Kind kind;
     uint8_t settingIndex;
   };
+  // Family tab row of the live font, ignoring the "Use Default Font" row.
+  int liveFamilyRow() const;
+  // Row to mark as selected: "Use Default Font" while the open book follows the default.
+  int selectedFamilyRow() const;
 
   struct SizeEntry {
     std::string name;  // the point size, rendered for display ("14 pt")

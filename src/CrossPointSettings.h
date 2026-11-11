@@ -56,13 +56,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     XTC_STATUS_BAR_MODE_COUNT
   };
 
-  enum STATUS_BAR_CLOCK_MODE {
-    STATUS_BAR_CLOCK_HIDE = 0,
-    STATUS_BAR_CLOCK_RIGHT = 1,
-    STATUS_BAR_CLOCK_LEFT = 2,
-    STATUS_BAR_CLOCK_MODE_COUNT
-  };
-
   // Auto follows the timezone's baked DST rule; On/Off override it — the
   // escape hatch for a zone whose law changed before the firmware caught up.
   enum CLOCK_DST_MODE { CLOCK_DST_AUTO = 0, CLOCK_DST_ON = 1, CLOCK_DST_OFF = 2, CLOCK_DST_MODE_COUNT };
@@ -136,6 +129,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     CENTER_ALIGN = 2,
     RIGHT_ALIGN = 3,
     BOOK_STYLE = 4,
+    THAI_JUSTIFIED = 5,
     PARAGRAPH_ALIGNMENT_COUNT
   };
 
@@ -203,7 +197,26 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, COVER_GRID = 4 };
+  enum UI_THEME {
+    CLASSIC = 0,
+    LYRA = 1,
+    LYRA_3_COVERS = 2,
+    ROUNDEDRAFF = 3,
+    COVER_GRID = 4,
+    THCRAFT = 5,  // fork-only; keep this value on upstream merges
+    UI_THEME_COUNT
+  };
+
+  // THCraft home widget slots
+  enum HOME_WIDGET {
+    HOME_WIDGET_OFF = 0,
+    HOME_WIDGET_IMAGE = 1,
+    HOME_WIDGET_TODAY = 2,
+    HOME_WIDGET_WEEK = 3,
+    HOME_WIDGET_GOAL = 4,
+    HOME_WIDGET_CLOCK = 5,
+    HOME_WIDGET_COUNT
+  };
 
   // Image rendering in EPUB reader. IMAGES_DISPLAY_BW lays images out like
   // IMAGES_DISPLAY but draws them as a B/W dither, so image pages skip the
@@ -268,8 +281,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t statusBarTitle = CHAPTER_TITLE;
   uint8_t statusBarBattery = 1;
   uint8_t xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
-  // Clock display in status bar (any board whose RTC probe succeeds)
-  uint8_t statusBarClock = STATUS_BAR_CLOCK_HIDE;
+  // Show the reader clock beside the battery.
+  uint8_t statusBarClock = 0;
   // LEGACY, kept for migration only: quarter-hour UTC offset biased by 48
   // (48 = UTC+0). Superseded by clockTimezone; read once by
   // timezones::activeIndex() when clockTimezone is unset.
@@ -367,6 +380,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   char sdFontFamilyName[32] = "";
   // Dictionary folder name under /dictionaries (empty = no dictionary)
   char dictionaryName[32] = "";
+  // THCraft home: widget per slot, daily goal, and image file names under /widgets
+  uint8_t homeWidgetLeft = HOME_WIDGET_TODAY;
+  uint8_t homeWidgetRight = HOME_WIDGET_WEEK;
+  uint8_t readingGoalMinutes = 30;
+  char homeWidgetLeftImage[48] = "";
+  char homeWidgetRightImage[48] = "";
   // Save successful dictionary lookups to vocabulary history (default off).
   uint8_t vocabularyHistoryEnabled = 0;
   // Master switch for all SD-card plugin discovery/execution. New installs keep
@@ -449,6 +468,22 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // offering a size nothing renders at. Both fields are persisted in one write.
   void clearSdFontFamily();
 
+  // A reader font choice: SD family name ("" = built-in) and point size.
+  struct ReaderFont {
+    char sdFamilyName[32] = "";
+    uint8_t pointSize = DEFAULT_FONT_POINT_SIZE;
+    bool operator==(const ReaderFont& other) const;
+    bool operator!=(const ReaderFont& other) const { return !(*this == other); }
+  };
+  ReaderFont liveReaderFont() const;
+  void setLiveReaderFont(const ReaderFont& font);
+  // While a book uses its own font, sdFontFamilyName/fontPointSize hold that
+  // font and the default is held aside, so settings.json keeps the default. See BookFont.
+  void holdDefaultReaderFont();
+  void releaseDefaultReaderFont();
+  bool isDefaultReaderFontHeld() const { return defaultReaderFontHeld; }
+  ReaderFont defaultReaderFont() const;
+
   // Resolved status-bar composition. Consumers read the spec; only settings
   // editors read the raw fields.
   //
@@ -464,7 +499,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     uint8_t titleMode = HIDE_TITLE;  // STATUS_BAR_TITLE
     bool showBattery = false;
     bool showBatteryPercent = false;
-    uint8_t clockMode = STATUS_BAR_CLOCK_HIDE;  // STATUS_BAR_CLOCK_MODE
+    bool showClock = false;
     bool clock12h = false;
     uint8_t progressBarMode = HIDE_PROGRESS;  // STATUS_BAR_PROGRESS_BAR
     uint8_t progressBarHeightPx = 0;          // (thickness+1)*2; 0 when the bar is hidden
@@ -472,12 +507,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 
     bool showsProgressBar() const { return progressBarMode != HIDE_PROGRESS; }
     bool showsTitle() const { return titleMode != HIDE_TITLE; }
-    bool showsClock() const { return clockMode != STATUS_BAR_CLOCK_HIDE; }
-    // Visibility of the text lane. Clock hardware presence is the caller's
-    // concern: pass halClock.isAvailable(), or true for layout reservation.
+    // Pass clockAvailable=true when reserving layout before time is synced.
     bool textLaneVisible(bool clockAvailable) const {
       return showChapterPageCount || showBookProgressPercent || showsTitle() || showBattery ||
-             (showsClock() && clockAvailable);
+             (showClock && clockAvailable);
     }
   };
   StatusBarSpec statusBarSpec() const;
@@ -498,6 +531,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;
+
+ private:
+  bool defaultReaderFontHeld = false;
+  ReaderFont heldDefaultReaderFont;
 };
 
 // Helper macro to access settings

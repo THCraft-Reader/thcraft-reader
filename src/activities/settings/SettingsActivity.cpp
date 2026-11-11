@@ -185,10 +185,7 @@ void SettingsActivity::rebuildSettings() {
     }
   }
 
-  // Clock configuration only exists where the RTC probe found hardware.
-  if (halClock.isAvailable()) {
-    addAction(SettingsSection::General, StrId::STR_CLOCK, SettingAction::ClockSettings);
-  }
+  addAction(SettingsSection::General, StrId::STR_CLOCK, SettingAction::ClockSettings);
   addAction(SettingsSection::Reader, StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar);
   addAction(SettingsSection::Reader, StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache);
 
@@ -329,11 +326,13 @@ void SettingsActivity::toggleSelectedSetting() {
     const uint8_t cur = setting.valueGetter();
     if (totalValues > 2) {
       const auto valueSetter = setting.valueSetter;
-      auto onSelect = [this, valueSetter, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
+      const bool themeChanged = setting.nameId == StrId::STR_UI_THEME;
+      auto onSelect = [this, valueSetter, sleepScreenChanged, quickResumeTimeoutChanged, themeChanged](int idx) {
         valueSetter(idx);
         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
         SETTINGS.saveToFile();
         rebuildSettings();
+        if (themeChanged) applyUiSettingChange(&CrossPointSettings::uiTheme);
       };
       if (!setting.enumStringValues.empty()) {
         optionPopup.show(setting.nameId, setting.enumStringValues, cur, std::move(onSelect));

@@ -539,5 +539,5 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
 }
 
 bool JpegToFramebufferConverter::supportsFormat(const std::string& extension) {
-  return FsHelpers::hasJpgExtension(extension);
+  return FsHelpers::hasJpgExtension(std::string_view(extension));
 }

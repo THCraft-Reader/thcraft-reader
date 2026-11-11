@@ -54,9 +54,17 @@ class EpubReaderActivity final : public ReaderActivity {
   StrId clippingMessage = StrId::STR_CLIPPING_SAVED;
   unsigned long clippingMessageTime = 0UL;
   bool currentPageBookmarked = false;
-  int idlePrewarmSpine = -1;
-  int idlePrewarmPage = -1;
-  unsigned long lastRenderCompleteMs = 0;
+  // Next-page glyph prewarm. Runs on the render task right after the page it
+  // follows, so its SD reads never stall the loop task's input polling.
+  int prewarmedSpine = -1;
+  int prewarmedPage = -1;
+  bool nextPagePrewarmDue = false;  // set when a page is drawn; render task only
+  void prewarmNextPage();
+#if THAI_ENGINE_STATS
+  int thaiLastRenderedSpine = -1;
+  int thaiLastRenderedPage = -1;
+  bool thaiTurnWindow = false;
+#endif
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
   bool recentsEntryRemoved = false;
@@ -132,15 +140,19 @@ class EpubReaderActivity final : public ReaderActivity {
 
   static constexpr int BUILD_PAGES_PER_CHUNK = 8;
   static constexpr int BACKGROUND_BUILD_PAGES_PER_TICK = 2;
+  // Caps one loop-task build tick so touch is still sampled several times within a tap.
+  static constexpr uint32_t BACKGROUND_BUILD_TICK_BUDGET_MS = 15;
   static constexpr size_t BACKGROUND_BUILD_MIN_FREE_HEAP = 32 * 1024;
   static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 16 * 1024;
   // Requires the render lock; heap admission is checked separately by the build tick.
   bool backgroundBuildWanted() const;
   bool buildTickHeapGate();
   bool buildHeapPaused = false;
+  bool heapBelowBuildFloors() const;
   // One bounded build step on the loop task, in a frame whose input did nothing. Lays out about
   // BACKGROUND_BUILD_PAGES_PER_TICK pages (one 1 KB parse step may add more) and hands the loop
-  // back as soon as a button is down, so a short press is seen before more pages are built.
+  // back after BACKGROUND_BUILD_TICK_BUDGET_MS or as soon as a button is down, so a short press
+  // or tap is seen before more pages are built.
   void backgroundBuildTick();
   bool anyButtonPressed() const;
   // A background build failed in this spine. The error would likely recur, so from then on the
@@ -156,6 +168,10 @@ class EpubReaderActivity final : public ReaderActivity {
   // "Connecting Bluetooth…" or "Bluetooth failed" in place of the status bar title.
   mutable LinkNoteTitle linkNoteTitle;
   static constexpr size_t RENDER_MIN_FREE_HEAP = 24 * 1024;
+  // Below either floor, an uncached page image is decoded with the SD fonts unloaded.
+  // Sized for the PNG decoder (~44 KB object behind a 60 KB free-heap gate); JPEG needs less.
+  static constexpr size_t IMAGE_DECODE_MIN_FREE_HEAP = 72 * 1024;
+  static constexpr size_t IMAGE_DECODE_MIN_MAX_ALLOC = 48 * 1024;
   static constexpr int PARTIAL_REBUILD_START_MARGIN = 15;
   static constexpr int BUILD_POPUP_PAGE_THRESHOLD = 20;
   static constexpr size_t BUILD_POPUP_BYTE_THRESHOLD = 96 * 1024;
@@ -192,6 +208,8 @@ class EpubReaderActivity final : public ReaderActivity {
   // Persist the reader text settings, (re)load the selected SD font, and
   // re-paginate the current chapter so changes apply without re-opening the book.
   void applyReaderTextSettings();
+  // Caller holds RenderLock. Drops the section so the next render re-paginates from the saved position.
+  void resetSectionForRelayout();
   // More panel rows.
   void buildMoreActions();
   std::string moreRowName(int row) const;
@@ -217,7 +235,7 @@ class EpubReaderActivity final : public ReaderActivity {
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
 
-  void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
+  bool renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
   void drawClippingHighlights(const Page& page, int fontId, int orientedMarginTop, int orientedMarginLeft) const;
   void renderStatusBar() const;
@@ -246,6 +264,11 @@ class EpubReaderActivity final : public ReaderActivity {
   std::string getBookAuthor() const override { return epub ? epub->getAuthor() : ""; }
   std::string getBookThumbBmpPath() const override { return epub ? epub->getThumbBmpPath() : ""; }
   int getProgressBasisPoints() const override;
+  bool currentChapter(uint16_t& index, uint16_t& count) const override;
+  // currentChapter() runs after every render; the TOC lookup reads the book cache, so keep it per spine item.
+  mutable int chapterLookupSpine = -1;
+  mutable uint16_t chapterLookupIndex = 0;
+  mutable uint16_t chapterLookupCount = 0;
   void renderBook() override;
   void onEndOfBookRendered() override;
 

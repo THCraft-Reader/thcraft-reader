@@ -100,6 +100,10 @@ class GfxRenderer {
   mutable int clipRight_ = 32767;
   mutable int clipBottom_ = 32767;
 
+#ifdef THAI_RENDER_PROBE
+  mutable void* glyphPlacementContext_ = nullptr;
+  mutable void (*glyphPlacementObserver_)(void*, size_t, uint32_t, int, int) = nullptr;
+#endif
   // CJK UI font fallback map: primary (built-in, Latin-only) UI font id -> a
   // size-matched SD-card font id that carries CJK glyphs. When a string drawn
   // or measured with a mapped primary font contains a CJK codepoint the primary
@@ -218,8 +222,8 @@ class GfxRenderer {
   // Packed variant for the paragraph layout path: each segment holds
   // consecutive NUL-terminated words (WordStore chunks), so a whole paragraph
   // is scanned without materializing per-word strings.
-  void ensureSdCardFontReady(int fontId, const char* const* segments, const size_t* segmentLens, size_t segmentCount,
-                             bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
+  bool ensureSdCardFontReady(int fontId, const char* const* segments, const size_t* segmentLens, size_t segmentCount,
+                             bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F, bool loadKernLig = false,
                              bool includeSmallCaps = false) const;
 
   // Orientation control (affects logical width/height and coordinate transforms)
@@ -351,7 +355,8 @@ class GfxRenderer {
                         BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO) const;
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR,
-                BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO, int8_t tracking = 0) const;
+                BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO, int8_t tracking = 0,
+                uint16_t thaiExtraPixels = 0) const;
   // Draws one glyph at scale256/256 of its size with its baseline at baselineY (drop caps).
   // Outlines are bilinearly resampled from the font bitmap, so no larger font is loaded.
   // Returns the scaled advance in pixels.
@@ -368,7 +373,17 @@ class GfxRenderer {
   int getKerning(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style, int8_t tracking = 0) const;
   int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style, int8_t tracking = 0,
                       BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO,
-                      TextMeasureMode mode = TextMeasureMode::Layout) const;
+                      TextMeasureMode mode = TextMeasureMode::Layout, uint16_t thaiExtraPixels = 0) const;
+  size_t countThaiJustificationGaps(int fontId, const char* text, EpdFontFamily::Style style,
+                                    BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO) const;
+  // Integer added-spacing cap from the resolved style's uncompressed line advance.
+  int getThaiJustificationGapLimit(int fontId, const char* text, EpdFontFamily::Style style) const;
+#ifdef THAI_RENDER_PROBE
+  void setGlyphPlacementObserver(void* context, void (*observer)(void*, size_t, uint32_t, int, int)) const {
+    glyphPlacementContext_ = context;
+    glyphPlacementObserver_ = observer;
+  }
+#endif
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
   // Explicit line spacing scales font size; the one-argument form returns font metrics.
@@ -383,7 +398,7 @@ class GfxRenderer {
 
   // Helper for drawing rotated text (90 degrees clockwise, for side buttons)
   void drawTextRotated90CW(int fontId, int x, int y, const char* text, bool black = true,
-                           EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+                           EpdFontFamily::Style style = EpdFontFamily::REGULAR, uint16_t thaiExtraPixels = 0) const;
   int getTextHeight(int fontId) const;
 
   // Grayscale functions

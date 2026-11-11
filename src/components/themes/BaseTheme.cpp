@@ -26,6 +26,7 @@
 #include "components/icons/cover.h"
 #include "components/icons/headerIcons.h"
 #include "fontIds.h"
+#include "images/Mascot.h"
 
 void BaseTheme::setCheckboxRow(freeink::ui::ListItem& item, const bool checked) {
   item.value = nullptr;
@@ -55,6 +56,37 @@ void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int 
 }
 
 }  // namespace
+
+void BaseTheme::drawMascotScreen(const GfxRenderer& renderer, const char* status, const bool dark,
+                                 const char* version) {
+  int top, right, bottom, left;
+  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+  const Rect bounds(left, top, renderer.getScreenWidth() - left - right, renderer.getScreenHeight() - top - bottom);
+  constexpr int GAP = 10;
+  const int titleHeight = renderer.getTextHeight(UI_10_FONT_ID);
+  const int statusHeight = renderer.getTextHeight(SMALL_FONT_ID);
+  const int footerHeight = version ? statusHeight + GAP : 0;
+  const int blockHeight = MASCOT_HEIGHT + GAP + titleHeight + GAP + statusHeight;
+  const int x = bounds.x + (bounds.width - MASCOT_WIDTH) / 2;
+  const int y = bounds.y + (bounds.height - footerHeight - blockHeight) / 2;
+
+  // Plot in logical coordinates so the pre-dithered artwork stays upright without a rotated buffer.
+  const auto* bitmap = dark ? MASCOT_DARK_BITMAP : MASCOT_BITMAP;
+  for (int row = 0; row < MASCOT_HEIGHT; ++row) {
+    for (int col = 0; col < MASCOT_WIDTH; ++col) {
+      const uint8_t byte = bitmap[row * (MASCOT_WIDTH / 8) + col / 8];
+      if ((byte & (0x80 >> (col & 7))) == 0) {
+        renderer.drawPixel(x + col, y + row, true);
+      }
+    }
+  }
+  const int titleY = y + MASCOT_HEIGHT + GAP;
+  UITheme::drawCenteredText(renderer, bounds, UI_10_FONT_ID, titleY, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
+  UITheme::drawCenteredText(renderer, bounds, SMALL_FONT_ID, titleY + titleHeight + GAP, status);
+  if (version) {
+    UITheme::drawCenteredText(renderer, bounds, SMALL_FONT_ID, bounds.y + bounds.height - statusHeight, version);
+  }
+}
 
 void BaseTheme::drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight) {
   // Top line
@@ -382,7 +414,7 @@ void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::Head
   // (SETTINGS.clockShowInHeader). Themes whose title layout has no room for
   // the clock's left reserve opt out via headerShowsClock.
   static char clockText[10];
-  if (metrics.headerShowsClock && SETTINGS.clockShowInHeader && halClock.isAvailable() &&
+  if (metrics.headerShowsClock && SETTINGS.clockShowInHeader &&
       halClock.formatTime(clockText, sizeof(clockText), SETTINGS.clockFormat == 1)) {
     status.clockText = clockText;
   }
@@ -833,7 +865,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
   const auto sb = SETTINGS.statusBarSpec();
-  const bool showStatusBarTextLane = sb.textLaneVisible(halClock.isAvailable());
+  const bool showStatusBarTextLane = sb.textLaneVisible(sb.showClock && halClock.hasTime());
 
   // Draw Progress Text
   const auto screenHeight = renderer.getScreenHeight();
@@ -933,20 +965,14 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     leftClusterWidth += batteryWidth;
   }
 
-  // Draw Clock (any board whose RTC probe succeeded)
-  if (sb.showsClock() && halClock.isAvailable()) {
+  // Read the clock only during an ordinary screen redraw; no timed refresh.
+  if (sb.showClock) {
     char timeBuf[9];
     if (halClock.formatTime(timeBuf, sizeof(timeBuf), sb.clock12h)) {
-      int clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeBuf);
-      int clockX = 0;
-      // Position to the left or right of the progress text (with a small gap)
-      if (sb.clockMode == CrossPointSettings::STATUS_BAR_CLOCK_LEFT) {
-        clockX = leftClusterX + leftClusterWidth + (leftClusterWidth > 0 ? 10 : 0);
-        leftClusterWidth += clockTextWidth + 10;
-      } else if (sb.clockMode == CrossPointSettings::STATUS_BAR_CLOCK_RIGHT) {
-        clockX = rightClusterX - rightClusterWidth - (rightClusterWidth > 0 ? 10 : 0) - clockTextWidth;
-        rightClusterWidth += clockTextWidth + 10;
-      }
+      const int clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeBuf);
+      const int clockGap = leftClusterWidth > 0 ? 10 : 0;
+      const int clockX = leftClusterX + leftClusterWidth + clockGap;
+      leftClusterWidth += clockTextWidth + clockGap;
       renderer.drawText(SMALL_FONT_ID, clockX, textY, timeBuf);
     }
   }

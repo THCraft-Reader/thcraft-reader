@@ -1,21 +1,19 @@
 #include "BootActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalDisplay.h>
 #include <I18n.h>
 
-#include "fontIds.h"
-#include "images/Logo120.h"
+#include "CrossPointSettings.h"
+#include "components/UITheme.h"
 
 void BootActivity::onEnter() {
   Activity::onEnter();
 
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
-
+  const bool dark = SETTINGS.screenInverted != 0;
+  // Boot draws directly from onEnter, before the per-render polarity hook.
+  display.setInverted(dark);
   renderer.clearScreen();
-  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSPOINT_VERSION);
+  GUI.drawMascotScreen(renderer, tr(STR_BOOTING), dark, CROSSPOINT_VERSION);
   renderer.displayBuffer();
 }

@@ -90,21 +90,74 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 74
+### Version 76
+
+Combines the Thai branch's version 75 shaping with upstream version 74: runtime
+TrueType advances are truncated to 1/16 pixel, so only the final pixel snap
+rounds. The binary
+layout is unchanged. Completed and partial section caches from either parent
+rebuild; book metadata and saved progress are kept. The derived partial version
+is `0xFE - (76 - 28)` = 206.
+
+### Thai branch version 75
+
+The serialized header and TextBlock layout are unchanged. Generic firmware Thai
+positioning replaces font-specific CPSHAPE recipes, changing glyph placement,
+Sara Am advances and potentially line breaks. Completed and partial sections
+rebuild automatically; book metadata and saved progress are kept. The derived
+partial version is `0xFE - (75 - 28)` = 207. CPFont remains version 4; companions
+are ignored. Font identity includes the algorithm revision and validated native
+metric snapshot, including whether the style could allocate it.
+
+Thai shaping algorithm revision 2 limits horizontal ascender avoidance to ป/ฝ/ฟ.
+Upper vowels over ส/ช and other bases retain their native horizontal bearings.
+The section schema remains version 75: the changed font identity invalidates
+affected completed and partial layouts without deleting book metadata or progress.
+
+### Thai branch version 74
+
+Combines the Thai branch's version 72 header and TextBlock arena with upstream
+versions 72 and 73: ruby spacing and overhang follow Chromium's default layout,
+and TrueType vector fonts render and advance .notdef for missing characters.
+Retained page lines reload evicted font variants before glyph-clearance checks.
+Completed and partial section caches from either parent rebuild; book metadata
+and saved progress are kept. The derived partial version is
+`0xFE - (74 - 28)` = 208. Version 0 remains the incomplete-write sentinel.
+
+### Thai branch version 72
+
+Combines the Thai branch's version 65 header and TextBlock arena with upstream
+layout changes through version 71. Older completed and partial section caches
+from either branch rebuild; book metadata and reading progress are kept.
+The derived partial version is `0xFE - (72 - 28)` = 210. Version 0 remains the
+incomplete-write sentinel.
+
+The header retains `thaiLayoutId`, and TextBlock flag bit 1 still selects the
+optional `thaiExtraPixels` array. The existing 16-bit Focus Reading array is now
+named `focusSplitX`: it locates the second visual run from the word origin
+(bold prefix for RTL words, regular suffix for LTR words). Thai justification
+and shaping remain available alongside bounded drop-cap layout, corrected
+space handling, font-size-based line spacing and per-glyph advance rounding.
+Clipping layout signatures use calculation version 2 and include `thaiLayoutId`.
+
+The histories below distinguish upstream versions from Thai branch versions
+where the same version numbers described incompatible layouts.
+
+### Upstream version 74
 
 Version 74 keeps the binary layout and rebuilds completed and partial sections.
 Runtime TrueType advances no longer round up before the final pixel snap, which
 can change cached line breaks and word positions. Bitmap fonts and `.cpfont`
 files are unchanged. Book metadata and saved progress are kept.
 
-### Version 73
+### Upstream version 73
 
 Version 73 keeps the binary layout and rebuilds completed and partial sections.
 TrueType vector fonts now render and advance the .notdef glyph for missing
 characters instead of omitting them. Cached line breaks and word positions change
 for text containing glyph fallbacks. Book metadata and saved progress are kept.
 
-### Version 72
+### Upstream version 72
 
 Version 72 makes ruby layout closer to how Chromium browser render text with
 ruby characters by default (`ruby-align: space-around; ruby-overhang: auto;`)
@@ -114,20 +167,20 @@ the ruby annotation is wider than its base text, spacing is inserted between
 every character in the base text as well as at the start and the end of the
 base text so that it becomes the same length as the ruby annotation.
 
-### Version 71
+### Upstream version 71
 
 Version 71 keeps the binary layout and rebuilds completed and partial sections.
 Focus split offsets now locate the bold prefix in RTL words and the regular
 suffix in LTR words. Book metadata and saved progress are kept.
 
-### Version 70
+### Upstream version 70
 
 Version 70 preserves the binary layout but rebuilds completed and partial
 sections because SD-font layout now rounds each scaled glyph advance to pixels,
 matching unkerned drawing. Cached line breaks and word positions change.
 Book metadata and saved progress are kept.
 
-### Version 69
+### Upstream version 69
 
 Version 69 preserves the binary layout but rebuilds completed and partial
 sections because line spacing now multiplies font size instead of the font's
@@ -135,81 +188,52 @@ newline distance (`advanceY`). Clipping layout signatures also distinguish the
 new calculation so old page-local word ranges are not reused for a new layout.
 Book metadata and saved progress are kept.
 
-### Version 68
+### Upstream version 68
 
 Version 68 preserves the binary layout but rebuilds completed and partial
 sections to remove mid-line hyphens left by drop-cap layout. The lines beside
 the drop cap use bounded greedy wrapping; the rest keep their usual wrapping.
 Book metadata and saved progress are kept.
 
-### Version 67
+### Upstream version 67
 
 Version 67 preserves the binary layout but rebuilds completed and partial
 sections for corrected justification of visually reordered text with attached
 spaces. Book metadata and saved progress are kept.
 
-### Version 66
+### Upstream version 66
 
 Version 66 preserves the binary layout but rebuilds completed and partial
 sections to remove leading non-breaking spaces carried across soft line wraps.
 Explicit paragraph-leading spaces, book metadata, and saved progress are kept.
 
-### Version 65
+### Upstream version 65
 
 Version 65 preserves the binary layout but rebuilds completed and partial
 sections for corrected justification of non-breaking spaces after hyphens and
 ellipses. Book metadata and reading progress are unchanged.
 
-### Version 64
+### Thai branch version 65
 
-Version 64 preserves the binary layout but rebuilds completed and partial
-sections for corrected explicit font-weight/font-style inheritance. It retains
-version 63's GIF rendering and paragraph-boundary fixes. CSS cache version 19 stores
-`inherit` as value 2 in the existing font-style and font-weight bytes; the
-winning declaration is resolved against the parent before applying the element's
-style. Older CSS caches are rebuilt. Book metadata and reading progress are
-unchanged.
+The serialized layout is unchanged from version 61. Upstream's static GIF images
+and alternative text, corrected paragraph boundaries (upstream version 63), and
+explicit font-weight/font-style inheritance (upstream version 64) are combined
+with the Thai layout. Upstream versions 62-64 described layouts without Thai
+metadata; the Thai branch did not write them. CSS cache version 19 stores `inherit`
+as value 2 in the existing font-style and font-weight bytes; the winning
+declaration is resolved against the parent before applying the element's style.
+Older CSS caches and completed and partial section caches rebuild automatically;
+book metadata and reading progress are kept. The derived partial version is
+`0xFE - (65 - 28)` = 217.
 
-### Version 63
+### Version 61
 
-Version 63 retains the version 60 rendering format and rebuilds completed and
-partial sections to include previously omitted GIFs and their alternative text.
-Earlier GIF/table development builds used versions 60 through 62; their caches
-also rebuild to preserve both the current rendering format and corrected
-paragraph boundaries. The partial-build sentinel remains derived from the final
-section version. Book metadata and saved progress are kept, but pagination can
-change as GIFs become visible.
-
-### Version 60
-
-The serialized layout is unchanged. Text that runs straight into a block or
-heading start (`text<div>…`) now stays in its own paragraph instead of being
-joined to the first word of the new block. Older completed and partial section
-caches rebuild automatically; book metadata and reading progress are kept.
-
-### Version 59
-
-The serialized layout is unchanged. Stored CSS rules now apply even below
-48 KiB free heap. Older completed and partial sections rebuild because they may
-contain missing styles, different line breaks, or content that should be hidden.
-Book metadata, CSS rule caches, and reading progress are kept.
-
-### Version 58
-
-The serialized layout is unchanged. Completed and partial sections rebuild for
-corrected rendering layout and footnote placement. Book metadata and reading
-progress are kept.
-
-### Version 57
-
-Version 57 combines the rendering layout below with line breaks after explicit
-hyphens and dashes. It invalidates version 56 caches from both branches, which
-used different layouts under the same version. Completed and partial sections
-are rebuilt.
-
-### Version 56
-
-Version 56 adds the rendering layout below on top of version 55.
+Combines upstream's rendering layout (upstream versions 56-60) with the Thai
+TextBlock layout of version 57, including upstream's corrected layout and
+footnote placement. Upstream versions 58-60 described layouts without Thai
+metadata; this firmware never writes them. Older completed and
+partial section caches rebuild automatically; book metadata and reading
+progress are kept. The derived partial version is `0xFE - (61 - 28)` = 221.
 
 Each TextBlock's BlockStyle stores a signed 32-bit `fontId` after
 `characterSpacing`: the renderer font the line was laid out in, or 0 for the
@@ -251,48 +275,98 @@ CSS cache version 18 adds a border-component byte after the four border sides.
 Bits 0-3 mark declared widths and bits 4-7 mark declared styles, in top, right,
 bottom, left order. Width and style declarations cascade independently.
 
-### Version 55
+Text that runs straight into a block or heading start (`text<div>…`) stays in
+its own paragraph. Stored CSS rules apply even below 48 KiB free heap.
 
-Each TextBlock adds a uint16 `paragraphStartWord` after `textBytes`. It is the
-visual index of the paragraph's first logical word, or `UINT16_MAX` for a
-continuation line. Clipping uses this marker independently of source-offset
-gaps. Older completed and partial section caches rebuild automatically;
-book metadata and reading progress are kept.
+### Version 57
 
-### Version 54
+The serialized layout is unchanged. Upstream line breaks after explicit hyphens
+and dashes are combined with the Thai layout. The derived partial version is
+`0xFE - (57 - 28)` = 225.
 
-The serialized layout is unchanged. Word source ranges and split offsets now
-include codepoints absorbed by NFC composition. The high bit of each word's
-style byte marks a discretionary hyphen, so clipping can remove it independently
-of source length. Rebuild completed and partial section caches to correct
-clipping spaces and anchors for decomposed text.
+### Version 56
 
-### Version 53
+Combines upstream's clipping metadata (upstream versions 53-55) with the Thai
+TextBlock flags. Each TextBlock header adds a uint16 `paragraphStartWord` after
+`textBytes`. It is the visual index of the paragraph's first logical word, or
+`UINT16_MAX` for a continuation line. Clipping uses this marker independently of
+source-offset gaps.
 
 Each TextBlock arena starts with one 8-byte source range per word (two uint32
-chapter-visible Unicode-codepoint offsets, start inclusive and end exclusive).
-Ranges follow words through BiDi ordering and line wrapping. This version also
-includes the version 52 redaction layout changes. Older completed and partial
-section caches are rebuilt automatically; book and progress files are kept.
+chapter-visible Unicode-codepoint offsets, start inclusive and end exclusive),
+ahead of the 16-bit arrays and the optional `thaiExtraPixels`. Ranges follow
+words through BiDi ordering, line wrapping, and Thai token splits, and include
+codepoints absorbed by NFC composition. The high bit of each word's style byte
+marks a discretionary hyphen, so clipping can remove it independently of source
+length.
 
-### Version 52
+Version 55 and older completed and partial section caches rebuild
+automatically; book metadata and reading progress are kept. The derived partial
+version is `0xFE - (56 - 28)` = 226.
+
+### Version 55
 
 The serialized layout is unchanged. Missing full-block (`U+2588`) and black-square
 (`U+25A0`) symbols now use font-sized solid rectangles instead of replacement
 glyphs. Rebuild older sections so cached line breaks and word positions match
-their new widths.
+their new widths. The derived partial version is `0xFE - (55 - 28)` = 227.
+
+### Version 54
+
+The byte layout remains v52. Soft-flushed paragraphs preserve first-line
+indentation and apply top spacing once, with bottom spacing only when finalized.
+Version 53 and older finalized/partial caches are rebuilt to use the corrected
+layout. The derived partial version is `0xFE - (54 - 28)` = 228.
+Reading progress, book metadata, and Thai layout identity are unchanged.
+
+### Version 53
+
+The byte layout remains v52, but Thai Justify budgets now encode bounded,
+weighted spacing between independent Thai letter units rather than unlimited
+whole-cluster expansion. Both stored origins and internal budget replay changed.
+Version 52 and older finalized/partial caches are rebuilt; the derived partial
+version changes with the section version. Alignment values, reading progress,
+book metadata, Thai analysis identity, CPFont and CPSHAPE formats are unchanged.
+
+### Version 52
+
+TextBlock's presence byte is now flags: bit 0 carries focus metadata and bit 1
+carries Thai cluster expansion. Other bits are invalid. When bit 1 is set,
+`u16 thaiExtraPixels[wordCount]` follows the optional focus suffix positions,
+before the byte arrays. Empty/all-zero budgets omit the array. All 16-bit arrays
+remain evenly aligned in the single resident arena; truncated arrays are rejected.
+
+Reader alignment 5 is Thai Justify; values 0–4 retain their meanings. Alignment
+already participates in section-cache validation. Version 51 and older final
+and partial caches are rebuilt. The 48-byte header, reading progress, book
+metadata, Thai analysis identity, CPFont and CPSHAPE formats are unchanged.
 
 ### Version 51
 
-The serialized layout is unchanged. Paragraph continuity and top spacing are
-preserved across soft flushes. Older sections are rebuilt for the updated layout.
+The 48-byte header combines upstream's `u8 paragraphIndentSpaces` after
+`extraParagraphSpacing` with `u32 thaiLayoutId` immediately after
+`wordSpacingPercent`. Both finalized and suspended section caches compare these
+values along with the other render settings. Versions 49 and 50 used different
+headers in Thai and upstream builds; both are rejected and rebuilt.
 
-### Version 50
+`thai::layoutId()` is FNV-1a (seed 2166136261, prime 16777619) over little-endian
+`u32` analyzer version 2, little-endian `u32` dictionary CRC32 (zero when disabled),
+then one byte each for enabled word breaking and dictionary use. Bit 31 is cleared.
+Analyzer version 2 adds bounded hybrid word segmentation; version-1 identities
+reflow automatically without changing the binary header or reading progress.
 
-The header adds `paragraphIndentSpaces` after `extraParagraphSpacing`. The value
-participates in cache validation, so sections with different indentation settings
-are rebuilt. Version 49 was used by pre-release builds with a different header
-layout and is skipped to prevent reuse of those caches.
+Bit 31 marks output produced while optional Thai analysis was unavailable due to
+allocation failure or invalid dictionary data. Commit patches that bit before
+stamping either final or partial version. The current Section can still read its
+pages through the normal LUTs, but a subsequent healthy open rejects that identity
+and rebuilds layout. Deterministic malformed-source fallback does not set this bit.
+Invalidation removes only rendered section data, not extracted HTML, book metadata,
+or reading progress.
+
+An in-progress file has version zero until commit. Suspended files use the derived
+partial version `0xFE - (51 - 28)` = 231, with the same header and LUT schema plus
+two `u32` values (`bytesConsumed`, `totalBytes`) after the visible-offset LUT.
+Older final and partial versions are rejected.
 
 ### Version 48
 
@@ -404,7 +478,9 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 64
+// Approximate: omits each TextBlock's paragraphStartWord and per-word source
+// ranges, and each Page's link records.
+#define EXPECTED_VERSION 72
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -446,7 +522,8 @@ enum TextAlign : u8 {
     LEFT_ALIGN = 1,
     CENTER_ALIGN = 2,
     RIGHT_ALIGN = 3,
-    NONE = 4
+    NONE = 4,
+    THAI_JUSTIFIED = 5
 };
 
 struct BlockStyle {
@@ -470,22 +547,26 @@ struct BlockStyle {
 
 struct TextBlock {
     u16 wordCount;
-    u8 hasFocus;
+    u8 flags [[comment("bit 0: focus; bit 1: Thai expansion; other bits invalid")]];
     u16 textBytes [[comment("Total size of text[], including one NUL per word")]];
 
     if (wordCount > 0) {
         u16 textOff[wordCount] [[comment("Byte offset of word i's text within text[]")]];
         s16 wordXPos[wordCount];
-        if (hasFocus != 0) {
-            u16 wordFocusSuffixX[wordCount] [[comment("Suffix x offset from word start")]];
+        if ((flags & 1) != 0) {
+            u16 wordFocusSplitX[wordCount] [[comment("Second visual run offset: RTL bold prefix, LTR regular suffix")]];
+        }
+        if ((flags & 2) != 0) {
+            u16 thaiExtraPixels[wordCount] [[comment("Internal Thai expansion budget in layout pixels")]];
         }
         WordStyle wordStyle[wordCount];
-        if (hasFocus != 0) {
+        if ((flags & 1) != 0) {
             u8 wordFocusBoundary[wordCount] [[comment("UTF-8 byte boundary between bold prefix and suffix")]];
         }
         char text[textBytes] [[comment("All words back to back, each NUL-terminated")]];
     }
 
+    String rubyTexts[wordCount];
     BlockStyle blockStyle;
     u8 hasWordFonts;
     if (hasWordFonts != 0) {
@@ -608,6 +689,7 @@ struct SectionBin {
     bool focusReadingEnabled;
     s8 characterSpacing;
     u8 wordSpacingPercent;
+    u32 thaiLayoutId;
 
     u16 pageCount;
     u32 pageLutOffset;
@@ -650,6 +732,23 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## `font.json`
+
+A book's own reader font. Read and written by `src/BookFont.cpp`. Written when
+the font or size is changed inside the book to something other than the
+default; removed when the book follows the default again. Books without this
+file use the default font from `settings.json`.
+
+```json
+{ "family": "NotoSansThai", "size": 16 }
+```
+
+- `family`: SD-card font family name; an empty string means the built-in font.
+  A family that is no longer installed is ignored and the file is kept.
+- `size`: reader point size; snapped to the family's installed sizes when the
+  book opens, and the snapped size is written back the next time the book's
+  text settings are saved.
 
 ## CLX1 — library index (`.crosspoint/library.idx`)
 

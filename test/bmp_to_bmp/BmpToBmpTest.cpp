@@ -73,7 +73,7 @@ class BmpToBmpTest : public ::testing::Test {
       std::ofstream out(path, std::ios::binary);
       out.write(reinterpret_cast<const char*>(bmp.data()), bmp.size());
     }
-    EXPECT_TRUE(file.open(path.c_str(), "rb"));
+    EXPECT_TRUE(file.open(path.string().c_str(), "rb"));
     Output out;
     EXPECT_TRUE(BmpToBmpConverter::bmpFileToBmpStream(file, out, crop, false));
     file.close();

@@ -14,6 +14,9 @@ HalMemory::HeapStats readHeapStats(uint32_t capabilities) {
 HalMemory::HeapStats HalMemory::getDefaultHeap() { return readHeapStats(MALLOC_CAP_DEFAULT); }
 
 HalMemory::HeapStats HalMemory::getInternalHeap() { return readHeapStats(MALLOC_CAP_INTERNAL); }
+HalMemory::HeapStats HalMemory::getInternal8BitHeap() {
+  return readHeapStats(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
 
 HalMemory::HeapStats HalMemory::getPsramHeap() { return readHeapStats(MALLOC_CAP_SPIRAM); }
 
