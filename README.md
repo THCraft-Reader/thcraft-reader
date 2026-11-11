@@ -63,7 +63,7 @@ separate **Sleep Screen** light/dark selection.
   - WebDAV handler
   - AP mode (hotspot) and STA mode (join existing Wi-Fi), both with QR helpers
   - Calibre wireless connect flow
-  - OPDS browser with saved servers (up to 8), search, pagination, and direct download
+  - OPDS browser with saved servers (up to 8), search, pagination, and direct download; hold Back for one second and release in a catalog to return to the main menu
   - OTA update checks and installs from GitHub releases
 
 - **Customization**: night mode, multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff, THCraft), sleep screen modes including transparent overlays, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more.

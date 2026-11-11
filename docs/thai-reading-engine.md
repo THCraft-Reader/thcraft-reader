@@ -429,7 +429,8 @@ spacing boundaries and prewarming use the same cursor. Snapshot content,
 availability, the shaping build flag and algorithm revision enter the font
 identity. Algorithm revision 2 corrects upper-vowel placement over ส/ช and
 changes SD-font identity so affected completed and partial sections rebuild.
-Section format stays at version 75; book metadata and reading progress are preserved.
+Revision 2 kept the section format at version 75 (the current version is listed in
+[file-formats.md](file-formats.md)); book metadata and reading progress are preserved.
 
 Prepare native test assets with:
 

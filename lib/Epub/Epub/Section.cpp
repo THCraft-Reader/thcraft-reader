@@ -104,9 +104,11 @@ namespace {
 // Thai v72 combined Thai header/expansion metadata and upstream v65-v71 layout.
 // Upstream v72: Ruby spacing and overhang follow Chromium's default layout.
 // Upstream v73: TrueType vector fonts load and advance .notdef for missing glyphs.
-// v74: Combined Thai metadata and upstream v72-v73 layout.
-// v75: Generic native-metric Thai shaping replaces font-specific companion recipes.
-constexpr uint8_t SECTION_FILE_VERSION = 75;
+// Thai v74: Combined Thai metadata and upstream v72-v73 layout.
+// Thai v75: Generic native-metric Thai shaping replaces font-specific companion recipes.
+// Upstream v74: TrueType advances defer rounding until pixel placement.
+// v76: Combined Thai v75 shaping and upstream v74 advance rounding.
+constexpr uint8_t SECTION_FILE_VERSION = 76;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects

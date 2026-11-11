@@ -175,9 +175,8 @@ bool HomeActivity::loadRecentCovers(int coverHeight) {
     }
   }
   // Keep failed paths for a later home visit, but never retry on every redraw.
-  // Fonts and the framebuffer are restored before the next Thai UI draw.
-  if (showingLoading) requestUpdate();
-
+  // Fonts are restored here; a true result means the framebuffer is blank and
+  // the caller must redraw before the next display.
   recentsLoaded = true;
   recentsLoading = false;
   return showingLoading;
@@ -435,30 +434,38 @@ void HomeActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
   if (coverGridUi) {
-    coverGridUi->setSelection(selectorIndex);
-    UITheme::getInstance().drawCoverGridHome(*coverGridUi);
-    // Front Left/Right walk the tabs, so their hints read Left/Right; the
-    // side page buttons (unhinted) walk the covers.
-    const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
-                                              tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH
-                                                                   : HalDisplay::FAST_REFRESH);
+    const auto drawGrid = [&] {
+      renderer.clearScreen();
+      coverGridUi->setSelection(selectorIndex);
+      UITheme::getInstance().drawCoverGridHome(*coverGridUi);
+      // Front Left/Right walk the tabs, so their hints read Left/Right; the
+      // side page buttons (unhinted) walk the covers.
+      const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
+                                                tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    };
+    drawGrid();
     // Slot heights are recorded during the draw above; a change (first layout
     // pass, orientation switch) means the paths must point at those sizes and
-    // any missing thumbs must be generated. Refreshing the paths right away
-    // lets the next pass draw already-cached thumbs before generation runs.
-    const bool coverSpecChanged = coverGridUi->takeThumbHeightChanged();
-    if (coverSpecChanged) {
+    // any missing thumbs must be generated. Resolve the covers before the
+    // panel is touched and redraw into the framebuffer, so Home paints once
+    // instead of three e-ink refreshes (placeholder, placeholder, covers).
+    if (coverGridUi->takeThumbHeightChanged()) {
       coverGridUi->refreshCoverPaths();
       recentsLoaded = false;
     }
-    if (!firstRenderDone) {
-      firstRenderDone = true;
-      requestUpdate();
-    } else if (!recentsLoaded && !recentsLoading) {
+    if (!recentsLoaded && !recentsLoading) {
       if (loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT)) coverGridUi->refreshCoverPaths();
+      drawGrid();
+      if (coverGridUi->takeThumbHeightChanged()) {
+        coverGridUi->refreshCoverPaths();
+        recentsLoaded = false;
+        requestUpdate();
+      }
     }
+    renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH
+                                                                   : HalDisplay::FAST_REFRESH);
+    firstRenderDone = true;
     return;
   }
   // A cover snapshot from the other output polarity holds the other byte form (night mode keeps images pre-inverted so
@@ -527,7 +534,7 @@ void HomeActivity::render(RenderLock&&) {
   } else if (!recentsLoaded && !recentsLoading) {
     recentsLoading = true;
     const int themeThumbHeight = GUI.homeCoverThumbHeight(renderer);
-    loadRecentCovers(themeThumbHeight > 0 ? themeThumbHeight : metrics.homeCoverHeight);
+    if (loadRecentCovers(themeThumbHeight > 0 ? themeThumbHeight : metrics.homeCoverHeight)) requestUpdate();
   }
 }
 

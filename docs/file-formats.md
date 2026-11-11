@@ -90,7 +90,16 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 75
+### Version 76
+
+Combines the Thai branch's version 75 shaping with upstream version 74: runtime
+TrueType advances are truncated to 1/16 pixel, so only the final pixel snap
+rounds. The binary
+layout is unchanged. Completed and partial section caches from either parent
+rebuild; book metadata and saved progress are kept. The derived partial version
+is `0xFE - (76 - 28)` = 206.
+
+### Thai branch version 75
 
 The serialized header and TextBlock layout are unchanged. Generic firmware Thai
 positioning replaces font-specific CPSHAPE recipes, changing glyph placement,
@@ -105,7 +114,7 @@ Upper vowels over ส/ช and other bases retain their native horizontal bearing
 The section schema remains version 75: the changed font identity invalidates
 affected completed and partial layouts without deleting book metadata or progress.
 
-### Version 74
+### Thai branch version 74
 
 Combines the Thai branch's version 72 header and TextBlock arena with upstream
 versions 72 and 73: ruby spacing and overhang follow Chromium's default layout,
@@ -133,6 +142,13 @@ Clipping layout signatures use calculation version 2 and include `thaiLayoutId`.
 
 The histories below distinguish upstream versions from Thai branch versions
 where the same version numbers described incompatible layouts.
+
+### Upstream version 74
+
+Version 74 keeps the binary layout and rebuilds completed and partial sections.
+Runtime TrueType advances no longer round up before the final pixel snap, which
+can change cached line breaks and word positions. Bitmap fonts and `.cpfont`
+files are unchanged. Book metadata and saved progress are kept.
 
 ### Upstream version 73
 
@@ -742,6 +758,7 @@ build-assigned discovery counter — breaks ties and carries books whose
 filesystem reports no time. Fold version 3 introduced the timestamp key; a
 fold bump rebuilds ranks while preserving `firstSeen`.
 Fold version 4 preserves leading articles in title sort and search keys.
+Fold version 5 drops all Unicode 18.0 Hebrew combining marks, including U+05C8 and U+05C9.
 
 Sections are 512-byte aligned so each starts on an SD block boundary.
 
