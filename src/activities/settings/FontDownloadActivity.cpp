@@ -586,8 +586,8 @@ void FontDownloadActivity::downloadFamily(ManifestFamily& family) {
               mappedInput.wasPressed(MappedInputManager::Button::Back)) {
             cancelRequested_ = true;
           }
-          // Home cancels immediately; other configured actions are deferred to
-          // the next main-loop pass by the transfer input pump.
+          // Home and Back cancel immediately; other configured actions are
+          // deferred to the next main-loop pass by the transfer input pump.
           if (mappedInput.wasHomeGesture()) {
             cancelRequested_ = true;
             goHomeRequested_ = true;

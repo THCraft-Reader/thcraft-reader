@@ -421,8 +421,8 @@ void CrossPointWebServerActivity::loop() {
           yield();
           // Pump input inside this blocking loop so exit events remain responsive.
           mappedInput.update(true);
-          // Home remains available now; other configured actions are deferred
-          // to the next main-loop pass.
+          // Home and Back remain available now; other configured actions are
+          // deferred to the next main-loop pass.
           if (mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasHomeGesture()) {
             onGoHome();
             return;

@@ -104,9 +104,11 @@ void MappedInputManager::update(const bool deferHomeButtonAction) const {
     deferredPowerSleepFrame = false;
   }
   if (deferHomeButtonAction) {
-    // Keep the first action observed during a synchronous transfer. Home must
-    // still be visible now so the transfer can cancel and unwind promptly.
-    if (homeAction != HomeButtonAction::Ignore && deferredHomeAction == HomeButtonAction::Ignore) {
+    // Keep the first action observed during a synchronous transfer. Home and
+    // Back stay visible now so the transfer can cancel; replaying Back later
+    // would also leave the screen the cancel returned to.
+    if (homeAction != HomeButtonAction::Ignore && homeAction != HomeButtonAction::Back &&
+        deferredHomeAction == HomeButtonAction::Ignore) {
       deferredHomeAction = homeAction;
     }
   } else if (deferredHomeAction != HomeButtonAction::Ignore) {
@@ -449,6 +451,7 @@ bool MappedInputManager::wasPressed(const Button button) const {
   if ((button == Button::NavPrevious || button == Button::Left) && remoteInput.button == RemoteButton::Previous)
     return true;
   if (button == Button::Confirm && homeAction == HomeButtonAction::Confirm) return true;
+  if (button == Button::Back && homeAction == HomeButtonAction::Back) return true;
   if (button == Button::Back && wasBackGesture()) return true;
 #if FREEINK_CAP_TOUCH
   if (button == Button::Confirm && wasPowerConfirmClick()) return true;
@@ -466,6 +469,7 @@ bool MappedInputManager::wasReleased(const Button button) const {
   if ((button == Button::NavPrevious || button == Button::Left) && remoteInput.button == RemoteButton::Previous)
     return true;
   if (button == Button::Confirm && homeAction == HomeButtonAction::Confirm) return true;
+  if (button == Button::Back && homeAction == HomeButtonAction::Back) return true;
   if (button == Button::Back && wasBackGesture()) return true;
 #if FREEINK_CAP_TOUCH
   if (button == Button::Confirm && wasPowerConfirmClick()) return true;

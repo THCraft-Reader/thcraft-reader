@@ -154,8 +154,8 @@ void CatalogActivity::beginDownload(const std::string& title) {
 void CatalogActivity::onDownloadProgress(const size_t downloaded, const size_t total) {
   downloadProgress = downloaded;
   downloadTotal = total;
-  // Home cancels immediately; other configured actions are deferred to the
-  // next main-loop pass by the transfer input pump.
+  // Home and Back cancel immediately; other configured actions are deferred
+  // to the next main-loop pass by the transfer input pump.
   mappedInput.update(true);
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
   if (mappedInput.wasHomeGesture()) cancelDownload = goHomeAfterCancel = true;

@@ -36,8 +36,9 @@ struct HalGPIO {
   unsigned long getHeldTime() const { return 900; }
   unsigned long getPowerButtonHeldTime() const { return powerHeldMs; }
   bool wasCapacitivePagePressed() const { return false; }
-  bool hasHomeKey() const { return false; }
-  bool wasHomeKeyTapped() const { return false; }
+  bool homeKey = false, homeTapped = false;
+  bool hasHomeKey() const { return homeKey; }
+  bool wasHomeKeyTapped() const { return homeTapped; }
   bool wasHomeKeyLongPressed() const { return false; }
   bool wasHomeKeyPressed() const { return false; }
 };
@@ -243,7 +244,30 @@ void checkPowerClicks() {
   assert(input.powerSleepClick());
 }
 
+// A home-key Back is a Back press now and is not replayed after a transfer.
+void checkHomeKeyBack() {
+  BoardConfig::x4Pro = false;
+  SETTINGS.homeButtonTapAction = static_cast<int>(HomeButtonAction::Back);
+  SETTINGS.homeButtonDoubleTapAction = static_cast<int>(HomeButtonAction::Ignore);
+  HalGPIO gpio;
+  GfxRenderer renderer;
+  MappedInputManager input(gpio, renderer);
+  using Button = MappedInputManager::Button;
+  gpio.homeKey = true;
+  gpio.homeTapped = true;
+  input.update();
+  assert(input.wasPressed(Button::Back) && input.wasReleased(Button::Back));
+  assert(!input.wasReleased(Button::Confirm) && input.getHeldTime() == 0);
+  input.update(true);
+  assert(input.wasReleased(Button::Back));
+  gpio.homeTapped = false;
+  input.update();
+  assert(!input.wasReleased(Button::Back));
+  assert(input.homeButtonAction() == HomeButtonAction::Ignore);
+}
+
 int main() {
+  checkHomeKeyBack();
   for (const bool x4Pro : {false, true}) {
     BoardConfig::x4Pro = x4Pro;
     checkRemoteButtons();

@@ -665,6 +665,7 @@ STR_HOME_BUTTON_TAP: "แตะ"
 STR_HOME_BUTTON_DOUBLE_TAP: "แตะสองครั้ง"
 STR_HOME_BUTTON_LONG_PRESS: "กดค้าง"
 STR_TOGGLE_FRONTLIGHT: "เปิด/ปิดไฟหน้าจอ"
+STR_GO_BACK: "ย้อนกลับ"
 
 STR_THEME_COVER_GRID: "ตารางปกหนังสือ"
 STR_WORD_SPACING: "ระยะห่างคำ"
