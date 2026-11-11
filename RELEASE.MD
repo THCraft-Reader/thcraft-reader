@@ -18,6 +18,8 @@ Select the production target with `RELEASE_TARGET` before running the build bloc
 | X4 Classic | `x4classic-thai` | `x4c-gh_release` |
 | X4 | `x4-thai` | `gh_release` |
 | X3 | `x3-thai` | `gh_release` |
+| Boox Picco | `picco-thai` | `picco-gh_release` |
+| EEGO Reader A4 | `eego-a4-thai` | `eego_a4-gh_release` |
 
 For example, `export RELEASE_TARGET=x4classic-thai` selects X4 Classic.
 Each output directory contains the same four filenames shown above. X4 and X3
@@ -132,6 +134,8 @@ environments = {
     "x4classic-thai": "x4c-gh_release",
     "x4-thai": "gh_release",
     "x3-thai": "gh_release",
+    "picco-thai": "picco-gh_release",
+    "eego-a4-thai": "eego_a4-gh_release",
 }
 if target not in environments:
     raise SystemExit(f"Unknown RELEASE_TARGET: {target}")
