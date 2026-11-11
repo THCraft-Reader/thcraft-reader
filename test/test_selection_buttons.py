@@ -107,6 +107,9 @@ popup_source = (ROOT / "src/components/OptionPopup.h").read_text()
 popup_buttons = "  bool handleButtons(" + popup_source.split("  bool handleButtons(", 1)[1].split(
     "  bool processRender(", 1
 )[0]
+popup_window = "  int optionCount() const" + popup_source.split("  int optionCount() const", 1)[1].split(
+    "  bool active = false;", 1
+)[0]
 popup_harness = r"""
 #include <algorithm>
 #include <cassert>
@@ -124,7 +127,9 @@ struct Popup {
   std::vector<int> ownedStrings{0};
   std::function<void(int)> onSelectCallback;
   bool isActive() const { return active; }
-""" + popup_buttons + r"""
+  int firstOption = 0;
+  int shownOptions = 0;
+""" + popup_buttons + popup_window + r"""
   // Model an outside release after the shared touch router finds no dialog hit.
   bool handleInput(const Input& input, const std::function<void()>& update) {
     if (active && input.outsideTap) { active = false; update(); return true; }
@@ -144,7 +149,36 @@ struct ClipSelectionActivity {
   void loop();
 };
 """ + loop_prefix + r"""
+// A list taller than the screen shows a window: buttons keep the selection in
+// it and a swipe pages it, clamped to the list.
+void checkPopupWindow() {
+  Popup popup;
+  popup.ownedStrings.assign(13, 0);
+  popup.shownOptions = 5;
+  const auto none = [] {};
+  for (int i = 0; i < 6; ++i) popup.handleButtons(false, true, false, false, none);
+  assert(popup.selectedIndex == 6 && popup.firstOption == 2);
+  popup.handleButtons(true, false, false, false, none);
+  popup.handleButtons(true, false, false, false, none);
+  popup.handleButtons(true, false, false, false, none);
+  assert(popup.selectedIndex == 3 && popup.firstOption == 2);
+  for (int i = 0; i < 4; ++i) popup.handleButtons(true, false, false, false, none);
+  assert(popup.selectedIndex == 12 && popup.firstOption == 8);
+  popup.firstOption = 0;
+  assert(popup.scrollPage(1) && popup.firstOption == 5);
+  assert(popup.scrollPage(1) && popup.firstOption == 8);
+  assert(!popup.scrollPage(1) && popup.firstOption == 8);
+  assert(popup.scrollPage(-1) && popup.firstOption == 3);
+  assert(popup.scrollPage(-1) && popup.firstOption == 0);
+  assert(!popup.scrollPage(-1));
+  // A window opened on the last option is already at the end: no repaint.
+  popup.firstOption = 12;
+  assert(!popup.scrollPage(1));
+  popup.shownOptions = 0;
+  assert(!popup.scrollPage(1));
+}
 int main() {
+  checkPopupWindow();
   for (const bool touch : {false, true}) {
     ClipSelectionActivity selection;
     selection.actionPopup.onSelectCallback = [&](int) { selection.cancel(); };

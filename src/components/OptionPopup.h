@@ -1,4 +1,5 @@
 #pragma once
+#include <BoardConfig.h>
 #include <I18n.h>
 
 #include <algorithm>
@@ -102,6 +103,16 @@ class OptionPopup {
           requestUpdate();
           return true;
         }
+        if (snap.touchReleased) {
+          // Routed above to clear the pressed option. A vertical swipe pages a
+          // list taller than the screen; swipe up shows later options.
+          const auto swipe = input.wasSwipe();
+          if ((swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) &&
+              scrollPage(swipe == MappedInputManager::SwipeDir::Up ? 1 : -1)) {
+            requestUpdate();
+          }
+          return true;
+        }
         if (snap.touchPressed) {
           // Touch-down on an option moves the highlight (route() latched the
           // hit as the active interaction; read it back, no re-hit-testing).
@@ -130,10 +141,12 @@ class OptionPopup {
     const int count = std::min<int>(ownedStrings.size(), MAX_OPTIONS);
     if (previous) {
       selectedIndex = (selectedIndex - 1 + count) % count;
+      revealSelection();
       requestUpdate();
       return true;
     } else if (next) {
       selectedIndex = (selectedIndex + 1) % count;
+      revealSelection();
       requestUpdate();
       return true;
     } else if (confirm) {
@@ -245,7 +258,21 @@ class OptionPopup {
     const fui::Rect screen = device.screen();
     const int16_t width =
         fui::clampI16(std::min<int>(screen.width * 3 / 4, screen.width - metrics.optionPopupDialogSideMargin * 2));
-    const int16_t height = fui::clampI16(fui::optionDialogHeight(target, props, width), 0, screen.height);
+    // Too many options for the screen: show the largest window that fits,
+    // with the SDK's scroll bar, clear of the bezel and any button hints.
+    const ::Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, !BoardConfig::hasTouch());
+    const int reserve = std::max(
+        {metrics.optionPopupDialogSideMargin, safe.y - screen.y, screen.y + screen.height - safe.y - safe.height});
+    const int maxHeight = screen.height - 2 * reserve;
+    uint8_t shown = count;
+    int16_t height = fui::optionDialogHeight(target, props, width);
+    while (height > maxHeight && shown > 1) {
+      props.visibleOptions = --shown;
+      height = fui::optionDialogHeight(target, props, width);
+    }
+    props.firstOption = static_cast<uint8_t>(std::clamp(firstOption, 0, count - shown));
+    shownOptions = shown < count ? shown : 0;
+    height = fui::clampI16(height, 0, screen.height);
     const fui::Rect dialogRect = fui::centeredRect(screen, fui::Size{width, height});
 
     // Chrome guard first, options after: route() scans newest-first, so the
@@ -268,9 +295,8 @@ class OptionPopup {
   }
 
  private:
-  // The dialog has no scrolling, so options past MAX_OPTIONS would render off
-  // screen anyway; a fixed cap keeps the DialogOption array on the stack and
-  // the interaction table small. +1 slot for the chrome guard rect.
+  // A fixed cap keeps the DialogOption array on the stack and the interaction
+  // table small. +1 slot for the chrome guard rect.
   static constexpr int MAX_OPTIONS = 16;
   static constexpr size_t INTERACTION_CAPACITY = MAX_OPTIONS + 1;
   static constexpr freeink::ui::ActionId ACTION_OPTION = 1;
@@ -279,10 +305,39 @@ class OptionPopup {
   void activate(int currentIndex, std::function<void(int)> onSelect) {
     const int count = std::min<int>(ownedStrings.size(), MAX_OPTIONS);
     selectedIndex = currentIndex >= 0 && currentIndex < count ? currentIndex : 0;
+    // Open with the current value at the top of the window; render clamps it.
+    firstOption = selectedIndex;
+    shownOptions = 0;
     onSelectCallback = std::move(onSelect);
     message.clear();
     uiReady = false;
     active = count > 0;
+  }
+
+  int optionCount() const { return std::min<int>(ownedStrings.size(), MAX_OPTIONS); }
+
+  // Moves the window by one page; false when every option is already shown.
+  bool scrollPage(const int direction) {
+    const int shown = shownOptions;
+    const int last = optionCount() - shown;
+    if (shown == 0 || last <= 0) return false;
+    const int current = std::clamp(firstOption, 0, last);
+    const int first = std::clamp(current + direction * shown, 0, last);
+    if (first == current) return false;
+    firstOption = first;
+    return true;
+  }
+
+  // Scrolls the window so button navigation keeps the selection visible.
+  void revealSelection() {
+    const int shown = shownOptions;
+    if (shown == 0) {
+      firstOption = selectedIndex;
+      return;
+    }
+    firstOption = std::clamp(firstOption, 0, std::max(0, optionCount() - shown));
+    if (selectedIndex < firstOption) firstOption = selectedIndex;
+    if (selectedIndex >= firstOption + shown) firstOption = selectedIndex - shown + 1;
   }
 
   bool active = false;
@@ -291,6 +346,10 @@ class OptionPopup {
   std::string message;
   std::vector<std::string> ownedStrings;
   int selectedIndex = 0;
+  // First option of the scroll window (loop task; render clamps it) and how
+  // many options the last render fit, 0 when all fit (render task).
+  int firstOption = 0;
+  mutable std::atomic<uint8_t> shownOptions{0};
   std::function<void(int)> onSelectCallback;
   // Written by the render task (frame registration), routed by the loop task;
   // uiReady closes the rebuild window exactly like UiListActivity::uiReady.
