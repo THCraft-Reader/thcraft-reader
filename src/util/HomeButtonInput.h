@@ -17,6 +17,7 @@ enum class HomeButtonAction : uint8_t {
   ToggleFrontlight,
   CreateClipping,
   Back,
+  FileBrowser,
   Count
 };
 

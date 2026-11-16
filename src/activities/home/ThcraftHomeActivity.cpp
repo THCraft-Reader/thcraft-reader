@@ -229,8 +229,12 @@ void ThcraftHomeActivity::applyInitialFocus() {
     case HomeMenuItem::LIBRARY:
       target = NavItem::Library;
       break;
-    case HomeMenuItem::OPDS_BROWSER:
+    case HomeMenuItem::PLUGINS:
       target = NavItem::Online;
+      break;
+    case HomeMenuItem::OPDS_BROWSER:
+      // OPDS is in File Transfer unless Online shows it (plugins off and a server saved).
+      target = hasPlugins || !hasOpdsServers ? NavItem::Transfer : NavItem::Online;
       break;
     case HomeMenuItem::FILE_TRANSFER:
       target = NavItem::Transfer;
@@ -327,7 +331,7 @@ void ThcraftHomeActivity::activate(const Zone zone, const int index) {
           return;
         case NavItem::Online:
           if (hasPlugins) {
-            activityManager.goToPlugins(hasOpdsServers);
+            activityManager.goToPlugins();
           } else {
             activityManager.goToBrowser();
           }

@@ -1173,6 +1173,8 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, cons
     // already have a text block running and it is empty - just reuse it
     if (currentTextBlock->isEmpty()) {
       if (paragraphEnd) currentTextBlock->resetFirstLineIndent();
+      // The reused block may have been created on the other side of a heading boundary.
+      currentTextBlock->setHyphenationEnabled(blockHyphenationEnabled());
       // The stack accumulates horizontal margins and text properties from ancestors.
       // Vertical margins are per-element and not inherited through the stack, but
       // container elements deposit their vertical margins on the empty block when they
@@ -1206,7 +1208,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, cons
   if (stopRequested) return;
   dropCap.firstLetterPending = false;
   inlineSize = InlineSizeState{};
-  currentTextBlock = makeTextBlock(blockStyle);
+  currentTextBlock = makeTextBlock(blockStyle, blockHyphenationEnabled());
   if (!currentTextBlock) {
     LOG_ERR("EHP", "OOM: ParsedText");
     layoutOom = true;  // parseStep() turns this into ParseStatus::Error
@@ -1215,7 +1217,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, cons
   listItemBulletOnly = false;
 }
 
-std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeTextBlock(const BlockStyle& blockStyle) {
+std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeTextBlock(const BlockStyle& blockStyle, const bool hyphenate) {
 #ifdef CROSSPOINT_PARSER_TEST
   if (failTextBlockAllocation) return nullptr;
 #endif
@@ -1228,7 +1230,7 @@ std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeTextBlock(const BlockStyl
     freeink::MemoryManager::instance().clearCaches();
     if (!contiguous()) return nullptr;
   }
-  return makeUniqueNoThrow<ParsedText>(hyphenationEnabled, focusReadingEnabled, blockStyle, paragraphIndentSpaces);
+  return makeUniqueNoThrow<ParsedText>(hyphenate, focusReadingEnabled, blockStyle, paragraphIndentSpaces);
 }
 
 void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
@@ -2036,7 +2038,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       tableCellBlockStyle.isRtl = cssStyle.direction == CssTextDirection::Rtl;
     }
 
-    self->currentTextBlock = self->makeTextBlock(tableCellBlockStyle);
+    self->currentTextBlock = self->makeTextBlock(tableCellBlockStyle, self->hyphenationEnabled);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: table cell");
       self->skipUntilDepth = self->depth;
@@ -2330,12 +2332,16 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                     makeUniqueNoThrow<ImageBlock>(cachedImagePath, resolvedPath, displayWidth, displayHeight);
                 if (!imageBlock) {
                   LOG_ERR("EHP", "Failed to create ImageBlock");
+                  self->layoutOom = true;
+                  self->depth += 1;
                   return;
                 }
                 int xPos = (self->viewportWidth - displayWidth) / 2;
                 auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, self->currentPageNextY);
                 if (!pageImage) {
                   LOG_ERR("EHP", "Failed to create PageImage");
+                  self->layoutOom = true;
+                  self->depth += 1;
                   return;
                 }
                 self->currentPage->elements.push_back(std::move(pageImage));
@@ -2523,6 +2529,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     }
     self->applyBlockFontScale(headerBlockStyle, cssStyle, name);
     headerBlockStyle.keepWithNext = true;
+    self->headingDepth = std::min(self->headingDepth, self->depth);
     self->openBoxScope(headerBlockStyle, cssStyle);
     const auto accumulated =
         self->blockStyleStack.back().getCombinedBlockStyle(headerBlockStyle, BlockStyle::CombineAxis::Horizontal);
@@ -2777,7 +2784,7 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   if (!self->currentTextBlock) {
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
-    self->currentTextBlock = self->makeTextBlock(flowStyle);
+    self->currentTextBlock = self->makeTextBlock(flowStyle, self->hyphenationEnabled);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block for character data");
       return;
@@ -3035,7 +3042,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
-    self->currentTextBlock = self->makeTextBlock(flowStyle);
+    self->currentTextBlock = self->makeTextBlock(flowStyle, self->hyphenationEnabled);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block after table");
     }
@@ -3045,6 +3052,11 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   // Leaving bold tag
   if (self->boldUntilDepth == self->depth) {
     self->boldUntilDepth = INT_MAX;
+  }
+
+  // Leaving heading: the block opened after it hyphenates again
+  if (self->headingDepth == self->depth) {
+    self->headingDepth = INT_MAX;
   }
 
   // Leaving italic tag

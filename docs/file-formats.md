@@ -90,6 +90,15 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 77
+
+Combines version 76 with upstream version 75: headings are no longer
+hyphenated. The binary layout is unchanged. Completed and partial section caches
+rebuild; book metadata and saved progress are kept. The derived partial version
+is `0xFE - (77 - 28)` = 205. Clipping layout signatures move to calculation
+version 3, so saved clippings restore from their text offsets instead of stale
+page and word indices.
+
 ### Version 76
 
 Combines the Thai branch's version 75 shaping with upstream version 74: runtime
@@ -138,7 +147,7 @@ named `focusSplitX`: it locates the second visual run from the word origin
 (bold prefix for RTL words, regular suffix for LTR words). Thai justification
 and shaping remain available alongside bounded drop-cap layout, corrected
 space handling, font-size-based line spacing and per-glyph advance rounding.
-Clipping layout signatures use calculation version 2 and include `thaiLayoutId`.
+Clipping layout signatures used calculation version 2 and include `thaiLayoutId`.
 
 The histories below distinguish upstream versions from Thai branch versions
 where the same version numbers described incompatible layouts.

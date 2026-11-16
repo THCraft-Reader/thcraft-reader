@@ -14,7 +14,8 @@ From top to bottom:
 4. Two widget slots, set in Display settings. When only one slot is on, it
    uses the full width.
 5. Icon bar: Library, Files, Stats, Transfer, OPDS or Plugins, Settings. Plugins
-   appears when plugins are enabled. OPDS appears when an OPDS server is added.
+   appears when plugins are enabled. Otherwise OPDS appears once an OPDS server
+   is added. With plugins enabled, OPDS is under Transfer.
 
 The layout adapts to the screen. When the screen is too short, the widget row is
 hidden first, then the recent row. Turning both widget slots off makes the

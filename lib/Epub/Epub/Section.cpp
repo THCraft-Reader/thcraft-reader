@@ -108,7 +108,9 @@ namespace {
 // Thai v75: Generic native-metric Thai shaping replaces font-specific companion recipes.
 // Upstream v74: TrueType advances defer rounding until pixel placement.
 // v76: Combined Thai v75 shaping and upstream v74 advance rounding.
-constexpr uint8_t SECTION_FILE_VERSION = 76;
+// Upstream v75: Headings are not hyphenated.
+// v77: Combined v76 layout and upstream v75 heading hyphenation.
+constexpr uint8_t SECTION_FILE_VERSION = 77;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
@@ -531,7 +533,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   return true;
 }
 
-bool Section::buildSomeMore(const int maxPages, bool (*yieldNow)(), const uint32_t budgetMs) {
+bool Section::buildSomeMore(const int maxPages, bool (*yieldNow)()) {
   if (!build_ || !build_->parser) {
     LOG_ERR("SCT", "buildSomeMore with no active build");
     return false;
@@ -540,7 +542,6 @@ bool Section::buildSomeMore(const int maxPages, bool (*yieldNow)(), const uint32
   // pageCount stays pinned at the partial's watermark until the build passes it, which
   // would otherwise turn one "small" chunk into a blocking rebuild of the whole watermark.
   const int startCount = builtPageCount_;
-  const uint32_t startMs = budgetMs > 0 ? millis() : 0;
   for (;;) {
 #if THAI_ENGINE_STATS
     const uint32_t layoutStart = micros();
@@ -557,10 +558,9 @@ bool Section::buildSomeMore(const int maxPages, bool (*yieldNow)(), const uint32
     if (status == ChapterHtmlSlimParser::ParseStatus::Done) {
       return finalizeBuild();
     }
-    // ParseStatus::More: yield once we've laid out the requested number of pages, spent the
-    // budget, or as soon as the caller has something more urgent to do.
-    if ((maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) ||
-        (budgetMs > 0 && millis() - startMs >= budgetMs) || (yieldNow && yieldNow())) {
+    // ParseStatus::More: yield once we've laid out the requested number of pages, or as soon
+    // as the caller has something more urgent to do.
+    if ((maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) || (yieldNow && yieldNow())) {
       build_->bytesConsumed = build_->parser->parseBytesConsumed();
       return true;
     }

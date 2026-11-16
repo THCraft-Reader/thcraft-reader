@@ -43,7 +43,6 @@ class EpubReaderActivity final : public ReaderActivity {
   bool pendingSyncSaveError = false;
   uint8_t pageLoadRetryCount = 0;
   static constexpr uint8_t MAX_PAGE_LOAD_RETRIES = 3;
-  bool skipNextButtonCheck = false;
   bool automaticPageTurnActive = false;
   bool showBookmarkMessage = false;
   bool showDictionaryMessage = false;
@@ -54,12 +53,10 @@ class EpubReaderActivity final : public ReaderActivity {
   StrId clippingMessage = StrId::STR_CLIPPING_SAVED;
   unsigned long clippingMessageTime = 0UL;
   bool currentPageBookmarked = false;
-  // Next-page glyph prewarm. Runs on the render task right after the page it
-  // follows, so its SD reads never stall the loop task's input polling.
-  int prewarmedSpine = -1;
-  int prewarmedPage = -1;
-  bool nextPagePrewarmDue = false;  // set when a page is drawn; render task only
-  void prewarmNextPage();
+  int idlePrewarmSpine = -1;
+  int idlePrewarmPage = -1;
+  int idlePrewarmOffset = 0;
+  unsigned long lastRenderCompleteMs = 0;
 #if THAI_ENGINE_STATS
   int thaiLastRenderedSpine = -1;
   int thaiLastRenderedPage = -1;
@@ -137,11 +134,12 @@ class EpubReaderActivity final : public ReaderActivity {
   int lastSavedSpineIndex = -1;
   int lastSavedPage = -1;
   int lastSavedPageCount = -1;
+  // Chapter title shown in the status bar, cached per spine item.
+  mutable int statusTitleSpine = -1;
+  mutable std::string statusTitle;
 
   static constexpr int BUILD_PAGES_PER_CHUNK = 8;
   static constexpr int BACKGROUND_BUILD_PAGES_PER_TICK = 2;
-  // Caps one loop-task build tick so touch is still sampled several times within a tap.
-  static constexpr uint32_t BACKGROUND_BUILD_TICK_BUDGET_MS = 15;
   static constexpr size_t BACKGROUND_BUILD_MIN_FREE_HEAP = 32 * 1024;
   static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 16 * 1024;
   // Requires the render lock; heap admission is checked separately by the build tick.
@@ -151,9 +149,10 @@ class EpubReaderActivity final : public ReaderActivity {
   bool heapBelowBuildFloors() const;
   // One bounded build step on the loop task, in a frame whose input did nothing. Lays out about
   // BACKGROUND_BUILD_PAGES_PER_TICK pages (one 1 KB parse step may add more) and hands the loop
-  // back after BACKGROUND_BUILD_TICK_BUDGET_MS or as soon as a button is down, so a short press
-  // or tap is seen before more pages are built.
-  void backgroundBuildTick();
+  // back as soon as a button is down, so a short press is seen before more pages are built.
+  // Returns true if a repaint was requested (caller should skip idle prewarm for this frame).
+  bool backgroundBuildTick();
+  void idlePrewarmTick();
   bool anyButtonPressed() const;
   // A background build failed in this spine. The error would likely recur, so from then on the
   // spine is built only as far as the reader goes; pages from earlier build steps stay readable.
