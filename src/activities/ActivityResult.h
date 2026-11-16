@@ -41,7 +41,8 @@ struct PageResult {
 };
 
 struct ClippingResult {
-  enum class Action : uint8_t { Clip, Lookup, Bookmark };
+  // AddWord: the word in text was saved to the Thai word list.
+  enum class Action : uint8_t { Clip, Lookup, Bookmark, AddWord };
   Action action = Action::Clip;
   std::string text;
   uint16_t startPageOffset = 0;

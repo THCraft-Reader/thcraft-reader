@@ -52,6 +52,8 @@
 #include "SdCardFont.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
+#include "ThaiAddWordActivity.h"
+#include "ThaiUserWordStore.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/TextSettingsActivity.h"
 #include "clippings/ClippingText.h"
@@ -380,7 +382,7 @@ void EpubReaderActivity::openReaderMenu() {
     return makeUniqueNoThrow<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), position.displayPage(),
                                                      position.totalPages, bookProgressPercent, SETTINGS.orientation,
                                                      !currentPageFootnotes.empty(), !cachedBookmarks.empty(),
-                                                     CLIPPINGS.hasClippings(), selectedMenuAction);
+                                                     CLIPPINGS.hasClippings(), offersThaiWords(), selectedMenuAction);
   };
   auto menu = makeMenu();
   if (!menu) {
@@ -565,6 +567,43 @@ void EpubReaderActivity::openDictionaryWordSelect() {
   startClipSelection(-1, -1, ClipSelectionActivity::Mode::Lookup);
 }
 
+void EpubReaderActivity::openThaiAddWord(std::string selection) {
+  auto page = section ? section->loadPage(section->currentPage) : nullptr;
+  if (!page) {
+    LOG_ERR("THW", "Failed to load page for Add Word");
+    requestUpdate();
+    return;
+  }
+  int top, right, bottom, left;
+  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+  auto activity =
+      makeUniqueNoThrow<ThaiAddWordActivity>(renderer, mappedInput, std::move(page), left + SETTINGS.screenMargin,
+                                             top + SETTINGS.screenMargin, std::move(selection));
+  if (!activity) {
+    LOG_ERR("THW", "OOM: Add Word activity");
+    requestUpdate();
+    return;
+  }
+  startActivityForResult(std::move(activity), [this](const ActivityResult& result) {
+    if (!result.isCancelled) {
+      // The new word changed the Thai layout id, so the cached chapter no longer matches.
+      {
+        RenderLock lock;
+        resetSectionForRelayout();
+      }
+      clippingMessage = StrId::STR_THAI_WORD_ADDED;
+      showClippingMessage = true;
+      clippingMessageTime = millis();
+    }
+    requestUpdate();
+  });
+}
+
+bool EpubReaderActivity::offersThaiWords() const {
+  return THAI_WORDS.count() > 0 || static_cast<Language>(SETTINGS.language) == Language::TH ||
+         (epub && epub->getLanguage().rfind("th", 0) == 0);
+}
+
 void EpubReaderActivity::startClipSelection(const int initialX, const int initialY,
                                             const ClipSelectionActivity::Mode mode) {
   const auto restoreSelection = pendingLookupSelection;
@@ -641,6 +680,10 @@ void EpubReaderActivity::startClipSelection(const int initialX, const int initia
     if (section && currentSpineIndex == spineIndex && endPage < section->pageCount) {
       section->currentPage = endPage;
       currentPageVisibleOffset = section->getVisibleTextOffsetForPage(endPage);
+    }
+    if (clipping.action == ClippingResult::Action::AddWord) {
+      openThaiAddWord(clipping.text);
+      return;
     }
     if (clipping.action == ClippingResult::Action::Bookmark) {
       addBookmark();
@@ -1400,6 +1443,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::SAVE_CLIPPING: {
       startClipSelection();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::ADD_THAI_WORD: {
+      startClipSelection(-1, -1, ClipSelectionActivity::Mode::AddWord);
       break;
     }
     case EpubReaderMenuActivity::MenuAction::VIEW_CLIPPINGS: {
@@ -3296,7 +3343,7 @@ void EpubReaderActivity::resetSectionForRelayout() {
 void EpubReaderActivity::buildMoreActions() {
   using MA = EpubReaderMenuActivity::MenuAction;
   EpubReaderMenuActivity::buildMenuItems(moreItems, !currentPageFootnotes.empty(), !cachedBookmarks.empty(),
-                                         CLIPPINGS.hasClippings());
+                                         CLIPPINGS.hasClippings(), offersThaiWords());
   moreItems.erase(std::remove_if(moreItems.begin(), moreItems.end(),
                                  [](const auto& item) {
                                    return item.action == MA::SELECT_CHAPTER || item.action == MA::TEXT_SETTINGS;

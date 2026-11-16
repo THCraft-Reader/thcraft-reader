@@ -284,6 +284,17 @@ size_t lastSafeBoundary(std::string_view text, size_t limit, bool endOfRun) {
   return safe;
 }
 
+bool isClusterBoundary(std::string_view text, size_t target) {
+  size_t offset = 0;
+  Cluster cluster{};
+  while (offset < target) {
+    if (!nextCluster(text, offset, cluster, true) || !cluster.valid) {
+      return false;
+    }
+  }
+  return offset == target;
+}
+
 namespace {
 // Spacing units are deliberately finer than TCCs. Only the conventional
 // base/mark stacks are admitted; malformed stacks exclude their whole TCC.

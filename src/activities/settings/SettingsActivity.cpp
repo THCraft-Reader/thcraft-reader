@@ -33,6 +33,8 @@
 #include "SilentRestart.h"
 #include "StatusBarSettingsActivity.h"
 #include "TextSettingsActivity.h"
+#include "ThaiUserWordStore.h"
+#include "ThaiWordsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/UITheme.h"
@@ -139,6 +141,10 @@ void SettingsActivity::rebuildSettings() {
   addAction(SettingsSection::General, StrId::STR_KEYBOARD_LAYOUTS, SettingAction::KeyboardLayouts);
   addAction(SettingsSection::Reader, StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings);
   addAction(SettingsSection::Reader, StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts);
+  // Thai readers, or anyone who already saved words, manage the Thai word list here.
+  if (static_cast<Language>(SETTINGS.language) == Language::TH || THAI_WORDS.count() > 0) {
+    addAction(SettingsSection::Reader, StrId::STR_THAI_WORDS, SettingAction::ThaiWords);
+  }
   if (section == SettingsSection::Controls) {
     if (controlsGroup == ControlsGroup::Root) {
       if (BoardConfig::hasHomeKey()) {
@@ -515,6 +521,13 @@ void SettingsActivity::toggleSelectedSetting() {
           startActivityForResult(std::move(activity), nullptr);
         } else {
           LOG_ERR("SETTINGS", "OOM: KeyboardLayoutsActivity");
+        }
+        break;
+      case SettingAction::ThaiWords:
+        if (auto activity = makeUniqueNoThrow<ThaiWordsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), nullptr);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: ThaiWordsActivity");
         }
         break;
       case SettingAction::About:

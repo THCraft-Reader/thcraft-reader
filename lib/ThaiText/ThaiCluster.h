@@ -24,6 +24,9 @@ bool nextCluster(std::string_view text, size_t& offset, Cluster& result, bool en
 // Last complete cluster end <= limit, evaluated against the full input (never a
 // sliced prefix that could manufacture a boundary). Returns zero if none fits.
 size_t lastSafeBoundary(std::string_view text, size_t limit, bool endOfRun);
+// True when every cluster from the start up to target is valid and one ends
+// exactly at target, the rule dictionary matches must satisfy.
+bool isClusterBoundary(std::string_view text, size_t target);
 
 // Only well-formed Thai letter clusters participate in internal justification.
 bool isJustifiableLetterCluster(std::string_view text, const Cluster& cluster);

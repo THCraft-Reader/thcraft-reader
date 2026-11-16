@@ -359,10 +359,14 @@ values along with the other render settings. Versions 49 and 50 used different
 headers in Thai and upstream builds; both are rejected and rebuilt.
 
 `thai::layoutId()` is FNV-1a (seed 2166136261, prime 16777619) over little-endian
-`u32` analyzer version 2, little-endian `u32` dictionary CRC32 (zero when disabled),
+`u32` analyzer version 3, little-endian `u32` dictionary CRC32 (zero when disabled),
+the little-endian `u32` Thai word list id when the user's word list is not empty,
 then one byte each for enabled word breaking and dictionary use. Bit 31 is cleared.
-Analyzer version 2 adds bounded hybrid word segmentation; version-1 identities
+Analyzer version 2 adds bounded hybrid word segmentation, and version 3 changes
+Thai line wrapping and spacing; older identities
 reflow automatically without changing the binary header or reading progress.
+The word list id is an FNV-1a hash of the words in sorted order, so editing the
+list re-lays out every book, while an empty list leaves identities unchanged.
 
 Bit 31 marks output produced while optional Thai analysis was unavailable due to
 allocation failure or invalid dictionary data. Commit patches that bit before

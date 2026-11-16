@@ -17,7 +17,8 @@
 
 class ClipSelectionActivity final : public Activity {
  public:
-  enum class Mode : uint8_t { Clip, Lookup, DefinitionLookup };
+  // AddWord: Confirm returns the selection for the Thai word list.
+  enum class Mode : uint8_t { Clip, Lookup, DefinitionLookup, AddWord };
 
   struct Selection {
     uint16_t firstPage = 0;
@@ -67,9 +68,13 @@ class ClipSelectionActivity final : public Activity {
   bool extractWords();
   size_t pageCount() const { return borrowedPages.empty() ? pages.size() : borrowedPages.size(); }
   const Page& pageAt(size_t index) const { return *(borrowedPages.empty() ? pages[index] : borrowedPages[index]); }
-  bool isLookup() const { return mode != Mode::Clip; }
-  int firstAction() const { return lookupAvailable ? 0 : 1; }
-  int actionCount() const { return mode == Mode::DefinitionLookup ? 1 : 3 - firstAction(); }
+  bool isLookup() const { return mode == Mode::Lookup || mode == Mode::DefinitionLookup; }
+  // Touch actions: Lookup, Clip, Bookmark, then Add Word for Thai selections.
+  static constexpr int ADD_WORD_ACTION = 3;
+  int firstAction() const { return mode == Mode::AddWord ? ADD_WORD_ACTION : lookupAvailable ? 0 : 1; }
+  int actionCount() const;
+  bool selectionHasThai() const;
+  const char* confirmLabel() const;
   int actionAt(int x, int y) const;
   int closestInRow(uint16_t row, int centerX) const;
   int wordAt(int x, int y) const;

@@ -20,17 +20,22 @@ struct DictionaryView {
 // Views must remain alive and immutable for the lifetime of this accessor.
 // Only the generated default view is trusted at construction; injected views
 // are validated without copying. Accessor reads remain checked in both cases.
+// The default dictionary also matches the installed user words (ThaiUserWords.h);
+// an injected view matches only its own words.
 class ThaiDictionary {
  public:
   ThaiDictionary();
   explicit ThaiDictionary(DictionaryView view);
   size_t longestMatch(std::string_view text, size_t maxBytes = SIZE_MAX) const;
+  // As longestMatch, without user words.
+  size_t longestBuiltinMatch(std::string_view text, size_t maxBytes = SIZE_MAX) const;
   bool valid() const { return !invalid_; }
   bool available() const { return valid() && view_.wordCount != 0; }
   uint32_t dataId() const { return available() ? view_.crc : 0; }
 
  private:
   DictionaryView view_;
+  bool userWords_ = false;
   mutable bool invalid_ = false;
 
   bool checkHeader() const;

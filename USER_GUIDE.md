@@ -44,6 +44,7 @@ Welcome to the **CrossPoint** firmware. This guide outlines the hardware control
     - [Tilt Page Turn (X3 only)](#tilt-page-turn-x3-only)
     - [Links and footnotes](#links-and-footnotes)
     - [Dictionary Lookup](#dictionary-lookup)
+    - [Thai Word List](#thai-word-list)
     - [System Navigation](#system-navigation)
     - [Supported Languages](#supported-languages)
   - [5. Reader Menu](#5-reader-menu)
@@ -206,7 +207,7 @@ Books cannot be removed from your device through Calibre. Use the web interface 
 
 ### 3.6 Settings
 
-Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **Library**, and **Connectivity**. System contains language, keyboard layouts, hidden-file visibility, file-extension visibility, Clock, firmware updates, and About. Library contains Use Book Metadata, Clear Read Books from Recent List, and Move Finished Books to Read Folder. Time to Sleep is under Display; Clear Reading Cache is under Reader. Connectivity contains Wi-Fi, Bluetooth Page Turner, CrossPoint Sync, OPDS, and the Plugins toggle. The options below describe these settings.
+Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **Library**, and **Connectivity**. System contains language, keyboard layouts, hidden-file visibility, file-extension visibility, Clock, firmware updates, and About. Library contains Use Book Metadata, Clear Read Books from Recent List, and Move Finished Books to Read Folder. Time to Sleep is under Display; Clear Reading Cache and Thai Word List are under Reader. Connectivity contains Wi-Fi, Bluetooth Page Turner, CrossPoint Sync, OPDS, and the Plugins toggle. The options below describe these settings.
 
 #### 3.6.1 Display
 
@@ -367,6 +368,7 @@ Side buttons, and Taps and gestures where supported by the device. See the
 - **OPDS Servers**: Manage one or more OPDS [(Open Publication Distribution System)](https://en.wikipedia.org/wiki/Open_Publication_Distribution_System) libraries for browsing and downloading books. See [OPDS Servers (Multiple Libraries)](#365-opds-servers-multiple-libraries) below.
 
 - **Clear Reading Cache** (**Settings → Reader**): Clear the internal SD card cache. This also resets fonts chosen for individual books.
+- **Thai Word List** (**Settings → Reader**, shown when the interface is Thai or the list has words): Review and delete the Thai words you added while reading. See [Thai Word List](#thai-word-list).
 
 - **Use book metadata**: Read the title and author stored inside each book when the Library index is rebuilt. When disabled or unavailable, the Library uses the filename.
 
@@ -694,6 +696,21 @@ Words on the current page can be looked up in an offline StarDict dictionary sto
 
 See [docs/dictionary.md](docs/dictionary.md) for supported formats, setup, and where to find dictionaries.
 
+### Thai Word List
+
+Thai text has no spaces between words, so the reader finds word breaks with a built-in dictionary. A name or other word missing from it, such as a character's name, can be split in the wrong place at the end of a line. Add it to your own word list and the reader keeps it whole.
+
+- **Touch:** hold a word to start a selection, extend it over the whole name, then tap **Add Word** in the bar above the selection. The button appears when the selection contains Thai text.
+- **Buttons:** choose **Add Thai Word** in the **[Reader Menu](#5-reader-menu)**. Move to the first part of the word and press **Confirm**, move to the last part and press **Confirm** (**Add Word**), then press **Confirm** again to add it.
+- A sheet shows the exact word over the page. **Trim Start** and **Trim End** remove one letter (with its vowel and tone marks) from either end, for when the selection caught part of a neighbouring word. **Add Word** saves it, and the chapter is laid out again while keeping your place.
+- Spaces, punctuation and quotes at either end are dropped. A word needs at least two Thai characters and at most 70, with no digits, spaces or the marks ๆ, ฯ and ฿. Words already in the dictionary or your list are not added again.
+
+One list applies to every book, up to 300 words (fewer if they are long). Manage it in **Settings → Reader → Thai Word List** (shown when the interface is Thai or the list has words): select a word to **Delete** it or **Delete All**.
+
+The list is stored as `/.crosspoint/thai-words.txt`, one word per line, and can be edited on a computer. Lines starting with `#` are ignored. Edits take effect after the device restarts. When the list changes on the device, the file is rewritten from the device's list, without comments or lines it could not use.
+
+Changing the list changes where lines break, so every book, Thai or not, is laid out again chapter by chapter the next time it is opened. Clippings saved without source positions may lose their highlight. A word only helps where a line would otherwise break inside it; if a neighbouring dictionary word still overlaps the name, add that longer combination too.
+
 ### System Navigation
 
 * **Return to Home:** Press the **Back** button to close the book and return to the **[Home](#31-home-screen)** screen.
@@ -727,6 +744,7 @@ Available options include:
 - **Bluetooth Page Turner** – Toggle Bluetooth for the saved remote. This entry appears after pairing a remote in **Settings → Connectivity → Bluetooth Page Turner** and disappears if that selected remote is forgotten.
 - **Create Clipping** – Select a range of text on the current page and save it as a highlighted clipping.
 - **View Clippings** – Open this book's saved clippings *(shown after the first clipping is saved)*.
+- **Add Thai Word** – Select a Thai word on the page and add it to your [Thai Word List](#thai-word-list). Shown when the book or the interface language is Thai, or once the list has words.
 - **Reading Orientation** – Cycle through screen orientations without leaving the reader.
 - **Auto Turn (Pages Per Minute)** – Cycle through automatic page turn speed options for hands-free reading.
 - **Go to %** – Jump to a specific position in the book by percentage.
@@ -760,7 +778,7 @@ Bookmarks are stored in the `.crosspoint/bookmarks` folder in the JSON format.
 
 ### 5.3 Clippings and Highlights
 
-Select **Create Clipping** from the Reader Menu, move to the first word, and press **Confirm**. Move to the last word and press **Select** again to choose **Look Up**, **Clip**, or **Bookmark**. **Back** closes that popup without losing the selection. On touch devices, press and hold a word in the reader to select it. Drag either selection handle to adjust the range, then tap **Look Up**, **Clip**, or **Bookmark** above it. Hold the ending handle at the bottom edge or over the final word for one second to extend onto the next preloaded page. Selection covers up to three pages in the same chapter, subject to the 240 selectable-word limit. The toolbar overlays the page without shifting the text. Releasing a handle keeps the selection open; tapping outside the text dismisses it. **Look Up** searches the selected text in your dictionary; **Bookmark** toggles the bookmark on the selection’s final page. Saved ranges with source offsets remain highlighted after changes to font, spacing, orientation, or pagination. Ranges without source offsets can only be highlighted when their saved layout still matches. Press and hold highlighted text to remove that clipping; its deletion is sent on the next manual sync when **Sync Clippings** is enabled.
+Select **Create Clipping** from the Reader Menu, move to the first word, and press **Confirm**. Move to the last word and press **Select** again to choose **Look Up**, **Clip**, or **Bookmark**. **Back** closes that popup without losing the selection. On touch devices, press and hold a word in the reader to select it. Drag either selection handle to adjust the range, then tap **Look Up**, **Clip**, or **Bookmark** above it (and **Add Word** when the selection is Thai, see [Thai Word List](#thai-word-list)). Hold the ending handle at the bottom edge or over the final word for one second to extend onto the next preloaded page. Selection covers up to three pages in the same chapter, subject to the 240 selectable-word limit. The toolbar overlays the page without shifting the text. Releasing a handle keeps the selection open; tapping outside the text dismisses it. **Look Up** searches the selected text in your dictionary; **Bookmark** toggles the bookmark on the selection’s final page. Saved ranges with source offsets remain highlighted after changes to font, spacing, orientation, or pagination. Ranges without source offsets can only be highlighted when their saved layout still matches. Press and hold highlighted text to remove that clipping; its deletion is sent on the next manual sync when **Sync Clippings** is enabled.
 
 Select **View Clippings** to browse saved excerpts for the current book. Press **Confirm** to choose **Open** or **Go to Passage**, or hold **Confirm** for about 0.7 seconds to delete it. **Go to Passage** uses the saved text offset and is available for new, source-anchored clippings. Older clippings can still be read or deleted. Touch devices can open a clipping with a tap or delete it with a long press.
 

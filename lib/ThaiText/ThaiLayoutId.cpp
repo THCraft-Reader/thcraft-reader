@@ -3,6 +3,7 @@
 #include "ThaiConfig.h"
 #if THAI_DICTIONARY
 #include "ThaiDictionary.h"
+#include "ThaiUserWords.h"
 #endif
 
 namespace thai {
@@ -15,6 +16,8 @@ uint32_t layoutId() {
   littleEndianWord(3);  // Analyzer and line-breaking contract version.
 #if THAI_DICTIONARY
   littleEndianWord(dictionaryDataId());
+  // Only a non-empty user list changes the id, so other caches stay valid.
+  if (const uint32_t userWords = userWordsId()) littleEndianWord(userWords);
 #else
   littleEndianWord(0);
 #endif

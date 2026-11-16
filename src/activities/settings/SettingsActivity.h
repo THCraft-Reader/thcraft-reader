@@ -31,6 +31,7 @@ enum class SettingAction {
   TextSettings,
   Plugins,
   KeyboardLayouts,
+  ThaiWords,
   HomeButton,
   ControlsPower,
   ControlsFront,

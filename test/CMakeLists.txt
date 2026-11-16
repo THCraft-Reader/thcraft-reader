@@ -70,6 +70,7 @@ add_library(crosspoint_thai STATIC
   ${REPO_ROOT}/lib/ThaiText/ThaiSegmenter.cpp
   ${REPO_ROOT}/lib/ThaiText/ThaiLayoutId.cpp
   ${REPO_ROOT}/lib/ThaiText/ThaiStats.cpp
+  ${REPO_ROOT}/lib/ThaiText/ThaiUserWords.cpp
 )
 target_include_directories(crosspoint_thai PUBLIC ${REPO_ROOT}/lib/ThaiText)
 target_link_libraries(crosspoint_thai PRIVATE crosspoint_test_common)

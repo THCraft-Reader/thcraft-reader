@@ -6,6 +6,7 @@
 
 #include "ThaiCluster.h"
 #include "ThaiConfig.h"
+#include "ThaiUserWords.h"
 
 #if THAI_DICTIONARY
 #include "generated/ThaiDictionaryData.h"
@@ -37,20 +38,9 @@ int compare(const uint8_t* word, size_t length, std::string_view text, size_t qu
   }
   return word[common] < querySymbol(text, common) ? -1 : 1;
 }
-
-bool clusterBoundary(std::string_view text, size_t target) {
-  size_t offset = 0;
-  Cluster cluster{};
-  while (offset < target) {
-    if (!nextCluster(text, offset, cluster, true) || !cluster.valid) {
-      return false;
-    }
-  }
-  return offset == target;
-}
 }  // namespace
 
-ThaiDictionary::ThaiDictionary() {
+ThaiDictionary::ThaiDictionary() : userWords_(true) {
 #if THAI_DICTIONARY
   static_assert(generated::MAX_WORD_CODEPOINTS <= MAX_DICTIONARY_WORD_CODEPOINTS);
   static_assert(generated::BLOCK_WORDS == DICTIONARY_BLOCK_WORDS);
@@ -193,6 +183,12 @@ bool ThaiDictionary::predecessor(std::string_view text, size_t queryLength, size
 }
 
 size_t ThaiDictionary::longestMatch(std::string_view text, size_t maxBytes) const {
+  const size_t builtin = longestBuiltinMatch(text, maxBytes);
+  if (!userWords_ || !valid()) return builtin;
+  return std::max(builtin, longestUserWord(text, maxBytes));
+}
+
+size_t ThaiDictionary::longestBuiltinMatch(std::string_view text, size_t maxBytes) const {
   if (!available() || maxBytes < 3) {
     return 0;
   }
@@ -223,7 +219,7 @@ size_t ThaiDictionary::longestMatch(std::string_view text, size_t maxBytes) cons
       return 0;
     }
     if (length == common) {
-      if (clusterBoundary(text, length * 3)) {
+      if (isClusterBoundary(text, length * 3)) {
         return length * 3;
       }
       queryLength = length - 1;

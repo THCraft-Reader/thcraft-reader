@@ -8,6 +8,7 @@ add_executable(ThaiTextTest
   ThaiParserTest.cpp
   ThaiTokenTest.cpp
   ThaiLayoutTest.cpp
+  ThaiUserWordsTest.cpp
   ${REPO_ROOT}/test/chapter_html_slim_parser/ParserLinkStubs.cpp
   ${REPO_ROOT}/lib/Epub/Epub/Page.cpp
   ${REPO_ROOT}/lib/Epub/Epub/blocks/TextBlock.cpp

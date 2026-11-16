@@ -7,6 +7,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <ThaiCluster.h>
 
 #include <algorithm>
 #include <climits>
@@ -31,7 +32,8 @@ constexpr int TOUCH_DRAG_MOVEMENT_PX = 4;
 constexpr unsigned long TOUCH_PAGE_ADVANCE_HOLD_MS = 1000;
 constexpr int TOUCH_PAGE_END_DWELL_SLOP_PX = 8;
 constexpr ClippingResult::Action SELECTION_ACTIONS[] = {ClippingResult::Action::Lookup, ClippingResult::Action::Clip,
-                                                        ClippingResult::Action::Bookmark};
+                                                        ClippingResult::Action::Bookmark,
+                                                        ClippingResult::Action::AddWord};
 
 const char* cleanWordStart(const char* text) {
   if (!text) return "";
@@ -635,7 +637,9 @@ bool ClipSelectionActivity::handleButtons(const uint8_t buttons) {
   }
 
   if (buttons & Input::INPUT_CONFIRM) {
-    confirmSelection(isLookup() ? ClippingResult::Action::Lookup : ClippingResult::Action::Clip);
+    confirmSelection(mode == Mode::AddWord ? ClippingResult::Action::AddWord
+                     : isLookup()          ? ClippingResult::Action::Lookup
+                                           : ClippingResult::Action::Clip);
     return true;
   }
 
@@ -691,7 +695,7 @@ Rect ClipSelectionActivity::actionRect() const {
   const int font = uiScaleSpec().smallFontId;
   const int labelWidth =
       std::max({renderer.getTextWidth(font, tr(STR_LOOKUP)), renderer.getTextWidth(font, tr(STR_CLIP)),
-                renderer.getTextWidth(font, tr(STR_BOOKMARK_OPTION))});
+                renderer.getTextWidth(font, tr(STR_BOOKMARK_OPTION)), renderer.getTextWidth(font, tr(STR_ADD_WORD))});
   const int padding = metrics.menuSpacing;
   const int count = actionCount();
   const int width = std::min(safe.width, count * (labelWidth + padding * 2) + padding * (count + 1));
@@ -791,9 +795,7 @@ bool ClipSelectionActivity::renderIncremental() {
     drawSelection();
     renderer.setClipRect(clip[0], clip[1], clip[2], clip[3]);
   }
-  const auto labels = mappedInput.mapLabels(
-      tr(STR_BACK), rangeStart < 0 ? tr(STR_SELECT) : (isLookup() ? tr(STR_LOOKUP) : tr(STR_DONE)), tr(STR_DIR_LEFT),
-      tr(STR_DIR_RIGHT));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel(), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   lastRenderedSelected = selected;
@@ -851,9 +853,7 @@ void ClipSelectionActivity::render(RenderLock&&) {
   if (wordCount != 0) drawSelection();
   renderer.setClipRect(clip[0], clip[1], clip[2], clip[3]);
 
-  const auto labels = mappedInput.mapLabels(
-      tr(STR_BACK), rangeStart < 0 ? tr(STR_SELECT) : (isLookup() ? tr(STR_LOOKUP) : tr(STR_DONE)), tr(STR_DIR_LEFT),
-      tr(STR_DIR_RIGHT));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel(), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 
@@ -862,4 +862,25 @@ void ClipSelectionActivity::render(RenderLock&&) {
   lastRenderedTextXOffset = offsetX;
   lastRenderedRangeStart = rangeStart;
   lastRenderedSelected = selected;
+}
+
+int ClipSelectionActivity::actionCount() const {
+  static_assert(SELECTION_ACTIONS[ADD_WORD_ACTION] == ClippingResult::Action::AddWord);
+  if (mode == Mode::DefinitionLookup || mode == Mode::AddWord) return 1;
+  return ADD_WORD_ACTION - firstAction() + (selectionHasThai() ? 1 : 0);
+}
+
+bool ClipSelectionActivity::selectionHasThai() const {
+  if (rangeStart < 0 || wordCount == 0) return false;
+  const int last = std::max(rangeStart, selected);
+  for (int i = std::min(rangeStart, selected); i <= last; ++i) {
+    if (words[i].text && thai::containsThai(words[i].text)) return true;
+  }
+  return false;
+}
+
+const char* ClipSelectionActivity::confirmLabel() const {
+  if (rangeStart < 0) return tr(STR_SELECT);
+  if (mode == Mode::AddWord) return tr(STR_ADD_WORD);
+  return isLookup() ? tr(STR_LOOKUP) : tr(STR_DONE);
 }

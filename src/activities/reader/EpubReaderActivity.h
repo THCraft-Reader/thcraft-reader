@@ -180,6 +180,10 @@ class EpubReaderActivity final : public ReaderActivity {
   bool applyDeferredReposition();
   void clearDeferredReposition();
   void rememberCurrentContentOffset();
+  // Thai word list: the Add Word sheet over the current page, and whether the
+  // reader menu offers Add Thai Word.
+  void openThaiAddWord(std::string selection);
+  bool offersThaiWords() const;
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
