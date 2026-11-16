@@ -3,6 +3,8 @@
 #include <array>
 #include <utility>
 
+#include "util/FileSortOrder.h"
+
 void forEachBaseSetting(SettingVisitor visit, void* context) {
   // Load and save walk this list, so every condition here must be fixed before
   // settings load. Runtime probes belong in isHiddenOnDevice().
@@ -220,6 +222,8 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
                            StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Toggle(StrId::STR_SHOW_FILE_EXTENSIONS, &CrossPointSettings::showFileExtensions,
                            "showFileExtensions", StrId::STR_CAT_SYSTEM));
+  emit(SettingInfo::StaticEnum(StrId::STR_FILE_SORT, &CrossPointSettings::fileSortOrder, file_sort::LABELS,
+                               "fileSortOrder", StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Toggle(StrId::STR_LIBRARY_USE_METADATA, &CrossPointSettings::libraryUseMetadata,
                            "libraryUseMetadata", StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Toggle(StrId::STR_REMOVE_READ_FROM_RECENTS, &CrossPointSettings::removeReadBooksFromRecents,

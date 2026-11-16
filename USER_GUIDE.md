@@ -124,6 +124,7 @@ The Browse Files screen acts as a file and folder browser. The full path to the 
 * **Open Selection:** Press **Confirm** to open a folder or start reading a selected book. Selecting a `.bmp` file will open the image viewer.
 * **Delete Files or Folders:** Hold and release **Confirm** to delete the selected file or folder. You will be given an option to either confirm or cancel. Multiple files can be selected for deletion in a single operation.
 * **Rename or Move:** Files can be renamed or moved to a different folder from within the browse screen.
+* **Sort Files:** Hold and release **Confirm** (or long-press a row on touch devices) and choose **Sort Files** to order the list by **Name A-Z**, **Name Z-A**, **Newest First**, **Oldest First**, **Largest First** or **Smallest First**. Folders always stay at the top, in name order for date and size orders, and files with the same date or size are listed by name. "Newest" uses the file's modified date on the SD card. The choice applies to every folder and is remembered; the header shows it when it is not Name A-Z. It can also be set in **Settings → System → Sort Files**.
 
 ### 3.4 Library Screen
 
@@ -207,7 +208,7 @@ Books cannot be removed from your device through Calibre. Use the web interface 
 
 ### 3.6 Settings
 
-Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **Library**, and **Connectivity**. System contains language, keyboard layouts, hidden-file visibility, file-extension visibility, Clock, firmware updates, and About. Library contains Use Book Metadata, Clear Read Books from Recent List, and Move Finished Books to Read Folder. Time to Sleep is under Display; Clear Reading Cache and Thai Word List are under Reader. Connectivity contains Wi-Fi, Bluetooth Page Turner, CrossPoint Sync, OPDS, and the Plugins toggle. The options below describe these settings.
+Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **Library**, and **Connectivity**. System contains language, keyboard layouts, hidden-file visibility, file-extension visibility, file sort order, Clock, firmware updates, and About. Library contains Use Book Metadata, Clear Read Books from Recent List, and Move Finished Books to Read Folder. Time to Sleep is under Display; Clear Reading Cache and Thai Word List are under Reader. Connectivity contains Wi-Fi, Bluetooth Page Turner, CrossPoint Sync, OPDS, and the Plugins toggle. The options below describe these settings.
 
 #### 3.6.1 Display
 

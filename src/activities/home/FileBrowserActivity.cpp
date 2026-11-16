@@ -113,8 +113,16 @@ void FileBrowserActivity::loadFiles() {
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) ++entryCount;
   root.rewindDirectory();
   files.reserve(entryCount);
+  // Date and size orders keep one key per listed entry (4 bytes each) until sorted.
+  const auto order = mode == Mode::Books ? file_sort::fromSetting(SETTINGS.fileSortOrder) : file_sort::NAME_ASC;
+  std::unique_ptr<uint32_t[]> keys;
+  if (file_sort::usesDate(order) || file_sort::usesSize(order)) {
+    keys = makeUniqueNoThrow<uint32_t[]>(entryCount);
+    if (!keys && entryCount) LOG_ERR("FileBrowser", "OOM: sort keys (%u entries)", static_cast<unsigned>(entryCount));
+  }
 
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
+    const size_t listed = files.size();
     file.getName(fileNameBuffer.get(), NAME_BUFFER_SIZE);
     const bool isDirectory = file.isDirectory();
     if ((!SETTINGS.showHiddenFiles && fileNameBuffer[0] == '.') ||
@@ -136,9 +144,17 @@ void FileBrowserActivity::loadFiles() {
         files.emplace_back(filename);
       }
     }
+    if (keys && files.size() > listed && listed < entryCount) {
+      keys[listed] = isDirectory ? 0
+                     : file_sort::usesDate(order)
+                         ? file.modificationTime()
+                         : static_cast<uint32_t>(std::min<uint64_t>(file.fileSize64(), UINT32_MAX));
+    }
   }
   root.close();
-  FsHelpers::sortFileList(files);
+  const uint32_t* sortKeys = keys && files.size() <= entryCount ? keys.get() : nullptr;
+  const bool keyed = file_sort::usesDate(order) || file_sort::usesSize(order);
+  appliedSortOrder = file_sort::sort(files, sortKeys, order) && (sortKeys || !keyed) ? order : file_sort::NAME_ASC;
 }
 
 // fui::ListProps::rowProvider — formats row `index` from files[index] into the
@@ -388,16 +404,18 @@ void FileBrowserActivity::showEntryActions() {
   }
 
   const bool isDirectory = files[nav.selected].back() == '/';
-  static constexpr StrId FILE_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE, StrId::STR_RENAME};
-  static constexpr StrId DIRECTORY_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE};
-  optionPopup.show(StrId::STR_FILENAME, isDirectory ? DIRECTORY_OPTIONS : FILE_OPTIONS, isDirectory ? 2 : 3, 0,
-                   [this](const int index) {
+  static constexpr StrId FILE_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE, StrId::STR_RENAME, StrId::STR_FILE_SORT};
+  static constexpr StrId DIRECTORY_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE, StrId::STR_FILE_SORT};
+  optionPopup.show(StrId::STR_FILENAME, isDirectory ? DIRECTORY_OPTIONS : FILE_OPTIONS, isDirectory ? 3 : 4, 0,
+                   [this, isDirectory](const int index) {
                      if (index == 0) {
                        activateSelected();
                      } else if (index == 1) {
                        deleteSelected();
-                     } else if (index == 2) {
+                     } else if (index == 2 && !isDirectory) {
                        startRename();
+                     } else {
+                       sortOptionsPending = true;
                      }
                    });
   requestUpdate();
@@ -520,7 +538,34 @@ void FileBrowserActivity::renameSelectedFile(const std::string& oldPath, const s
   requestUpdate(true);
 }
 
+void FileBrowserActivity::showSortOptions() {
+  const auto current = file_sort::fromSetting(SETTINGS.fileSortOrder);
+  // The render task may still be drawing the previous popup's strings.
+  RenderLock lock(*this);
+  optionPopup.show(StrId::STR_FILE_SORT, file_sort::LABELS, file_sort::COUNT, current, [this, current](int index) {
+    if (index == current) return;
+    SETTINGS.fileSortOrder = static_cast<uint8_t>(index);
+    SETTINGS.saveToFile();
+    {
+      // The row provider reads `files` on the render task; reorder under the lock.
+      RenderLock lock(*this);
+      const std::string selectedName =
+          nav.selected >= 0 && nav.selected < listCount() ? files[nav.selected] : std::string();
+      loadFiles();
+      nav.selected = static_cast<int>(findEntry(selectedName));
+      nav.follow(listCount());
+    }
+    requestUpdate();
+  });
+  requestUpdate();
+}
+
 bool FileBrowserActivity::handleCustomInput() {
+  if (sortOptionsPending) {
+    sortOptionsPending = false;
+    showSortOptions();
+    return true;
+  }
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return true;
 
   // Long press BACK (1s+) goes to root folder (Books mode only).
@@ -594,6 +639,8 @@ bool FileBrowserActivity::handleButtons() {
 }
 
 void FileBrowserActivity::render(RenderLock&& lock) {
+  // The sort popup follows on the next pass; skip repainting the list between them.
+  if (sortOptionsPending) return;
   if (optionPopup.processRender(renderer, mappedInput)) return;
   UiListActivity::render(std::move(lock));
 }
@@ -685,7 +732,11 @@ void FileBrowserActivity::drawChrome() {
           : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1));
   // Header via GUI.drawHeader (already FreeInkUI-themed) for the battery
   // indicator; the rest of the screen renders through the app.
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
+  // The header names the sort order once it differs from the default name order.
+  const char* sortLabel = mode == Mode::Books && appliedSortOrder != file_sort::NAME_ASC
+                              ? I18N.get(file_sort::LABELS[appliedSortOrder])
+                              : nullptr;
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str(), sortLabel);
 }
 
 void FileBrowserActivity::drawFooter() {

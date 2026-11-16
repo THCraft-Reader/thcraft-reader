@@ -406,6 +406,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t showHiddenFiles = 0;
   // Show each file's extension at the end of its row in the file browser (0 = hide, 1 = show)
   uint8_t showFileExtensions = 1;
+  // Browse Files order, a file_sort::Order (util/FileSortOrder.h); 0 = name A-Z
+  uint8_t fileSortOrder = 0;
   // Show the title and author read from inside each book rather than its
   // filename. Users can disable this to make index rebuilds skip EPUB parsing.
   uint8_t libraryUseMetadata = 1;

@@ -6,6 +6,7 @@
 
 #include "activities/UiListActivity.h"
 #include "components/OptionPopup.h"
+#include "util/FileSortOrder.h"
 
 class FileBrowserActivity final : public UiListActivity {
  public:
@@ -20,6 +21,12 @@ class FileBrowserActivity final : public UiListActivity {
   void renameSelectedFile(const std::string& oldPath, const std::string& oldEntry, const std::string& newStem,
                           const std::string& extension);
   void deleteSelected();
+  // Sort Files: chosen from the entry actions, opened from the next loop pass
+  // (a popup callback must not replace its own popup).
+  void showSortOptions();
+  bool sortOptionsPending = false;
+  // The order loadFiles() applied (name order when memory for a sort ran out).
+  file_sort::Order appliedSortOrder = file_sort::NAME_ASC;
 
   Mode mode = Mode::Books;
 
