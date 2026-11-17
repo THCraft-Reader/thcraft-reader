@@ -132,6 +132,11 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
   emit(SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
                            StrId::STR_CAT_READER)
            .withTextSettings());
+  emit(SettingInfo::Enum(StrId::STR_TEXT_WEIGHT, &CrossPointSettings::textWeight,
+                         {StrId::STR_TEXT_WEIGHT_THIN, StrId::STR_NORMAL, StrId::STR_TEXT_WEIGHT_BOLD,
+                          StrId::STR_TEXT_WEIGHT_EXTRA_BOLD},
+                         "textWeight", StrId::STR_CAT_READER)
+           .withTextSettings());
   emit(SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                          {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS,
                           StrId::STR_IMAGES_DISPLAY_BW},

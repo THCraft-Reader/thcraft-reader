@@ -313,6 +313,8 @@ Settings are grouped into **System**, **Display**, **Reader**, **Controls**, **L
 
 - **Text Anti-Aliasing**: Whether to show smooth grey edges (anti-aliasing) on text in reading mode. Note this slows down page turns slightly.
 
+- **Text Weight**: Makes EPUB and dictionary text thinner or bolder with any font, without changing the layout; options are "Thin", "Normal" (default), "Bold" and "Extra Bold". Loops inside letters, such as Thai heads, stay open. At "Extra Bold", closely spaced letters can touch; increase Character Spacing if they do. Superscript, subscript, small caps and drop caps keep their normal weight. For the best result, use a font that ships the weight you want.
+
 - **Images**: How embedded images (JPG/PNG/GIF) in EPUB files are shown. GIFs render only the first frame; interlaced GIFs are not supported.
   - **Display** (default): images in gray levels. Pages with images take an extra grayscale refresh.
   - **Placeholder**: the image's alt text in place of the image.

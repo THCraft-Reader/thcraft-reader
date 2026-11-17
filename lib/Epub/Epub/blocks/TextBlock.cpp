@@ -214,6 +214,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int sectionFontId, con
   // A sized variant that can no longer be loaded falls back to the section font.
   const int fontId = renderFontId(renderer, blockFontId(sectionFontId), sectionFontId);
   const int8_t tracking = blockStyle.characterSpacing;
+  const GfxRenderer::ReaderTextScope weighted(renderer);
 
   const bool scanning = renderer.isFontCacheScanning();
   // Words in other sizes share the baseline set by the line's tallest font.

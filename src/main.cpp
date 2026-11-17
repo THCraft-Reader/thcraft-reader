@@ -660,6 +660,8 @@ void setup() {
     SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
   }
   SETTINGS.loadFromFile();
+  // Set before the first page renders; loop() keeps it in sync afterwards.
+  renderer.setReaderTextWeight(SETTINGS.getTextWeight());
   // Push the saved timezone's POSIX rule into the clock (migrating the legacy
   // UTC-offset setting on first boot after the update).
   timezones::applyToClock();
@@ -917,6 +919,7 @@ void loop() {
   }
 
   renderer.setFadingFix(SETTINGS.fadingFix && CrossPointSettings::fadingFixSupported());
+  renderer.setReaderTextWeight(SETTINGS.getTextWeight());
 
   // The ROM console does not depend on Arduino USB CDC's connection state.
   if ((Serial || FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_ROM_PRINTF) && millis() - lastMemPrint >= 10000) {

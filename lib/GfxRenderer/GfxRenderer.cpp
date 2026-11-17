@@ -751,6 +751,8 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   const uint8_t height = glyph->height;
   const int left = glyph->left;
   const int top = glyph->top;
+  // A bolder weight paints past the glyph's right edge.
+  const int inkWidth = glyphBitmap::weightedWidth(width, renderer.glyphWeight());
 
   // Tiled-grayscale band culling: if this glyph's physical y-extent is entirely
   // outside the active strip, skip it before the expensive bitmap decode. This
@@ -758,13 +760,13 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   if constexpr (rotation == TextRotation::Rotated90CW) {
     const int ob = cursorX + fontData->ascender - top;
     const int ib = cursorY - left;
-    if (!renderer.glyphIntersectsStrip(ob, ib - (width - 1), ob + height - 1, ib)) {
+    if (!renderer.glyphIntersectsStrip(ob, ib - (inkWidth - 1), ob + height - 1, ib)) {
       return;
     }
   } else {
     const int gx0 = cursorX + left;
     const int gy0 = cursorY - top;
-    if (!renderer.glyphIntersectsStrip(gx0, gy0, gx0 + width - 1, gy0 + height - 1)) {
+    if (!renderer.glyphIntersectsStrip(gx0, gy0, gx0 + inkWidth - 1, gy0 + height - 1)) {
       return;
     }
   }
@@ -800,7 +802,7 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
                                   const glyphBitmap::Frame& frame, const bool twoBit, const RenderMode mode,
                                   const bool state) const {
   // Apply the logical clip rectangle before rotating, in glyph-local pixels.
-  glyphBitmap::Clip clip{0, 0, width, height};
+  glyphBitmap::Clip clip{0, 0, glyphBitmap::weightedWidth(width, glyphWeight_), height};
   glyphBitmap::clipToRect(frame, clipLeft_, clipTop_, clipRight_, clipBottom_, clip);
 
   // Writes go to the framebuffer, or to the strip scratch in tiled grayscale
@@ -822,7 +824,11 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
   const glyphBitmap::Plane plane = mode == BW              ? glyphBitmap::Plane::BW
                                    : mode == GRAYSCALE_MSB ? glyphBitmap::Plane::GrayMSB
                                                            : glyphBitmap::Plane::GrayLSB;
-  glyphBitmap::draw(bitmap, width, height, twoBit, plane, state, target, clip);
+  if (glyphWeight_ != 0) {
+    glyphBitmap::drawWeighted(bitmap, width, height, twoBit, plane, state, target, clip, glyphWeight_);
+  } else {
+    glyphBitmap::draw(bitmap, width, height, twoBit, plane, state, target, clip);
+  }
 }
 
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and

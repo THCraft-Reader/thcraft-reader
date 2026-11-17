@@ -29,8 +29,12 @@ constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_L
 constexpr StrId LAYOUT_ROW_NAME_IDS[] = {
     StrId::STR_LINE_SPACING,          StrId::STR_WORD_SPACING, StrId::STR_CHARACTER_SPACING, StrId::STR_EXTRA_SPACING,
     StrId::STR_PARAGRAPH_INDENTATION, StrId::STR_ALIGNMENT,    StrId::STR_SCREEN_MARGIN};
-constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING, StrId::STR_HYPHENATION_NO_PREVIEW,
-                                        StrId::STR_EMBEDDED_STYLE_NO_PREVIEW, StrId::STR_TEXT_AA_NO_PREVIEW};
+constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_TEXT_WEIGHT, StrId::STR_FOCUS_READING,
+                                        StrId::STR_HYPHENATION_NO_PREVIEW, StrId::STR_EMBEDDED_STYLE_NO_PREVIEW,
+                                        StrId::STR_TEXT_AA_NO_PREVIEW};
+constexpr StrId TEXT_WEIGHT_IDS[] = {StrId::STR_TEXT_WEIGHT_THIN, StrId::STR_NORMAL, StrId::STR_TEXT_WEIGHT_BOLD,
+                                     StrId::STR_TEXT_WEIGHT_EXTRA_BOLD};
+static_assert(std::size(TEXT_WEIGHT_IDS) == CrossPointSettings::TEXT_WEIGHT_COUNT, "text weight labels");
 
 int findCurrentFontIndex(const SdCardFontRegistry* registry, const char* sdFontFamilyName, uint8_t fontFamily) {
   if (sdFontFamilyName[0] != '\0' && registry) {
@@ -244,11 +248,16 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
       case Tab::Layout:
         rowValues_[i] = layoutValueText(i);
         break;
+      case Tab::Style:
+        if (i == static_cast<int>(StyleRow::TextWeight)) {
+          rowValues_[i] = I18N.get(TEXT_WEIGHT_IDS[SETTINGS.getTextWeightIndex()]);
+        }
+        break;
       default:
         break;
     }
     rowItems_[i].value = rowValues_[i].empty() ? nullptr : rowValues_[i].c_str();
-    if (tab_ == Tab::Style) {
+    if (tab_ == Tab::Style && i != static_cast<int>(StyleRow::TextWeight)) {
       GUI.setCheckboxRow(rowItems_[i], styleRowChecked(i));
     } else if (tab_ == Tab::Layout && i == static_cast<int>(LayoutRow::ParaSpacing)) {
       GUI.setCheckboxRow(rowItems_[i], SETTINGS.extraParagraphSpacing);
@@ -279,7 +288,7 @@ const char* TextSettingsActivity::confirmLabelText() const {
     case Tab::Layout:
       return ringPos() - 1 == static_cast<int>(LayoutRow::ParaSpacing) ? tr(STR_TOGGLE) : tr(STR_SELECT);
     case Tab::Style:
-      return tr(STR_TOGGLE);
+      return ringPos() - 1 == static_cast<int>(StyleRow::TextWeight) ? tr(STR_SELECT) : tr(STR_TOGGLE);
     default:
       return tr(STR_SELECT);
   }
@@ -509,6 +518,16 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
 
 void TextSettingsActivity::confirmStyleRow(int row) {
   switch (static_cast<StyleRow>(row)) {
+    case StyleRow::TextWeight:
+      optionPopup_.show(StrId::STR_TEXT_WEIGHT, TEXT_WEIGHT_IDS, static_cast<int>(std::size(TEXT_WEIGHT_IDS)),
+                        SETTINGS.getTextWeightIndex(), [this](int idx) {
+                          SETTINGS.textWeight = static_cast<uint8_t>(idx);
+                          // Before the preview repaints; loop() would only sync it later.
+                          renderer.setReaderTextWeight(SETTINGS.getTextWeight());
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      return;
     case StyleRow::FocusReading:
       SETTINGS.focusReadingEnabled = !SETTINGS.focusReadingEnabled;
       break;

@@ -95,15 +95,21 @@ GLYPH_ALWAYS_INLINE void paint(uint8_t* buffer, int destination, uint8_t ink, ui
 //   both grays, LSB paints dark gray only. 1bpp glyphs paint ink with state on
 //   every plane.
 // Clipping happens before pixel decoding, so fully hidden glyphs cost nothing.
-inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Plane plane, bool state,
-                 const Target& target, Clip clip) {
-  // Bit n of levels set means source value n is painted.
-  uint8_t levels = 0x02;
-  bool clearBits = state;
+// Bit n of levels set means source value n is painted.
+inline void planeLevels(bool twoBit, Plane plane, bool state, uint8_t& levels, bool& clearBits) {
+  levels = 0x02;
+  clearBits = state;
   if (twoBit) {
     levels = plane == Plane::BW ? 0x0e : plane == Plane::GrayMSB ? 0x06 : 0x04;
     if (plane != Plane::BW) clearBits = false;
   }
+}
+
+inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Plane plane, bool state,
+                 const Target& target, Clip clip) {
+  uint8_t levels;
+  bool clearBits;
+  planeLevels(twoBit, plane, state, levels, clearBits);
 
   // Intersect with the glyph bounds, then with the panel width and the
   // buffered row band.
@@ -152,6 +158,83 @@ inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Plan
       paint(target.buffer, destination, ink, levels, clearBits);
       ++source;
       destination += stepX;
+    }
+  }
+}
+
+// Width a glyph paints at the given weight (see drawWeighted()).
+inline int weightedWidth(int width, int weight) { return width + (weight > 0 ? weight : 0); }
+
+// One output pixel of drawWeighted(), from the source values around it.
+// weight 1 or 2: the darkest of the pixel and the weight pixels to its left,
+//   so strokes grow right. A pixel with a darker right neighbour is kept, so
+//   the gap before the next stroke stays open (such as a Thai head loop),
+//   including a gray anti-aliased gap.
+// weight -1: the lighter of the pixel and its left neighbour, which trims one
+//   pixel from the left of each stroke. The darkest pixel at the right of a
+//   stroke is kept, so 1px strokes do not disappear. A left-edge pixel is also
+//   kept when diagonalLeft (the darker of the pixels above-left and
+//   below-left) is darker than left: the stroke continues diagonally there,
+//   and trimming would cut the join, for example in a small loop.
+inline uint8_t weightedInk(uint8_t left2, uint8_t left, uint8_t current, uint8_t right, uint8_t diagonalLeft,
+                           int weight) {
+  if (weight > 0) {
+    if (right > current) return current;
+    const uint8_t ink = std::max(current, left);
+    return weight > 1 ? std::max(ink, left2) : ink;
+  }
+  if ((current >= left && current > right) || diagonalLeft > left) return current;
+  return std::min(current, left);
+}
+
+// Like draw(), but changes stroke weight along glyph x with weightedInk().
+// Every pass gets the same values, so the BW and gray planes stay consistent.
+// The glyph paints weightedWidth() pixels wide; clip is in those pixels. Only
+// black extends past the bitmap: gray there could mark the next glyph's black
+// stroke gray in the gray planes.
+inline void drawWeighted(const uint8_t* bitmap, int width, int height, bool twoBit, Plane plane, bool state,
+                         const Target& target, Clip clip, int weight) {
+  uint8_t levels;
+  bool clearBits;
+  planeLevels(twoBit, plane, state, levels, clearBits);
+
+  clip.left = std::max(clip.left, 0);
+  clip.top = std::max(clip.top, 0);
+  clip.right = std::min(clip.right, weightedWidth(width, weight));
+  clip.bottom = std::min(clip.bottom, height);
+  clipToRect(target.frame, 0, target.originY, target.width, target.originY + target.rows, clip);
+  if (clip.left >= clip.right || clip.top >= clip.bottom) return;
+
+  const Frame& frame = target.frame;
+  const int strideBits = target.stride * 8;
+  const int stepX = frame.dxY * strideBits + frame.dxX;
+  const int stepY = frame.dyY * strideBits + frame.dyX;
+  int rowBit = (frame.y - target.originY) * strideBits + frame.x + clip.left * stepX + clip.top * stepY;
+  const uint8_t black = twoBit ? 3 : 1;
+  // Source value at glyph pixel (x, y); white outside the glyph.
+  const auto sample = [&](int x, int y) -> uint8_t {
+    if (x < 0 || x >= width || y < 0 || y >= height) return 0;
+    const int source = y * width + x;
+    return twoBit ? ((bitmap[source >> 2] >> (6 - (source & 3) * 2)) & 3)
+                  : ((bitmap[source >> 3] >> (7 - (source & 7))) & 1);
+  };
+  for (int y = clip.top; y < clip.bottom; ++y, rowBit += stepY) {
+    // Sliding window: left2, left, current, right.
+    uint8_t left2 = sample(clip.left - 2, y);
+    uint8_t left = sample(clip.left - 1, y);
+    uint8_t current = sample(clip.left, y);
+    int destination = rowBit;
+    for (int x = clip.left; x < clip.right; ++x, destination += stepX) {
+      const uint8_t right = sample(x + 1, y);
+      // Only a pixel that thinning would trim needs the rows around it.
+      const uint8_t diagonalLeft =
+          weight < 0 && left < current ? std::max(sample(x - 1, y - 1), sample(x - 1, y + 1)) : 0;
+      uint8_t ink = weightedInk(left2, left, current, right, diagonalLeft, weight);
+      if (x >= width && ink != black) ink = 0;
+      paint(target.buffer, destination, ink, levels, clearBits);
+      left2 = left;
+      left = current;
+      current = right;
     }
   }
 }

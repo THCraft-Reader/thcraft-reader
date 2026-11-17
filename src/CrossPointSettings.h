@@ -312,6 +312,13 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t characterSpacing = CHARACTER_SPACING_OFFSET;
   int8_t getCharacterSpacing() const { return static_cast<int8_t>(characterSpacing - CHARACTER_SPACING_OFFSET); }
   uint8_t textAntiAliasing = 1;
+  // Stored 0..3 maps to stroke weight -1..+2 (Thin, Normal, Bold, Extra Bold).
+  static constexpr uint8_t TEXT_WEIGHT_OFFSET = 1;
+  static constexpr uint8_t TEXT_WEIGHT_COUNT = 4;
+  uint8_t textWeight = TEXT_WEIGHT_OFFSET;
+  // Option index 0..3; an out-of-range stored value reads as Normal.
+  uint8_t getTextWeightIndex() const { return textWeight < TEXT_WEIGHT_COUNT ? textWeight : TEXT_WEIGHT_OFFSET; }
+  int8_t getTextWeight() const { return static_cast<int8_t>(getTextWeightIndex() - TEXT_WEIGHT_OFFSET); }
   // Short power button click behaviour
   uint8_t shortPwrBtn = IGNORE;
   // Power double click (see hasPowerDoubleClick()); Ignore disables the

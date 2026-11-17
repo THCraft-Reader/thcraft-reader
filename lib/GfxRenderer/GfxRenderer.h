@@ -15,6 +15,7 @@ class FontCacheManager;
 class SdCardFont;
 class TtfEpdFont;
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <map>
@@ -54,6 +55,8 @@ class GfxRenderer {
   bool ditherImagesInBw = false;
   Orientation orientation;
   bool fadingFix;
+  int8_t readerTextWeight_ = 0;
+  mutable int8_t glyphWeight_ = 0;  // weight for glyphs drawn now; see ReaderTextScope
   uint8_t* frameBuffer = nullptr;
   uint32_t frameBufferLoans = 0;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
@@ -232,6 +235,25 @@ class GfxRenderer {
 
   // Fading fix control
   void setFadingFix(const bool enabled) { fadingFix = enabled; }
+
+  // Stroke weight for book text: -1 thinner, 0 as drawn, 1 or 2 pixels bolder.
+  // Glyph advances do not change, so layout and caches are unaffected.
+  void setReaderTextWeight(int8_t weight) { readerTextWeight_ = std::clamp<int8_t>(weight, -1, 2); }
+  // Applies the reader text weight to glyphs drawn while it is alive.
+  class ReaderTextScope {
+   public:
+    explicit ReaderTextScope(const GfxRenderer& renderer) : renderer_(renderer), saved_(renderer.glyphWeight_) {
+      renderer.glyphWeight_ = renderer.readerTextWeight_;
+    }
+    ~ReaderTextScope() { renderer_.glyphWeight_ = saved_; }
+    ReaderTextScope(const ReaderTextScope&) = delete;
+    ReaderTextScope& operator=(const ReaderTextScope&) = delete;
+
+   private:
+    const GfxRenderer& renderer_;
+    int8_t saved_;
+  };
+  int8_t glyphWeight() const { return glyphWeight_; }
 
   // Screen ops
   int getScreenWidth() const;
