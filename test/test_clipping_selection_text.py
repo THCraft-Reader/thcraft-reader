@@ -128,7 +128,7 @@ struct FontCache {
   Scope createPrewarmScope() { return Scope(*this); }
 };
 struct Renderer {
-  enum RenderMode { BW };
+  enum RenderMode { BW, GRAYSCALE_MSB };
   enum class TextMeasureMode { Layout, Rendered };
   enum class DitherMode { Replace, PreserveInk };
   struct Draw { int x, width, tracking; };

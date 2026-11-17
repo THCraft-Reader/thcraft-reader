@@ -388,6 +388,9 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::STATS_SCREEN;
     }
   }
+  // EEGO A4: after a gray reader page, a fast refresh leaves the page ghosting
+  // in Home's dithered areas.
+  if (BoardConfig::isEegoA4() && isReaderActivity()) cleanInitialRefresh = true;
   if (UITheme::hasThcraftHome()) {
     auto home = makeUniqueNoThrow<ThcraftHomeActivity>(renderer, mappedInput, initialMenuItem, cleanInitialRefresh);
     if (home) {
