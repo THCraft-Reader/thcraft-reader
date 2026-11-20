@@ -243,4 +243,4 @@ Preserve the applicable copyright attributions, license texts and source
 obligations. Preserve the OFL requirements for the other families and any Noto
 fallback glyphs as well; those do not relicense Garuda or JS-Jindara.
 
-Hardware testing and licensing clearance remain separate from local packaging.
+Hardware testing and licensing clearance remain separate from local packaging..
